@@ -70,6 +70,28 @@ import com.jme3.util.SkyFactory;
 import com.jme3.util.TangentBinormalGenerator;
 import com.jme3.util.mikktspace.MikktspaceTangentGenerator;
 
+/**
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestSimpleDeferredLighting. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
+ */
 public class TestSimpleDeferredLighting extends RenderPathExample implements ActionListener {
     private RenderPath currentRenderPath;
     private boolean bUseFramegraph = true;
@@ -99,14 +121,14 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
     private Geometry model;
     private Node tex;
 
-    public static void main(String[] args){
+    public static void main(String[] args) {
         TestSimpleDeferredLighting app = new TestSimpleDeferredLighting();
         AppSettings appSettings = new AppSettings(true);
         appSettings.setRenderer(AppSettings.LWJGL_OPENGL43);
         app.setSettings(appSettings);
         app.start();
     }
-    private void testScene1(){
+    private void testScene1() {
         sceneId = 0;
         Geometry teapot = (Geometry) assetManager.loadModel("Models/Teapot/Teapot.obj");
         TangentBinormalGenerator.generate(teapot.getMesh(), true);
@@ -114,26 +136,28 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         teapot.setLocalScale(2f);
         renderManager.setSinglePassLightBatchSize(1);
         mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
-//        m_currentTechnique = TechniqueDef.DEFAULT_TECHNIQUE_NAME;
-//        mat.selectTechnique(m_currentTechnique, getRenderManager());
-//        mat.selectTechnique("GBuf");
-//        System.out.println("tech:" + mat.getMaterialDef().getTechniqueDefsNames().toString());
+        //        m_currentTechnique = TechniqueDef.DEFAULT_TECHNIQUE_NAME;
+        //        mat.selectTechnique(m_currentTechnique, getRenderManager());
+        //        mat.selectTechnique("GBuf");
+        //        System.out.println("tech:" +
+        //        mat.getMaterialDef().getTechniqueDefsNames().toString());
         mat.setFloat("Shininess", 25);
-//        mat.setBoolean("UseMaterialColors", true);
+        //        mat.setBoolean("UseMaterialColors", true);
         cam.setLocation(new Vector3f(0.015041917f, 0.4572918f, 5.2874837f));
         cam.setRotation(new Quaternion(-1.8875003E-4f, 0.99882424f, 0.04832061f, 0.0039016632f));
 
-//        mat.setTexture("ColorRamp", assetManager.loadTexture("Textures/ColorRamp/cloudy.png"));
-//
-//        mat.setBoolean("VTangent", true);
-//        mat.setBoolean("Minnaert", true);
-//        mat.setBoolean("WardIso", true);
-//        mat.setBoolean("VertexLighting", true);
-//        mat.setBoolean("LowQuality", true);
-//        mat.setBoolean("HighQuality", true);
+        //        mat.setTexture("ColorRamp",
+        //        assetManager.loadTexture("Textures/ColorRamp/cloudy.png"));
+        //
+        //        mat.setBoolean("VTangent", true);
+        //        mat.setBoolean("Minnaert", true);
+        //        mat.setBoolean("WardIso", true);
+        //        mat.setBoolean("VertexLighting", true);
+        //        mat.setBoolean("LowQuality", true);
+        //        mat.setBoolean("HighQuality", true);
 
-        mat.setColor("Ambient",  ColorRGBA.Black);
-        mat.setColor("Diffuse",  ColorRGBA.Gray);
+        mat.setColor("Ambient", ColorRGBA.Black);
+        mat.setColor("Diffuse", ColorRGBA.Gray);
         mat.setColor("Specular", ColorRGBA.Gray);
 
         teapot.setMaterial(mat);
@@ -144,7 +168,7 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         dl.setColor(ColorRGBA.White);
         rootNode.addLight(dl);
     }
-    private void testScene2(){
+    private void testScene2() {
         sceneId = 1;
         Sphere sphMesh = new Sphere(32, 32, 1);
         sphMesh.setTextureMode(Sphere.TextureMode.Projected);
@@ -153,8 +177,8 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
 
         Geometry sphere = new Geometry("Rock Ball", sphMesh);
         mat = assetManager.loadMaterial("Textures/Terrain/Pond/Pond.j3m");
-//        m_currentTechnique = TechniqueDef.DEFAULT_TECHNIQUE_NAME;
-//        mat.selectTechnique(m_currentTechnique, getRenderManager());
+        //        m_currentTechnique = TechniqueDef.DEFAULT_TECHNIQUE_NAME;
+        //        mat.selectTechnique(m_currentTechnique, getRenderManager());
         sphere.setMaterial(mat);
         rootNode.attachChild(sphere);
 
@@ -167,32 +191,32 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         pl.setPosition(new Vector3f(0f, 0f, 4f));
         rootNode.addLight(pl);
     }
-    private void testScene3(){
+    private void testScene3() {
         renderManager.setSinglePassLightBatchSize(300);
         sceneId = 2;
         Node tank = (Node) assetManager.loadModel("Models/HoverTank/Tank2.mesh.xml");
         rootNode.attachChild(tank);
 
-
-
         pls = new PointLight[2];
         angles = new float[pls.length];
-        ColorRGBA colors[] = new ColorRGBA[]{
-                ColorRGBA.White,
-                ColorRGBA.Red,
-                ColorRGBA.Blue,
-                ColorRGBA.Green,
-                ColorRGBA.Yellow,
-                ColorRGBA.Orange,
-                ColorRGBA.Brown,
+        ColorRGBA colors[] = new ColorRGBA[] {
+            ColorRGBA.White,
+            ColorRGBA.Red,
+            ColorRGBA.Blue,
+            ColorRGBA.Green,
+            ColorRGBA.Yellow,
+            ColorRGBA.Orange,
+            ColorRGBA.Brown,
         };
         Material pml = assetManager.loadMaterial("Common/Materials/RedColor.j3m");
         lightMdls = new Geometry[pls.length];
-        for(int i = 0;i < pls.length;i++){
+        for (int i = 0; i < pls.length; i++) {
             pls[i] = new PointLight();
             pls[i].setColor(colors[pls.length % colors.length]);
             pls[i].setRadius(RenderPathHelper.randomFloat(1.0f, 2.0f));
-            pls[i].setPosition(new Vector3f(RenderPathHelper.randomFloat(-1.0f, 1.0f), RenderPathHelper.randomFloat(-1.0f, 1.0f), RenderPathHelper.randomFloat(-1.0f, 1.0f)));
+            pls[i].setPosition(new Vector3f(RenderPathHelper.randomFloat(-1.0f, 1.0f),
+                RenderPathHelper.randomFloat(-1.0f, 1.0f),
+                RenderPathHelper.randomFloat(-1.0f, 1.0f)));
             rootNode.addLight(pls[i]);
 
             lightMdls[i] = new Geometry("Light", new Sphere(10, 10, 0.02f));
@@ -201,12 +225,12 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
             rootNode.attachChild(lightMdls[i]);
         }
 
-//        DirectionalLight dl = new DirectionalLight();
-//        dl.setDirection(new Vector3f(-1, -1, -1).normalizeLocal());
-//        dl.setColor(ColorRGBA.Green);
-//        rootNode.addLight(dl);
+        //        DirectionalLight dl = new DirectionalLight();
+        //        dl.setDirection(new Vector3f(-1, -1, -1).normalizeLocal());
+        //        dl.setColor(ColorRGBA.Green);
+        //        rootNode.addLight(dl);
     }
-    public Geometry putShape(Mesh shape, ColorRGBA color, float lineWidth){
+    public Geometry putShape(Mesh shape, ColorRGBA color, float lineWidth) {
         Geometry g = new Geometry("shape", shape);
         Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         mat.getAdditionalRenderState().setWireframe(true);
@@ -216,20 +240,20 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         rootNode.attachChild(g);
         return g;
     }
-    private void testScene4(){
+    private void testScene4() {
         renderManager.setSinglePassLightBatchSize(300);
         sceneId = 3;
         Node tank = (Node) assetManager.loadModel("Models/HoverTank/Tank2.mesh.xml");
         rootNode.attachChild(tank);
 
-        ColorRGBA colors[] = new ColorRGBA[]{
-                ColorRGBA.White,
-                ColorRGBA.Red,
-                ColorRGBA.Blue,
-                ColorRGBA.Green,
-                ColorRGBA.Yellow,
-                ColorRGBA.Orange,
-                ColorRGBA.Brown,
+        ColorRGBA colors[] = new ColorRGBA[] {
+            ColorRGBA.White,
+            ColorRGBA.Red,
+            ColorRGBA.Blue,
+            ColorRGBA.Green,
+            ColorRGBA.Yellow,
+            ColorRGBA.Orange,
+            ColorRGBA.Brown,
         };
         PointLight p1 = new PointLight(new Vector3f(0, 1, 0), ColorRGBA.White);
         PointLight p2 = new PointLight(new Vector3f(1, 0, 0), ColorRGBA.Green);
@@ -238,20 +262,20 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         rootNode.addLight(p1);
         rootNode.addLight(p2);
 
-//        Geometry g = putShape(new WireSphere(1), ColorRGBA.Yellow, 1);
-//        g.setLocalTranslation(p1.getPosition());
-//        g.setLocalScale(p1.getRadius() * 0.5f);
-//
-//        g = putShape(new WireSphere(1), ColorRGBA.Yellow, 1);
-//        g.setLocalTranslation(p2.getPosition());
-//        g.setLocalScale(p2.getRadius());
+        //        Geometry g = putShape(new WireSphere(1), ColorRGBA.Yellow, 1);
+        //        g.setLocalTranslation(p1.getPosition());
+        //        g.setLocalScale(p1.getRadius() * 0.5f);
+        //
+        //        g = putShape(new WireSphere(1), ColorRGBA.Yellow, 1);
+        //        g.setLocalTranslation(p2.getPosition());
+        //        g.setLocalScale(p2.getRadius());
 
-//        DirectionalLight dl = new DirectionalLight();
-//        dl.setDirection(new Vector3f(-1, -1, -1).normalizeLocal());
-//        dl.setColor(ColorRGBA.White);
-//        rootNode.addLight(dl);
+        //        DirectionalLight dl = new DirectionalLight();
+        //        dl.setDirection(new Vector3f(-1, -1, -1).normalizeLocal());
+        //        dl.setColor(ColorRGBA.White);
+        //        rootNode.addLight(dl);
     }
-    private void testScene5(){
+    private void testScene5() {
         sceneId = 4;
         // setupLighting
         DirectionalLight dl = new DirectionalLight();
@@ -259,7 +283,8 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         dl.setColor(new ColorRGBA(.9f, .9f, .9f, 1));
         rootNode.addLight(dl);
         // setupSkyBox
-        rootNode.attachChild(SkyFactory.createSky(assetManager, "Scenes/Beach/FullskiesSunset0068.dds", SkyFactory.EnvMapType.CubeMap));
+        rootNode.attachChild(SkyFactory.createSky(
+            assetManager, "Scenes/Beach/FullskiesSunset0068.dds", SkyFactory.EnvMapType.CubeMap));
         // setupFloor
         mat = assetManager.loadMaterial("Textures/Terrain/BrickWall/BrickWall.j3m");
 
@@ -270,10 +295,9 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         g.setLocalRotation(new Quaternion().fromAngleAxis(-FastMath.HALF_PI, Vector3f.UNIT_X));
         floorGeom.attachChild(g);
 
-
         TangentBinormalGenerator.generate(floorGeom);
         floorGeom.setLocalTranslation(-50, 22, 60);
-        //floorGeom.setLocalScale(100);
+        // floorGeom.setLocalScale(100);
 
         floorGeom.setMaterial(mat);
         rootNode.attachChild(floorGeom);
@@ -292,7 +316,6 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         cam.setRotation(new Quaternion(0.05173137f, 0.92363626f, -0.13454558f, 0.35513034f));
         flyCam.setMoveSpeed(30);
         inputManager.addListener(new AnalogListener() {
-
             @Override
             public void onAnalog(String name, float value, float tpf) {
                 if ("heightUP".equals(name)) {
@@ -304,14 +327,12 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
                     parallaxHeight = Math.max(parallaxHeight, 0);
                     mat.setFloat("ParallaxHeight", parallaxHeight);
                 }
-
             }
         }, "heightUP", "heightDown");
         inputManager.addMapping("heightUP", new KeyTrigger(KeyInput.KEY_I));
         inputManager.addMapping("heightDown", new KeyTrigger(KeyInput.KEY_K));
 
         inputManager.addListener(new ActionListener() {
-
             @Override
             public void onAction(String name, boolean isPressed, float tpf) {
                 if (isPressed && "toggleSteep".equals(name)) {
@@ -322,7 +343,7 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         }, "toggleSteep");
         inputManager.addMapping("toggleSteep", new KeyTrigger(KeyInput.KEY_O));
     }
-    private void testScene6(){
+    private void testScene6() {
         sceneId = 6;
         final Node buggy = (Node) assetManager.loadModel("Models/Buggy/Buggy.j3o");
 
@@ -342,17 +363,17 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         flyCam.setEnabled(false);
 
         ChaseCamera chaseCam = new ChaseCamera(cam, inputManager);
-        chaseCam.setLookAtOffset(new Vector3f(0,0.5f,-1.0f));
+        chaseCam.setLookAtOffset(new Vector3f(0, 0.5f, -1.0f));
         buggy.addControl(chaseCam);
         rootNode.attachChild(buggy);
-        rootNode.attachChild(SkyFactory.createSky(assetManager, tex,
-                SkyFactory.EnvMapType.CubeMap));
+        rootNode.attachChild(
+            SkyFactory.createSky(assetManager, tex, SkyFactory.EnvMapType.CubeMap));
 
         DirectionalLight l = new DirectionalLight();
         l.setDirection(new Vector3f(0, -1, -1));
         rootNode.addLight(l);
     }
-    private void testScene7(){
+    private void testScene7() {
         sceneId = 6;
         Node scene = (Node) assetManager.loadModel("Scenes/ManyLights/Main.scene");
         rootNode.attachChild(scene);
@@ -364,15 +385,15 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         g.getMaterial().setBoolean("VertexLighting", false);
 
         /* A colored lit cube. Needs light source! */
-//        Geometry boxGeo = new Geometry("shape", new Box(1, 1, 1));
-//        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-//        mat.getAdditionalRenderState().setWireframe(true);
-//        mat.setColor("Color", ColorRGBA.Green);
-//        mat.setBoolean("UseInstancing", true);
-//        boxGeo.setMaterial(mat);
-//
-//        InstancedNode instancedNode = new InstancedNode("instanced_node");
-//        n.attachChild(instancedNode);
+        //        Geometry boxGeo = new Geometry("shape", new Box(1, 1, 1));
+        //        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        //        mat.getAdditionalRenderState().setWireframe(true);
+        //        mat.setColor("Color", ColorRGBA.Green);
+        //        mat.setBoolean("UseInstancing", true);
+        //        boxGeo.setMaterial(mat);
+        //
+        //        InstancedNode instancedNode = new InstancedNode("instanced_node");
+        //        n.attachChild(instancedNode);
         int nb = 0;
         for (Light light : lightList) {
             nb++;
@@ -396,23 +417,23 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
                         break;
                 }
             }
-//            Geometry b = boxGeo.clone(false);
-//            instancedNode.attachChild(b);
-//            b.setLocalTranslation(p.getPosition().x, p.getPosition().y, p.getPosition().z);
-//            b.setLocalScale(p.getRadius() * 0.5f);
-
+            //            Geometry b = boxGeo.clone(false);
+            //            instancedNode.attachChild(b);
+            //            b.setLocalTranslation(p.getPosition().x, p.getPosition().y,
+            //            p.getPosition().z);
+            //            b.setLocalScale(p.getRadius() * 0.5f);
         }
-//        instancedNode.instance();
-//        for(int i = 0,num = instancedNode.getChildren().size();i < num;i++){
-//            if(instancedNode.getChild(i) instanceof InstancedGeometry){
-//                instancedGeometry = (InstancedGeometry)instancedNode.getChild(i);
-//                instancedGeometry.setForceNumVisibleInstances(2);
-//            }
-//        }
+        //        instancedNode.instance();
+        //        for(int i = 0,num = instancedNode.getChildren().size();i < num;i++){
+        //            if(instancedNode.getChild(i) instanceof InstancedGeometry){
+        //                instancedGeometry = (InstancedGeometry)instancedNode.getChild(i);
+        //                instancedGeometry.setForceNumVisibleInstances(2);
+        //            }
+        //        }
 
-
-//        cam.setLocation(new Vector3f(3.1893547f, 17.977385f, 30.8378f));
-//        cam.setRotation(new Quaternion(0.14317635f, 0.82302624f, -0.23777823f, 0.49557027f));
+        //        cam.setLocation(new Vector3f(3.1893547f, 17.977385f, 30.8378f));
+        //        cam.setRotation(new Quaternion(0.14317635f, 0.82302624f, -0.23777823f,
+        //        0.49557027f));
 
         cam.setLocation(new Vector3f(-180.61f, 64, 7.657533f));
         cam.lookAtDirection(new Vector3f(0.93f, -0.344f, 0.044f), Vector3f.UNIT_Y);
@@ -420,8 +441,8 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         cam.setLocation(new Vector3f(-26.85569f, 15.701239f, -19.206047f));
         cam.lookAtDirection(new Vector3f(0.13871355f, -0.6151029f, 0.7761488f), Vector3f.UNIT_Y);
     }
-    private void testScene8(){
-        Quad quadMesh = new Quad(512,512);
+    private void testScene8() {
+        Quad quadMesh = new Quad(512, 512);
         Geometry quad = new Geometry("Quad", quadMesh);
         quad.setQueueBucket(RenderQueue.Bucket.Opaque);
 
@@ -431,7 +452,7 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
 
         rootNode.attachChild(quad);
     }
-    private void testScene9(){
+    private void testScene9() {
         viewPort.setBackgroundColor(ColorRGBA.Black);
 
         dl = new DirectionalLight();
@@ -459,7 +480,6 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         inputManager.addListener(new ActionListener() {
             @Override
             public void onAction(String name, boolean isPressed, float tpf) {
-
                 if (name.equals("rup") && isPressed) {
                     roughness = FastMath.clamp(roughness + 0.1f, 0.0f, 1.0f);
                     m.setFloat("Roughness", roughness);
@@ -475,12 +495,11 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
             }
         }, "light", "rup", "rdown");
 
-
         inputManager.addMapping("light", new KeyTrigger(KeyInput.KEY_F));
         inputManager.addMapping("rup", new KeyTrigger(KeyInput.KEY_UP));
         inputManager.addMapping("rdown", new KeyTrigger(KeyInput.KEY_DOWN));
     }
-    private void testScene10(){
+    private void testScene10() {
         sceneId = 9;
         roughness = 1.0f;
         assetManager.registerLoader(KTXLoader.class, "ktx");
@@ -503,26 +522,28 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
             fpp.setNumSamples(numSamples);
         }
 
-//        fpp.addFilter(new FXAAFilter());
+        //        fpp.addFilter(new FXAAFilter());
         fpp.addFilter(new ToneMapFilter(Vector3f.UNIT_XYZ.mult(4.0f)));
-//        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
+        //        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
         viewPort.addProcessor(fpp);
 
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Sky_Cloudy.hdr", SkyFactory.EnvMapType.EquirectMap);
-        Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Path.hdr", SkyFactory.EnvMapType.EquirectMap);
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds", SkyFactory.EnvMapType.CubeMap);
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/road.hdr", SkyFactory.EnvMapType.EquirectMap);
+        // Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Sky_Cloudy.hdr",
+        // SkyFactory.EnvMapType.EquirectMap);
+        Spatial sky = SkyFactory.createSky(
+            assetManager, "Textures/Sky/Path.hdr", SkyFactory.EnvMapType.EquirectMap);
+        // Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds",
+        // SkyFactory.EnvMapType.CubeMap); Spatial sky = SkyFactory.createSky(assetManager,
+        // "Textures/Sky/road.hdr", SkyFactory.EnvMapType.EquirectMap);
         rootNode.attachChild(sky);
 
         pbrMat = assetManager.loadMaterial("Models/Tank/tank.j3m");
         model.setMaterial(pbrMat);
 
-
         final EnvironmentCamera envCam = new EnvironmentCamera(256, new Vector3f(0, 3f, 0));
         stateManager.attach(envCam);
 
-//        EnvironmentManager envManager = new EnvironmentManager();
-//        stateManager.attach(envManager);
+        //        EnvironmentManager envManager = new EnvironmentManager();
+        //        stateManager.attach(envManager);
 
         //       envManager.setScene(rootNode);
 
@@ -537,7 +558,7 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         chaser.setRotationSensitivity(10);
         chaser.setZoomSensitivity(5);
         flyCam.setEnabled(false);
-        //flyCam.setMoveSpeed(100);
+        // flyCam.setMoveSpeed(100);
 
         inputManager.addListener(new ActionListener() {
             @Override
@@ -561,7 +582,6 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
                     roughness = FastMath.clamp(roughness - 0.1f, 0.0f, 1.0f);
                     pbrMat.setFloat("Roughness", roughness);
                 }
-
 
                 if (name.equals("up") && isPressed) {
                     model.move(0, tpf * 100f, 0);
@@ -592,16 +612,16 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         inputManager.addMapping("rup", new KeyTrigger(KeyInput.KEY_T));
         inputManager.addMapping("rdown", new KeyTrigger(KeyInput.KEY_G));
     }
-    private void testScene11(){
-//        Box boxMesh = new Box(0.5f,0.5f,0.5f);
-//        Geometry boxGeo = new Geometry("Colored Box", boxMesh);
-//        boxGeo.setShadowMode(RenderQueue.ShadowMode.CastAndReceive);
+    private void testScene11() {
+        //        Box boxMesh = new Box(0.5f,0.5f,0.5f);
+        //        Geometry boxGeo = new Geometry("Colored Box", boxMesh);
+        //        boxGeo.setShadowMode(RenderQueue.ShadowMode.CastAndReceive);
         Material boxMat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
-//        boxMat.setBoolean("UseMaterialColors", true);
-//        boxMat.setColor("Ambient", ColorRGBA.Green);
-//        boxMat.setColor("Diffuse", ColorRGBA.Green);
-//        boxGeo.setMaterial(boxMat);
-//        rootNode.attachChild(boxGeo);
+        //        boxMat.setBoolean("UseMaterialColors", true);
+        //        boxMat.setColor("Ambient", ColorRGBA.Green);
+        //        boxMat.setColor("Diffuse", ColorRGBA.Green);
+        //        boxGeo.setMaterial(boxMat);
+        //        rootNode.attachChild(boxGeo);
         Node tank = (Node) assetManager.loadModel("Models/HoverTank/Tank2.mesh.xml");
         tank.setShadowMode(RenderQueue.ShadowMode.CastAndReceive);
         tank.setLocalScale(0.3f);
@@ -619,7 +639,6 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         planeGeo.setMaterial(planeMat);
         rootNode.attachChild(planeGeo);
 
-
         DirectionalLight sun = new DirectionalLight();
         sun.setDirection((new Vector3f(-0.5f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
@@ -631,14 +650,16 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         sun.setDirection((new Vector3f(0.5f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
         rootNode.addLight(sun);
-        DirectionalLightShadowFilter dlsf2 = new DirectionalLightShadowFilter(assetManager, 1024, 1);
+        DirectionalLightShadowFilter dlsf2 =
+            new DirectionalLightShadowFilter(assetManager, 1024, 1);
         dlsf2.setLight(sun);
 
         sun = new DirectionalLight();
         sun.setDirection((new Vector3f(0.0f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
         rootNode.addLight(sun);
-        DirectionalLightShadowFilter dlsf3 = new DirectionalLightShadowFilter(assetManager, 1024, 1);
+        DirectionalLightShadowFilter dlsf3 =
+            new DirectionalLightShadowFilter(assetManager, 1024, 1);
         dlsf3.setLight(sun);
 
         FilterPostProcessor fpp = new FilterPostProcessor(assetManager);
@@ -651,17 +672,16 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
     @Override
     public void simpleInitApp() {
         currentRenderPath = RenderPath.Forward;
-        renderManager.setRenderPath(currentRenderPath);
+        useRenderPath(currentRenderPath);
         testScene10();
-//        cam.setFrustumPerspective(45.0f, 4.0f / 3.0f, 0.01f, 100.0f);
+        //        cam.setFrustumPerspective(45.0f, 4.0f / 3.0f, 0.01f, 100.0f);
         flyCam.setMoveSpeed(10.0f);
         // deferred下闪烁
-//        testScene7();
-        
-        
-//        MaterialDebugAppState debug = new MaterialDebugAppState();
-//        debug.registerBinding("Common/ShaderLib/BlinnPhongLighting.glsllib", teapot);
-//        stateManager.attach(debug);
+        //        testScene7();
+
+        //        MaterialDebugAppState debug = new MaterialDebugAppState();
+        //        debug.registerBinding("Common/ShaderLib/BlinnPhongLighting.glsllib", teapot);
+        //        stateManager.attach(debug);
         setPauseOnLostFocus(false);
         flyCam.setDragToRotate(true);
         flyCam.setMoveSpeed(50.0f);
@@ -674,12 +694,12 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
         guiFont = assetManager.loadFont("Interface/Fonts/Default.fnt");
         hitText = new BitmapText(guiFont, false);
         hitText.setSize(guiFont.getCharSet().getRenderedSize());
-        hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+        hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         hitText.setLocalTranslation(0, cam.getHeight(), 0);
         guiNode.attachChild(hitText);
     }
 
-    private void registerInput(){
+    private void registerInput() {
         inputManager.addListener(this, "toggleRenderPath");
         inputManager.addListener(this, "toggleFramegraph");
         inputManager.addListener(this, "addInstNum");
@@ -691,72 +711,74 @@ public class TestSimpleDeferredLighting extends RenderPathExample implements Act
     }
 
     @Override
-    public void simpleUpdate(float tpf){
-        if(sceneId == 1){
+    public void simpleUpdate(float tpf) {
+        if (sceneId == 1) {
             angle += tpf * 0.25f;
             angle %= FastMath.TWO_PI;
 
             pl.setPosition(new Vector3f(FastMath.cos(angle) * 4f, 0.5f, FastMath.sin(angle) * 4f));
             lightMdl.setLocalTranslation(pl.getPosition());
-        }
-        else if(sceneId == 2){
-//            float t = 0;
-//            for(int i = 0;i < pls.length;i++){
-//                t = i * 1.0f / pls.length * 1.5f + 1.5f;
-//                angles[i] += tpf * ((i + 1)) / pls.length;
-//                angles[i] %= FastMath.TWO_PI;
-//
-//                pls[i].setPosition(new Vector3f(FastMath.cos(angles[i]) * t, i *1.0f / pls.length, FastMath.sin(angles[i]) * t));
-//                lightMdls[i].setLocalTranslation(pls[i].getPosition());
-//            }
-        }
-        else if(sceneId == 9){
+        } else if (sceneId == 2) {
+            //            float t = 0;
+            //            for(int i = 0;i < pls.length;i++){
+            //                t = i * 1.0f / pls.length * 1.5f + 1.5f;
+            //                angles[i] += tpf * ((i + 1)) / pls.length;
+            //                angles[i] %= FastMath.TWO_PI;
+            //
+            //                pls[i].setPosition(new Vector3f(FastMath.cos(angles[i]) * t, i *1.0f /
+            //                pls.length, FastMath.sin(angles[i]) * t));
+            //                lightMdls[i].setLocalTranslation(pls[i].getPosition());
+            //            }
+        } else if (sceneId == 9) {
             frame++;
 
             if (frame == 2) {
                 modelNode.removeFromParent();
-                final LightProbe probe = LightProbeFactory.makeProbe(stateManager.getState(EnvironmentCamera.class), rootNode, new JobProgressAdapter<LightProbe>() {
-
-                    @Override
-                    public void done(LightProbe result) {
-                        System.err.println("Done rendering env maps");
-                        tex = EnvMapUtils.getCubeMapCrossDebugViewWithMipMaps(result.getPrefilteredEnvMap(), assetManager);
-                    }
-                });
+                final LightProbe probe =
+                    LightProbeFactory.makeProbe(stateManager.getState(EnvironmentCamera.class),
+                        rootNode, new JobProgressAdapter<LightProbe>() {
+                            @Override
+                            public void done(LightProbe result) {
+                                System.err.println("Done rendering env maps");
+                                tex = EnvMapUtils.getCubeMapCrossDebugViewWithMipMaps(
+                                    result.getPrefilteredEnvMap(), assetManager);
+                            }
+                        });
                 probe.getArea().setRadius(100);
                 rootNode.addLight(probe);
-                //getStateManager().getState(EnvironmentManager.class).addEnvProbe(probe);
-
+                // getStateManager().getState(EnvironmentManager.class).addEnvProbe(probe);
             }
             if (frame > 10 && modelNode.getParent() == null) {
                 rootNode.attachChild(modelNode);
             }
         }
-//        System.out.println("cam.pos:" + cam.getLocation());
-//        System.out.println("cam.look:" + cam.getDirection());
+        //        System.out.println("cam.pos:" + cam.getLocation());
+        //        System.out.println("cam.look:" + cam.getDirection());
     }
 
     @Override
     public void onAction(String name, boolean isPressed, float tpf) {
-        if(name.equals("toggleFramegraph") && !isPressed){
+        if (name.equals("toggleFramegraph") && !isPressed) {
             bUseFramegraph = !bUseFramegraph;
-            renderManager.setRenderPath(bUseFramegraph ? currentRenderPath : RenderPath.Forward);
+            useRenderPath(bUseFramegraph ? currentRenderPath : RenderPath.Forward);
         }
-        if(name.equals("toggleRenderPath") && !isPressed){
+        if (name.equals("toggleRenderPath") && !isPressed) {
             currentRenderPath = RenderPathHelper.next(currentRenderPath);
-            renderManager.setRenderPath(currentRenderPath);
-//            getRenderManager().setForcedTechnique(null);
-            hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+            useRenderPath(currentRenderPath);
+            //            getRenderManager().setForcedTechnique(null);
+            hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         }
-//        if(name.equals("addInstNum") && !isPressed){
-//            if(sceneId == 6){
-//                instancedGeometry.setForceNumVisibleInstances(instancedGeometry.getNumVisibleInstances() + 1);
-//            }
-//        }
-//        else if(name.equals("deleteInstNum") && !isPressed){
-//            if(sceneId == 6){
-//                instancedGeometry.setForceNumVisibleInstances(instancedGeometry.getNumVisibleInstances() - 1);
-//            }
-//        }
+        //        if(name.equals("addInstNum") && !isPressed){
+        //            if(sceneId == 6){
+        //                instancedGeometry.setForceNumVisibleInstances(instancedGeometry.getNumVisibleInstances()
+        //                + 1);
+        //            }
+        //        }
+        //        else if(name.equals("deleteInstNum") && !isPressed){
+        //            if(sceneId == 6){
+        //                instancedGeometry.setForceNumVisibleInstances(instancedGeometry.getNumVisibleInstances()
+        //                - 1);
+        //            }
+        //        }
     }
 }

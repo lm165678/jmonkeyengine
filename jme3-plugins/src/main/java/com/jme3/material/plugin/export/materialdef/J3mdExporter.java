@@ -49,6 +49,9 @@ public class J3mdExporter {
 //        }
 
         out.write("MaterialDef " + matDef.getName() + " {\n");
+        if (matDef.getDeferredLightingShader() != null) {
+            out.write("    DeferredLightingShader " + matDef.getDeferredLightingShader() + "\n");
+        }
         if (matDef.getShadingId() != 0) {
             out.write("    ShadingId " + matDef.getShadingId() + "\n");
         }

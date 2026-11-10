@@ -43,17 +43,22 @@ import com.jme3.shader.VarType;
 
 /** Runs native surface techniques without changing material instances. */
 final class GBufferPass implements DeferredPass {
-    private final MatParamOverride lightDataOverride = new MatParamOverride(VarType.Texture2D, "DeferredLightData", null);
-    private final MatParamOverride lightCountOverride = new MatParamOverride(VarType.Int, "DeferredLightCount", 0);
-    private final MatParamOverride shadingIdOverride = new MatParamOverride(VarType.Int, "DeferredShadingId", 0);
+    private final MatParamOverride lightDataOverride =
+        new MatParamOverride(VarType.Texture2D, "DeferredLightData", null);
+    private final MatParamOverride lightCountOverride =
+        new MatParamOverride(VarType.Int, "DeferredLightCount", 0);
+    private final MatParamOverride shadingIdOverride =
+        new MatParamOverride(VarType.Int, "DeferredShadingId", 0);
 
-    @Override public void reset() {
+    @Override
+    public void reset() {
         lightDataOverride.setValue(null);
         lightCountOverride.setValue(0);
         shadingIdOverride.setValue(0);
     }
 
-    @Override public boolean execute(DeferredRenderContext frame) {
+    @Override
+    public boolean execute(DeferredRenderContext frame) {
         RenderManager rm = frame.manager;
         Renderer renderer = frame.renderer;
         Camera camera = frame.camera();
@@ -63,18 +68,20 @@ final class GBufferPass implements DeferredPass {
         try {
             renderer.setFrameBuffer(frame.resources.gbuffer);
             renderer.setBackgroundColor(ColorRGBA.BlackNoAlpha);
-            renderer.clearBuffers(true,true,true);
-            rm.setCamera(camera,false);
+            renderer.clearBuffers(true, true, true);
+            rm.setCamera(camera, false);
             rm.setForcedTechnique("GBuffer");
             for (Geometry geometry : frame.batch.geometries) {
-                Material material=geometry.getMaterial();
-                String previous = material.getActiveTechnique() == null ? TechniqueDef.DEFAULT_TECHNIQUE_NAME
-                        : material.getActiveTechnique().getDef().getName();
-                shadingIdOverride.setValue(material.getMaterialDef().getShadingId());
+                Material material = geometry.getMaterial();
+                String previous = material.getActiveTechnique() == null
+                    ? TechniqueDef.DEFAULT_TECHNIQUE_NAME
+                    : material.getActiveTechnique().getDef().getName();
+                shadingIdOverride.setValue(frame.models.resolve(
+                    material.getMaterialDef(), frame.resources.getAssetManager()));
                 rm.addForcedMatParam(shadingIdOverride);
                 boolean needsLightData = Boolean.TRUE.equals(parameter(geometry, "VertexLighting"))
-                        || Boolean.TRUE.equals(parameter(geometry, "UseVertexColorsAsSunIntensity"))
-                        || parameter(geometry, "StaticSunIntensity") != null;
+                    || Boolean.TRUE.equals(parameter(geometry, "UseVertexColorsAsSunIntensity"))
+                    || parameter(geometry, "StaticSunIntensity") != null;
                 if (needsLightData) {
                     rm.addForcedMatParam(lightDataOverride);
                     rm.addForcedMatParam(lightCountOverride);
@@ -98,9 +105,10 @@ final class GBufferPass implements DeferredPass {
     static Object parameter(Geometry geometry, String name) {
         Object value = geometry.getMaterial().getParamValue(name);
         for (MatParamOverride override : geometry.getWorldMatParamOverrides()) {
-            if (override.isEnabled() && name.equals(override.getName())) value=override.getValue();
+            if (override.isEnabled() && name.equals(override.getName())) {
+                value = override.getValue();
+            }
         }
         return value;
     }
-
 }

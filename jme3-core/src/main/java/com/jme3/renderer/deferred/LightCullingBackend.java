@@ -34,5 +34,6 @@ package com.jme3.renderer.deferred;
 /** Builds a tile list from world-space lights. No geometry is drawn or consumed. */
 interface LightCullingBackend {
     boolean prepare(DeferredRenderContext frame);
-    default void reset() { }
+    default void reset() {
+    }
 }

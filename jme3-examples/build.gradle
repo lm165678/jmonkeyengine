@@ -1,3 +1,17 @@
+task frameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.renderpath.TestFrameGraph'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
+task dynamicFrameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.renderpath.TestDynamicFrameGraph'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
 //apply plugin:'application'
 
 task tiledSceneBenchmark(type: JavaExec, dependsOn: 'classes') {

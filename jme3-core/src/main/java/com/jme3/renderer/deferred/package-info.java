@@ -82,38 +82,75 @@
  * <li>DeferredLightingPass composes color and depth into the viewport target.</li>
  * </ol>
  * This ordering preserves vertex-lighting inputs; it does not introduce a new
- * depth-culling algorithm. DeferredResources is the sole native resource owner.
+ * depth-culling algorithm. FrameGraph owns the transient GBuffer allocation pool.
+ * DeferredResources owns persistent light textures, buffers and shader programs.
  * Passes borrow its textures, programs and buffers through DeferredRenderContext.
  * Resize releases size-dependent targets. Cleanup releases all native resources,
  * clears borrowed references and permits pipeline reinitialization. Scene objects
  * are not retained in the batch pool after the frame. ShadingModelRegistry versions
  * invalidate lighting programs only; culling programs survive model updates.
- * These explicit dependencies provide a future FrameGraph integration point;
- * no FrameGraph or automatic resource aliasing is introduced here.
+ * The three passes declare their dependencies in a compiled FrameGraph. GBuffer
+ * resources return to the pool at last use and are reused between batches/frames.
+ * See com.jme3.renderer.framegraph for custom graph construction and ownership.
  *
  * <h2>Material contract</h2>
  * A definition opts in with {@code ShadingModelId N} (or {@code ShadingId N})
  * and a named {@code Technique GBuffer}. ShadingModel exposes built-in IDs:
  * zero is ForwardOnly, 1 Lighting, 2 PBRLighting, 3 Unshaded. Custom IDs 4..65535
- * require {@code RenderManager.registerDeferredShadingModel(id, glsl)}, or
- * registration directly on an explicitly installed processor. Unknown models
- * keep their Forward technique. Material definition export preserves the ID.
+ * can be explicitly registered by low-level integrations. Normal applications
+ * instead load Material from .j3md; declare the custom source in that asset:
+ * <pre>{@code
+ * MaterialDef Custom Deferred Lambert {
+ *     DeferredLightingShader Materials/Tiled/CustomLambert.frag
+ *     // MaterialParameters and default/GBuffer techniques follow.
+ * }
+ * }</pre>
+ * The engine loads the declared source, whose entry point is deferredSurfaceShading,
+ * and assigns a registry-local ID. Omit ShadingId for automatic assignment or
+ * declare an explicit custom ID for checked association. The full runnable asset
+ * is Materials/Tiled/CustomLambert.j3md in jme3-examples; no application-side
+ * loadAsset(.frag) or registration is required. Both declaration and explicit ID
+ * survive material definition export. Unknown manual models keep Forward.
+ * Technique lighting execution is declared with LightModel MultiPass/SinglePass;
+ * legacy LightMode is accepted as an alias. This execution mode is independent
+ * of the deferred shading model selected by the material.
  *
- * GBuffer techniques use DeferredSurface.glsllib to write linear MRT records:
- * <ul>
- * <li>0, RGBA32F: diffuse RGB and exact integer model ID (zero is background).</li>
- * <li>1, RGBA16F: world-space normal and shininess/roughness.</li>
- * <li>2, RGBA16F: direct-light specular RGB/F0.</li>
- * <li>3, RGBA16F: precomputed indirect/emissive RGB and surface alpha.</li>
- * <li>4, RGBA16F: legacy reflection coefficients/flags or terrain modifiers.</li>
- * <li>Depth24: ordinary depth, also written to the composed scene target.</li>
- * </ul>
- * Declare {@code Int DeferredShadingId} without a default. A temporary forced
- * parameter supplies the definition ID; material instances are not mutated.
- * Custom functions use the first four records; their fourth RGB record is an
- * ambient response multiplied by the batch's ambient light. The built-in models
- * instead store already-evaluated indirect light in that record. See the ID 7
- * CustomLambert example for a complete Forward/GBuffer pair.
+ * GBuffer techniques use DeferredSurface.glsllib to write five raw records plus
+ * depth. Attachment uniforms are gbuffer0..gbuffer4 and gbufferDepth. Only
+ * gbuffer0.a (shadingId) and the depth attachment have shared meanings. Other
+ * channels, including opacity, are defined by each model's writer/decoder pair.
+ * Main obtains getShadingId() and dispatches through subfaceShading(shadingId).
+ * Built-in decoders and their complete channel maps are documented separately in
+ * Common/ShaderLib/Deferred/LightingModel.glsllib, PbrModel.glsllib and
+ * UnshadedModel.glsllib. No shared decoder assumes all models have a normal,
+ * specular color, ambient term or reflection record.
+ *
+ * <p>Custom material usage:</p>
+ * <pre>{@code
+ * // .j3md: DeferredLightingShader Materials/Tiled/CustomLambert.frag
+ * // Its GBuffer technique writes its own layout with writeGBuffer(...).
+ * // The lighting source defines a full-surface function, e.g.:
+ * vec4 deferredSurfaceShading() {
+ *     vec3 diffuse = getGBuffer0().rgb;
+ *     vec3 normal = normalize(getGBuffer3().xyz);
+ *     float opacity = getGBuffer4().a;
+ *     vec3 position = getWorldPosition();
+ *     DeferredLightList lights = getLightList();
+ *     vec3 color = getGBuffer1().rgb * AmbientColor;
+ *     for (int entry = 0; entry < lights.count; ++entry) {
+ *         DeferredLight light = getLight(lights, entry, position);
+ *         color += diffuse * light.color * max(dot(normal, light.direction), 0.0)
+ *                 * light.attenuation;
+ *     }
+ *     return vec4(color, opacity);
+ * }
+ * }</pre>
+ * The full example is CustomLambert.j3md, CustomLambertGBuffer.frag and
+ * CustomLambert.frag in jme3-examples. It deliberately stores the normal in
+ * record3 and opacity in record4, unlike built-in models. The Java application
+ * only constructs Material; the registry associates the declared shader/ID.
+ * The old per-light deferredLighting entry is retained via a compatibility
+ * adapter with its original record3 ambient/opacity contract.
  *
  * <h2>Material features and composition</h2>
  * Lighting, PBRLighting and Unshaded reuse their native surface and vertex

@@ -156,6 +156,20 @@ public class J3MLoaderTest {
         verify(textureCombined).setWrap(Texture.WrapMode.Repeat);
     }
 
+    @Test
+    public void materialLightingDeclarationAndBothLightModelSpellings() throws IOException {
+        for (String keyword : new String[]{"LightModel", "LightMode"}) {
+            String source = "MaterialDef Automatic {\n DeferredLightingShader Materials/Auto.frag\n"
+                    + " MaterialParameters {\n }\n Technique {\n " + keyword + " MultiPass\n"
+                    + " VertexShader GLSL100: test.vert\n FragmentShader GLSL100: test.frag\n }\n }";
+            when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);
+            assertEquals("Materials/Auto.frag", def.getDeferredLightingShader());
+            assertEquals(0, def.getShadingId());
+            assertEquals(com.jme3.material.TechniqueDef.LightMode.MultiPass, def.getTechniqueDefs("Default").get(0).getLightMode());
+        }
+    }
+
     private TextureKey setupMockForTexture(final String paramName, final String path, final boolean flipY, final Texture texture) {
         when(materialDef.getMaterialParam(paramName)).thenReturn(new MatParamTexture(VarType.Texture2D, paramName, texture, null));
 

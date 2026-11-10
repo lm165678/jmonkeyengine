@@ -27,7 +27,8 @@ public class BenchmarkTiledDeferred extends TestTileBasedDeferredShading {
     private static boolean closeView;
     private static boolean downView;
 
-    @Override public void simpleInitApp() {
+    @Override
+    public void simpleInitApp() {
         FastMath.rand.setSeed(421);
         super.simpleInitApp();
         if (closeView) {
@@ -46,32 +47,44 @@ public class BenchmarkTiledDeferred extends TestTileBasedDeferredShading {
     }
 
     private void configure() {
+        renderManager.setPipeline(viewPort, null);
         renderManager.setDeferredTileSize(sizes[phase]);
         renderManager.setRenderPath(paths[phase]);
         for (SceneProcessor processor : viewPort.getProcessors()) {
             if (processor instanceof FilterPostProcessor) {
                 for (Filter filter : ((FilterPostProcessor) processor).getFilterList()) {
-                    if (filter instanceof BloomFilter) filter.setEnabled(phase != 5);
+                    if (filter instanceof BloomFilter) {
+                        filter.setEnabled(phase != 5);
+                    }
                 }
             }
         }
     }
 
-    @Override public void simpleRender(RenderManager manager) {
+    @Override
+    public void simpleRender(RenderManager manager) {
         pixels.clear();
         renderer.readFrameBuffer(null, pixels);
         long now = System.nanoTime();
         int within = frame % 120;
-        if (within >= 40) times[within - 40] = (now - previous) / 1e6;
+        if (within >= 40) {
+            times[within - 40] = (now - previous) / 1e6;
+        }
         previous = now;
         if (++frame % 120 == 0) {
             Arrays.sort(times);
-            System.out.println("TILE_CASE_BENCH view=" + (downView ? "down" : closeView ? "near" : "original")
-                    + " requested=" + paths[phase] + " active=" + manager.getRenderPipeline(viewPort).getActiveMode()
-                    + " tile=" + sizes[phase] + " bloom=" + (phase != 5)
-                    + " medianMs=" + times[40] + " p95Ms=" + times[76]);
-            if (++phase == paths.length) stop();
-            else configure();
+            System.out.println("TILE_CASE_BENCH view="
+                + (downView         ? "down"
+                        : closeView ? "near"
+                                    : "original")
+                + " requested=" + paths[phase] + " active="
+                + manager.getRenderPipeline(viewPort).getActiveMode() + " tile=" + sizes[phase]
+                + " bloom=" + (phase != 5) + " medianMs=" + times[40] + " p95Ms=" + times[76]);
+            if (++phase == paths.length) {
+                stop();
+            } else {
+                configure();
+            }
         }
     }
 

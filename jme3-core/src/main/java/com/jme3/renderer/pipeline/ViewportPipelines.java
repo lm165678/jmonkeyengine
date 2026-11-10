@@ -67,7 +67,9 @@ public final class ViewportPipelines {
         this.manager = Objects.requireNonNull(manager);
     }
 
-    public ShadingModelRegistry getShadingModels() { return models; }
+    public ShadingModelRegistry getShadingModels() {
+        return models;
+    }
 
     public RenderPipeline get(ViewPort viewport) {
         Entry entry = entries.get(viewport);
@@ -77,24 +79,34 @@ public final class ViewportPipelines {
     public void set(ViewPort viewport, RenderPipeline pipeline) {
         Objects.requireNonNull(viewport, "viewport");
         if (!manager.getPreViews().contains(viewport) && !manager.getMainViews().contains(viewport)
-                && !manager.getPostViews().contains(viewport)) {
+            && !manager.getPostViews().contains(viewport)) {
             throw new IllegalArgumentException("Viewport does not belong to this RenderManager");
         }
         if (pipeline != null) {
             for (SceneProcessor processor : viewport.getProcessors()) {
                 if (processor instanceof TiledDeferredProcessor) {
-                    throw new IllegalStateException("Remove the explicit deferred processor before replacing the pipeline");
+                    throw new IllegalStateException(
+                        "Remove the explicit deferred processor before replacing the pipeline");
                 }
             }
             Entry current = entries.get(viewport);
-            if (current != null && current.pipeline == pipeline) return;
-            for (Entry entry : entries.values()) {
-                if (entry.pipeline == pipeline) throw new IllegalArgumentException("Pipeline already belongs to another viewport");
+            if (current != null && current.pipeline == pipeline) {
+                return;
             }
-            if (pipeline.isInitialized()) throw new IllegalArgumentException("Install an uninitialized pipeline");
+            for (Entry entry : entries.values()) {
+                if (entry.pipeline == pipeline) {
+                    throw new IllegalArgumentException(
+                        "Pipeline already belongs to another viewport");
+                }
+            }
+            if (pipeline.isInitialized()) {
+                throw new IllegalArgumentException("Install an uninitialized pipeline");
+            }
         }
         remove(viewport);
-        if (pipeline != null) entries.put(viewport, new Entry(pipeline, true));
+        if (pipeline != null) {
+            entries.put(viewport, new Entry(pipeline, true));
+        }
     }
 
     public void render(ViewPort viewport) {
@@ -111,16 +123,20 @@ public final class ViewportPipelines {
                 return;
             }
         }
-        RenderPath path = viewport.getRenderPath() == RenderPath.Inherit
-                ? manager.getRenderPath() : viewport.getRenderPath();
+        RenderPath path = viewport.getRenderPath() == RenderPath.Inherit ? manager.getRenderPath()
+                                                                         : viewport.getRenderPath();
         if (path == RenderPath.Forward) {
             remove(viewport);
             return;
         }
         if (entry == null) {
-            if (viewport.getQueue().getOpaqueQueue().size() == 0) return;
-            MaterialDef definition = viewport.getQueue().getOpaqueQueue().get(0).getMaterial().getMaterialDef();
-            entry = new Entry(new TiledDeferredProcessor(definition.getAssetManager(), models), false);
+            if (viewport.getQueue().getOpaqueQueue().size() == 0) {
+                return;
+            }
+            MaterialDef definition =
+                viewport.getQueue().getOpaqueQueue().get(0).getMaterial().getMaterialDef();
+            entry =
+                new Entry(new TiledDeferredProcessor(definition.getAssetManager(), models), false);
             entries.put(viewport, entry);
         }
         TiledDeferredProcessor adapter = (TiledDeferredProcessor) entry.pipeline;
@@ -143,7 +159,9 @@ public final class ViewportPipelines {
                 entry.height = height;
             } catch (RuntimeException | Error failure) {
                 entries.remove(viewport);
-                try { entry.pipeline.cleanup(); } catch (RuntimeException | Error cleanupFailure) {
+                try {
+                    entry.pipeline.cleanup();
+                } catch (RuntimeException | Error cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
                 throw failure;
@@ -157,7 +175,7 @@ public final class ViewportPipelines {
     public void reshape(ViewPort viewport, int width, int height) {
         Entry entry = entries.get(viewport);
         if (entry != null && entry.initialized
-                && (entry.width != width || entry.height != height)) {
+            && (entry.width != width || entry.height != height)) {
             entry.pipeline.reshape(width, height);
             entry.width = width;
             entry.height = height;
@@ -166,7 +184,9 @@ public final class ViewportPipelines {
 
     public void remove(ViewPort viewport) {
         Entry entry = entries.remove(viewport);
-        if (entry != null && entry.initialized) entry.pipeline.cleanup();
+        if (entry != null && entry.initialized) {
+            entry.pipeline.cleanup();
+        }
     }
 
     public void cleanup() {
@@ -175,12 +195,24 @@ public final class ViewportPipelines {
         entries.clear();
         Throwable failure = null;
         for (Entry entry : owned) {
-            if (!entry.initialized) continue;
-            try { entry.pipeline.cleanup(); } catch (RuntimeException | Error error) {
-                if (failure == null) failure = error; else failure.addSuppressed(error);
+            if (!entry.initialized) {
+                continue;
+            }
+            try {
+                entry.pipeline.cleanup();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    failure = error;
+                } else {
+                    failure.addSuppressed(error);
+                }
             }
         }
-        if (failure instanceof RuntimeException) throw (RuntimeException) failure;
-        if (failure instanceof Error) throw (Error) failure;
+        if (failure instanceof RuntimeException) {
+            throw(RuntimeException) failure;
+        }
+        if (failure instanceof Error) {
+            throw(Error) failure;
+        }
     }
 }

@@ -1,21 +1,35 @@
-// Shared MRT surface encoding. The ordinary forward shader remains unchanged.
+// Raw MRT write contract. Only record0.a is reserved for the model ID.
+// Model-specific channels must match that model's decoder in the lighting stage.
 #ifdef DEFERRED_GBUFFER
 uniform int m_DeferredShadingId;
-layout(location=0) out vec4 deferredAlbedo;
-layout(location=1) out vec4 deferredNormal;
-layout(location=2) out vec4 deferredSpecular;
-layout(location=3) out vec4 deferredIndirect;
-layout(location=4) out vec4 deferredReflection;
+layout(location = 0) out vec4 outGBuffer0;
+layout(location = 1) out vec4 outGBuffer1;
+layout(location = 2) out vec4 outGBuffer2;
+layout(location = 3) out vec4 outGBuffer3;
+layout(location = 4) out vec4 outGBuffer4;
 vec4 deferredSurfaceColor;
 #undef gl_FragColor
 #define gl_FragColor deferredSurfaceColor
-void writeDeferredSurface(vec3 diffuse, vec3 normal, float parameter,
-                          vec3 specular, vec3 indirect, float alpha,
-                          vec3 reflection, float flags, int model) {
-    deferredAlbedo=vec4(diffuse,float(model));
-    deferredNormal=vec4(normal,parameter);
-    deferredSpecular=vec4(specular,0.0);
-    deferredIndirect=vec4(indirect,alpha);
-    deferredReflection=vec4(reflection,flags);
+
+// Custom GBuffer techniques can choose their own attribute layout. Pass five raw
+// records; the writer supplies the shared ID header and initializes every MRT.
+void writeGBuffer(vec4 record0, vec4 record1, vec4 record2, vec4 record3, vec4 record4,
+                  int shadingId) {
+    outGBuffer0 = vec4(record0.rgb, float(shadingId));
+    outGBuffer1 = record1;
+    outGBuffer2 = record2;
+    outGBuffer3 = record3;
+    outGBuffer4 = record4;
+}
+
+// Compatibility packer for existing built-in surface shaders. These meanings are
+// NOT a universal GBuffer layout. Read the model's decoder under ShaderLib/Deferred:
+// Lighting: parameter=shininess, specular=color, reflection/flags=legacy reflection.
+// PBR: parameter=roughness, specular=F0, reflection/flags=terrain modifiers.
+// Unshaded: only record3 (final color/opacity) is needed by its decoder.
+void writeDeferredSurface(vec3 diffuse, vec3 normal, float parameter, vec3 specular, vec3 indirect,
+                          float alpha, vec3 reflection, float flags, int model) {
+    writeGBuffer(vec4(diffuse, 0.0), vec4(normal, parameter), vec4(specular, 0.0),
+                 vec4(indirect, alpha), vec4(reflection, flags), model);
 }
 #endif

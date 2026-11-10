@@ -49,11 +49,13 @@ final class GpuLightCullingBackend implements LightCullingBackend {
         return (long) columns * rows * (capacity + 1);
     }
     static boolean supported(Renderer renderer, long records) {
-        return renderer.getCaps().containsAll(EnumSet.of(Caps.OpenGL43, Caps.ShaderStorageBufferObject))
-                && ((records + 3) / 4) * 16 <= Math.min(64L * 1024 * 1024,
-                        renderer.getLimits().get(Limits.ShaderStorageBufferObjectMaxBlockSize));
+        return renderer.getCaps().containsAll(
+                   EnumSet.of(Caps.OpenGL43, Caps.ShaderStorageBufferObject))
+            && ((records + 3) / 4) * 16 <= Math.min(64L * 1024 * 1024,
+                   renderer.getLimits().get(Limits.ShaderStorageBufferObjectMaxBlockSize));
     }
-    @Override public boolean prepare(DeferredRenderContext frame) {
+    @Override
+    public boolean prepare(DeferredRenderContext frame) {
         Camera camera = frame.camera();
         Renderer renderer = frame.renderer;
         int columns = frame.columns, rows = frame.rows, tileSize = frame.tileSize;
@@ -62,24 +64,27 @@ final class GpuLightCullingBackend implements LightCullingBackend {
         frame.resources.ensureGpuIndices((int) records(columns, rows, tileCapacity));
         Shader computeShader = frame.resources.computeShader();
         computeShader.getBufferBlock("TileIndices").setBufferObject(frame.resources.gpuIndices);
-        renderer.setTexture(6,frame.resources.lightTexture);
-        uniform(computeShader,"Lights",VarType.Int,6);
-        uniform(computeShader,"View",VarType.Matrix4,camera.getViewMatrix());
-        uniform(computeShader,"Projection",VarType.Matrix4,camera.getProjectionMatrix());
-        uniform(computeShader,"Resolution",VarType.Vector2,resolution.set(camera.getWidth(),camera.getHeight()));
-        uniform(computeShader,"Near",VarType.Float,camera.getFrustumNear());
-        uniform(computeShader,"Far",VarType.Float,camera.getFrustumFar());
-        uniform(computeShader,"Columns",VarType.Int,columns);uniform(computeShader,"TileSize",VarType.Int,tileSize);
-        uniform(computeShader,"LightCount",VarType.Int,lights.size());
-        uniform(computeShader,"TileCapacity",VarType.Int,tileCapacity);
+        renderer.setTexture(6, frame.resources.lightTexture);
+        uniform(computeShader, "Lights", VarType.Int, 6);
+        uniform(computeShader, "View", VarType.Matrix4, camera.getViewMatrix());
+        uniform(computeShader, "Projection", VarType.Matrix4, camera.getProjectionMatrix());
+        uniform(computeShader, "Resolution", VarType.Vector2,
+            resolution.set(camera.getWidth(), camera.getHeight()));
+        uniform(computeShader, "Near", VarType.Float, camera.getFrustumNear());
+        uniform(computeShader, "Far", VarType.Float, camera.getFrustumFar());
+        uniform(computeShader, "Columns", VarType.Int, columns);
+        uniform(computeShader, "TileSize", VarType.Int, tileSize);
+        uniform(computeShader, "LightCount", VarType.Int, lights.size());
+        uniform(computeShader, "TileCapacity", VarType.Int, tileCapacity);
         // Legacy ramps/reflections can contribute outside the physical light sphere.
         // Keep their existing conservative screen bounds and accumulation semantics.
         boolean conservative = frame.batch.colorRamp != null;
         for (com.jme3.scene.Geometry geometry : frame.batch.geometries) {
             conservative |= GBufferPass.parameter(geometry, "EnvMap") != null;
         }
-        uniform(computeShader,"ConservativeBounds",VarType.Boolean,conservative);
-        renderer.setShader(computeShader);renderer.dispatchCompute(columns,rows,1);
+        uniform(computeShader, "ConservativeBounds", VarType.Boolean, conservative);
+        renderer.setShader(computeShader);
+        renderer.dispatchCompute(columns, rows, 1);
         return true;
     }
 }

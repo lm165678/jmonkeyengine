@@ -52,6 +52,7 @@ public class MaterialDef{
     private String name;
     private String assetName;
     private int shadingId;
+    private String deferredLightingShader;
     private AssetManager assetManager;
 
     private Map<String, List<TechniqueDef>> techniques;
@@ -94,6 +95,49 @@ public class MaterialDef{
      */
     public int getShadingModelId() { return shadingId; }
 
+    /** @return custom deferred-lighting GLSL asset path, or null for built-in/manual models */
+    public String getDeferredLightingShader() { return deferredLightingShader; }
+
+    /**
+     * Declares a material-owned custom lighting model. Applications normally set
+     * this in .j3md rather than loading GLSL or registering IDs themselves:
+     * <pre>{@code
+     * MaterialDef MyMaterial {
+     *     DeferredLightingShader Materials/MyMaterial/Lighting.frag
+     *     // MaterialParameters, default Technique and Technique GBuffer ...
+     * }
+     * }</pre>
+     * The preferred source entry is {@code vec4 deferredSurfaceShading()}.
+     * It reads raw records with getGBuffer0() through getGBuffer4(), decodes its own
+     * attributes, evaluates its lights and returns final RGB/opacity. getShadingId()
+     * reads the only shared header (gbuffer0.a); all other color channels belong
+     * to the model. getWorldPosition(), getLightList() and getLight(list, entry,
+     * position) provide common geometry/light access without imposing a layout.
+     * A custom GBuffer technique uses writeGBuffer(record0, ..., record4, id)
+     * from DeferredSurface.glsllib and must match the lighting decoder.
+     * The engine loads the function lazily and binds a registry-local ID. Omit
+     * ShadingId for automatic assignment, or use an explicit custom ID 4..65535.
+     * IDs 1..3 cannot be combined with this property. The older per-light
+     * deferredLighting(...) entry is still supported with its legacy record3
+     * ambient/opacity convention; use the full-surface entry for independent layouts.
+     * Automatic IDs are runtime details: do not persist or compare them across
+     * registries. The definition's getShadingId stays zero for automatic models;
+     * the resolved ID is supplied to the GBuffer as DeferredShadingId.
+     * Provide compatible GBuffer and default Forward techniques; this declaration
+     * does not synthesize those shaders. Use unique names for extra GLSL helpers.
+     * @param assetPath GLSL asset path, or null to remove the custom declaration
+     */
+    public void setDeferredLightingShader(String assetPath) {
+        if (assetPath != null && (assetPath.trim().isEmpty() || assetPath.indexOf('\n') >= 0
+                || assetPath.indexOf('\r') >= 0)) throw new IllegalArgumentException("Invalid lighting asset path");
+        deferredLightingShader = assetPath;
+    }
+
+    /**
+     * Alias for setShadingId, for example {@code definition.setShadingModelId(7)}.
+     * @param id model identifier in the unsigned 16-bit range
+     * @see #setShadingId(int)
+     */
     public void setShadingModelId(int id) { setShadingId(id); }
 
     public void setShadingModel(ShadingModel model) { setShadingId(model.getId()); }
@@ -105,6 +149,15 @@ public class MaterialDef{
     /**
      * Selects a deferred shading model. The renderer must also recognize the
      * identifier and the material must provide a compatible G-buffer technique.
+     * Prefer declaring {@code ShadingId 7} (or {@code ShadingModelId 7}) inside
+     * the MaterialDef block of a .j3md asset. For programmatically constructed
+     * definitions, use {@code definition.setShadingId(7)} before rendering.
+     * IDs 1..3 select Lighting, PBRLighting and Unshaded; custom IDs 4..65535 need
+     * registration through RenderManager.registerDeferredShadingModel.
+     * Keep a default Forward technique as well as the GBuffer technique.
+     * A MaterialDef can be shared by several materials: changing its ID affects
+     * all of them, not just one material instance. This setter does not create
+     * shader techniques or convert their surface layout.
      * @param shadingId identifier in the unsigned 16-bit range; zero opts out
      */
     public void setShadingId(int shadingId) {

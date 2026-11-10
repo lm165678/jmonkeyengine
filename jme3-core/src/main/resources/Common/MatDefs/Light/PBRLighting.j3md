@@ -123,7 +123,7 @@ MaterialDef PBR Lighting {
     }
 
     Technique {
-        LightMode SinglePassAndImageBased
+        LightModel SinglePassAndImageBased
         
         VertexShader GLSL300 GLSL110 GLSL150:   Common/MatDefs/Light/PBRLighting.vert
         FragmentShader GLSL300 GLSL110 GLSL150: Common/MatDefs/Light/PBRLighting.frag
@@ -275,8 +275,16 @@ MaterialDef PBR Lighting {
     }
 
 
+    // Deferred path: this technique renders mesh geometry into the GBuffer.
+    // VS: Common/MatDefs/Light/PBRLighting.vert
+    // FS: Common/MatDefs/Light/PBRLighting.frag, compiled with DEFERRED_GBUFFER below.
+    // DeferredPipeline then uses Tiled/Fullscreen.vert + Tiled/Lighting.frag.
+    // The shared lighting FS reads shadingId 2 and evaluates PBR direct lighting; probe/IBL and emissive terms are evaluated in the surface pass.
+    // Built-in direct-light branches are in that shared FS; this material does not
+    // declare a separate DeferredLightingShader. Custom models use that declaration
+    // to contribute a deferredLighting(...) function to the shared lighting FS.
     Technique GBuffer {
-        LightMode DeferredSurface
+        LightModel DeferredSurface
 
         VertexShader GLSL330:   Common/MatDefs/Light/PBRLighting.vert
         FragmentShader GLSL330: Common/MatDefs/Light/PBRLighting.frag

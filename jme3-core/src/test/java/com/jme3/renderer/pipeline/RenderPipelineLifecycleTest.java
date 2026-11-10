@@ -15,22 +15,38 @@ public class RenderPipelineLifecycleTest {
     private static final class RecordingPipeline implements RenderPipeline {
         final List<String> events = new ArrayList<>();
         boolean initialized, failInitialization, failCleanup;
-        @Override public void initialize(RenderManager manager, ViewPort viewport) {
+        @Override
+        public void initialize(RenderManager manager, ViewPort viewport) {
             events.add("initialize");
             initialized = true;
-            if (failInitialization) throw new IllegalStateException("initialization");
+            if (failInitialization) {
+                throw new IllegalStateException("initialization");
+            }
         }
-        @Override public boolean isInitialized() { return initialized; }
-        @Override public void reshape(int width, int height) { events.add("resize " + width + "x" + height); }
-        @Override public void render(RenderQueue queue) { events.add("render"); }
-        @Override public void cleanup() {
+        @Override
+        public boolean isInitialized() {
+            return initialized;
+        }
+        @Override
+        public void reshape(int width, int height) {
+            events.add("resize " + width + "x" + height);
+        }
+        @Override
+        public void render(RenderQueue queue) {
+            events.add("render");
+        }
+        @Override
+        public void cleanup() {
             events.add("cleanup");
             initialized = false;
-            if (failCleanup) throw new IllegalStateException("cleanup");
+            if (failCleanup) {
+                throw new IllegalStateException("cleanup");
+            }
         }
     }
 
-    @Test public void installResizeReplaceAndRemoveAreOwnedByManager() {
+    @Test
+    public void installResizeReplaceAndRemoveAreOwnedByManager() {
         RenderManager manager = new RenderManager(new NullRenderer());
         ViewPort view = manager.createMainView("main", new Camera(64, 48));
         RecordingPipeline first = new RecordingPipeline();
@@ -43,7 +59,9 @@ public class RenderPipelineLifecycleTest {
         manager.renderViewPort(view, 0);
         RecordingPipeline second = new RecordingPipeline();
         manager.setPipeline(view, second);
-        assertEquals(Arrays.asList("initialize", "render", "render", "resize 81x63", "render", "cleanup"), first.events);
+        assertEquals(
+            Arrays.asList("initialize", "render", "render", "resize 81x63", "render", "cleanup"),
+            first.events);
         manager.renderViewPort(view, 0);
         manager.removeMainView("main");
         manager.cleanupRenderPaths();
@@ -51,27 +69,38 @@ public class RenderPipelineLifecycleTest {
         assertNull(manager.getPipeline(view));
     }
 
-    @Test public void instanceCannotBeSharedOrInstalledIntoForeignViewport() {
+    @Test
+    public void instanceCannotBeSharedOrInstalledIntoForeignViewport() {
         RenderManager manager = new RenderManager(new NullRenderer());
         ViewPort a = manager.createMainView("a", new Camera(64, 48));
         ViewPort b = manager.createMainView("b", new Camera(64, 48));
         RecordingPipeline pipeline = new RecordingPipeline();
         manager.setPipeline(a, pipeline);
-        try { manager.setPipeline(b, pipeline); fail(); } catch (IllegalArgumentException expected) { }
-        try { manager.setPipeline(new ViewPort("foreign", new Camera(1, 1)), null); fail(); }
-        catch (IllegalArgumentException expected) { }
+        try {
+            manager.setPipeline(b, pipeline);
+            fail();
+        } catch (IllegalArgumentException expected) {
+        }
+        try {
+            manager.setPipeline(new ViewPort("foreign", new Camera(1, 1)), null);
+            fail();
+        } catch (IllegalArgumentException expected) {
+        }
         assertSame(pipeline, manager.getPipeline(a));
         assertNull(manager.getPipeline(b));
     }
 
-    @Test public void failedInitializationCleansPartialResourcesAndPreservesCause() {
+    @Test
+    public void failedInitializationCleansPartialResourcesAndPreservesCause() {
         RenderManager manager = new RenderManager(new NullRenderer());
         ViewPort view = manager.createMainView("main", new Camera(64, 48));
         RecordingPipeline pipeline = new RecordingPipeline();
         pipeline.failInitialization = pipeline.failCleanup = true;
         manager.setPipeline(view, pipeline);
-        try { manager.renderViewPort(view, 0); fail(); }
-        catch (IllegalStateException error) {
+        try {
+            manager.renderViewPort(view, 0);
+            fail();
+        } catch (IllegalStateException error) {
             assertEquals("initialization", error.getMessage());
             assertEquals(1, error.getSuppressed().length);
         }
@@ -79,7 +108,8 @@ public class RenderPipelineLifecycleTest {
         assertEquals(Arrays.asList("initialize", "cleanup"), pipeline.events);
     }
 
-    @Test public void cleanupFailureDoesNotStrandOtherViewports() {
+    @Test
+    public void cleanupFailureDoesNotStrandOtherViewports() {
         RenderManager manager = new RenderManager(new NullRenderer());
         RecordingPipeline first = new RecordingPipeline(), second = new RecordingPipeline();
         first.failCleanup = true;
@@ -89,7 +119,11 @@ public class RenderPipelineLifecycleTest {
         manager.setPipeline(b, second);
         manager.renderViewPort(a, 0);
         manager.renderViewPort(b, 0);
-        try { manager.cleanupRenderPaths(); fail(); } catch (IllegalStateException expected) { }
+        try {
+            manager.cleanupRenderPaths();
+            fail();
+        } catch (IllegalStateException expected) {
+        }
         assertEquals(Arrays.asList("initialize", "render", "cleanup"), first.events);
         assertEquals(Arrays.asList("initialize", "render", "cleanup"), second.events);
         assertNull(manager.getPipeline(a));
@@ -98,7 +132,8 @@ public class RenderPipelineLifecycleTest {
         assertEquals(3, second.events.size());
     }
 
-    @Test public void secondManagerCannotBorrowOrDestroyAnInitializedInstance() {
+    @Test
+    public void secondManagerCannotBorrowOrDestroyAnInitializedInstance() {
         RenderManager first = new RenderManager(new NullRenderer());
         RenderManager second = new RenderManager(new NullRenderer());
         ViewPort a = first.createMainView("a", new Camera(64, 48));
@@ -107,7 +142,11 @@ public class RenderPipelineLifecycleTest {
         first.setPipeline(a, pipeline);
         second.setPipeline(b, pipeline);
         first.renderViewPort(a, 0);
-        try { second.renderViewPort(b, 0); fail(); } catch (IllegalStateException expected) { }
+        try {
+            second.renderViewPort(b, 0);
+            fail();
+        } catch (IllegalStateException expected) {
+        }
         second.cleanupRenderPaths();
         assertTrue(pipeline.isInitialized());
         assertEquals(Arrays.asList("initialize", "render"), pipeline.events);
@@ -116,7 +155,8 @@ public class RenderPipelineLifecycleTest {
         assertEquals(Arrays.asList("initialize", "render", "cleanup"), pipeline.events);
     }
 
-    @Test public void nullReplacementRestoresOrdinaryForwardWithoutReinitializing() {
+    @Test
+    public void nullReplacementRestoresOrdinaryForwardWithoutReinitializing() {
         RenderManager manager = new RenderManager(new NullRenderer());
         ViewPort view = manager.createMainView("main", new Camera(64, 48));
         RecordingPipeline pipeline = new RecordingPipeline();

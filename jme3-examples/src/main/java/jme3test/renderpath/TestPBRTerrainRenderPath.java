@@ -97,10 +97,30 @@ import com.jme3.texture.Texture.WrapMode;
  * </li>
  * </ol>
  *
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestPBRTerrainRenderPath. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author yaRnMcDonuts,johnKkk
+
  */
 public class TestPBRTerrainRenderPath extends RenderPathExample {
-
     private TerrainQuad terrain;
     private Material matTerrain;
     private boolean triPlanar = false;
@@ -150,9 +170,9 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
                 triPlanar = !triPlanar;
                 if (triPlanar) {
                     matTerrain.setBoolean("useTriPlanarMapping", true);
-                    // Tri-planar textures don't use the mesh's texture coordinates but real world coordinates,
-                    // so we need to convert these texture coordinate scales into real world scales so it looks
-                    // the same when we switch to/from tri-planar mode.
+                    // Tri-planar textures don't use the mesh's texture coordinates but real world
+                    // coordinates, so we need to convert these texture coordinate scales into real
+                    // world scales so it looks the same when we switch to/from tri-planar mode.
                     matTerrain.setFloat("AlbedoMap_0_scale", (dirtScale / terrainSize));
                     matTerrain.setFloat("AlbedoMap_1_scale", (darkRockScale / terrainSize));
                     matTerrain.setFloat("AlbedoMap_2_scale", (snowScale / terrainSize));
@@ -177,21 +197,22 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
                 // Ambient and directional light are faded smoothly in update loop below.
             }
             if (name.equals("delPointLight") && !pressed) {
-                if(currentPointLightNum > 0){
-                    for(int i = 0;i < 10;i++){
+                if (currentPointLightNum > 0) {
+                    for (int i = 0; i < 10; i++) {
                         pointLights[currentPointLightNum - i - 1].setEnabled(false);
                     }
-                    currentPointLightNum-=10;
-                    currentPointLightsText.setText("Current PointLights[" + currentPointLightNum + "],Press '1' addPointLight,Press '2' delPointLight");
+                    currentPointLightNum -= 10;
+                    currentPointLightsText.setText("Current PointLights[" + currentPointLightNum
+                        + "],Press '1' addPointLight,Press '2' delPointLight");
                 }
-            }
-            else if(name.equals("addPointLight") && !pressed){
-                if(currentPointLightNum < 1000){
-                    for(int i = 0;i < 10;i++){
+            } else if (name.equals("addPointLight") && !pressed) {
+                if (currentPointLightNum < 1000) {
+                    for (int i = 0; i < 10; i++) {
                         pointLights[currentPointLightNum + i].setEnabled(true);
                     }
-                    currentPointLightNum+=10;
-                    currentPointLightsText.setText("Current PointLights[" + currentPointLightNum + "],Press '1' addPointLight,Press '2' delPointLight");
+                    currentPointLightNum += 10;
+                    currentPointLightsText.setText("Current PointLights[" + currentPointLightNum
+                        + "],Press '1' addPointLight,Press '2' delPointLight");
                 }
             }
         }
@@ -200,7 +221,7 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
     @Override
     public void simpleInitApp() {
         // For this scene, use a tileSize=64 configuration (at 1600*900 resolution)
-        renderManager.setDeferredTileSize(64);// 1600 * 900 resolution config
+        renderManager.setDeferredTileSize(64); // 1600 * 900 resolution config
         setupKeys();
         setUpTerrain();
         setUpTerrainMaterial();
@@ -212,9 +233,9 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
             fpp.setNumSamples(numSamples);
         }
 
-//        fpp.addFilter(new FXAAFilter());
+        //        fpp.addFilter(new FXAAFilter());
         fpp.addFilter(new ToneMapFilter(Vector3f.UNIT_XYZ.mult(1.0f)));
-//        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
+        //        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
         viewPort.addProcessor(fpp);
     }
 
@@ -225,8 +246,10 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         matTerrain.setBoolean("useTriPlanarMapping", false);
 
         // ALPHA map (for splat textures)
-        matTerrain.setTexture("AlphaMap", assetManager.loadTexture("Textures/Terrain/splat/alpha1.png"));
-        matTerrain.setTexture("AlphaMap_1", assetManager.loadTexture("Textures/Terrain/splat/alpha2.png"));
+        matTerrain.setTexture(
+            "AlphaMap", assetManager.loadTexture("Textures/Terrain/splat/alpha1.png"));
+        matTerrain.setTexture(
+            "AlphaMap_1", assetManager.loadTexture("Textures/Terrain/splat/alpha2.png"));
         // this material also supports 'AlphaMap_2', so you can get up to 12 diffuse textures
 
         // DIRT texture, Diffuse textures 0 to 3 use the first AlphaMap
@@ -236,7 +259,7 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         matTerrain.setFloat("AlbedoMap_0_scale", dirtScale);
         matTerrain.setFloat("Roughness_0", 1);
         matTerrain.setFloat("Metallic_0", 0);
-        //matTerrain.setInt("AfflictionMode_0", 0);
+        // matTerrain.setInt("AfflictionMode_0", 0);
 
         // DARK ROCK texture
         Texture darkRock = assetManager.loadTexture("Textures/Terrain/PBR/Rock035_1K_Color.png");
@@ -245,7 +268,7 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         matTerrain.setFloat("AlbedoMap_1_scale", darkRockScale);
         matTerrain.setFloat("Roughness_1", 0.92f);
         matTerrain.setFloat("Metallic_1", 0.02f);
-        //matTerrain.setInt("AfflictionMode_1", 0);
+        // matTerrain.setInt("AfflictionMode_1", 0);
 
         // SNOW texture
         Texture snow = assetManager.loadTexture("Textures/Terrain/PBR/Snow006_1K_Color.png");
@@ -286,25 +309,32 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         matTerrain.setFloat("Roughness_6", 0.9f);
         matTerrain.setFloat("Metallic_6", 0.07f);
         // NORMAL MAPS
-        Texture normalMapDirt = assetManager.loadTexture("Textures/Terrain/PBR/Ground036_1K_Normal.png");
+        Texture normalMapDirt =
+            assetManager.loadTexture("Textures/Terrain/PBR/Ground036_1K_Normal.png");
         normalMapDirt.setWrap(WrapMode.Repeat);
 
-        Texture normalMapDarkRock = assetManager.loadTexture("Textures/Terrain/PBR/Rock035_1K_Normal.png");
+        Texture normalMapDarkRock =
+            assetManager.loadTexture("Textures/Terrain/PBR/Rock035_1K_Normal.png");
         normalMapDarkRock.setWrap(WrapMode.Repeat);
 
-        Texture normalMapSnow = assetManager.loadTexture("Textures/Terrain/PBR/Snow006_1K_Normal.png");
+        Texture normalMapSnow =
+            assetManager.loadTexture("Textures/Terrain/PBR/Snow006_1K_Normal.png");
         normalMapSnow.setWrap(WrapMode.Repeat);
 
-        Texture normalMapGravel = assetManager.loadTexture("Textures/Terrain/PBR/Gravel015_1K_Normal.png");
+        Texture normalMapGravel =
+            assetManager.loadTexture("Textures/Terrain/PBR/Gravel015_1K_Normal.png");
         normalMapGravel.setWrap(WrapMode.Repeat);
 
-        Texture normalMapGrass = assetManager.loadTexture("Textures/Terrain/PBR/Ground037_1K_Normal.png");
+        Texture normalMapGrass =
+            assetManager.loadTexture("Textures/Terrain/PBR/Ground037_1K_Normal.png");
         normalMapGrass.setWrap(WrapMode.Repeat);
 
-//        Texture normalMapMarble = assetManager.loadTexture("Textures/Terrain/PBR/Marble013_1K_Normal.png");
-//        normalMapMarble.setWrap(WrapMode.Repeat);
+        //        Texture normalMapMarble =
+        //        assetManager.loadTexture("Textures/Terrain/PBR/Marble013_1K_Normal.png");
+        //        normalMapMarble.setWrap(WrapMode.Repeat);
 
-        Texture normalMapTiles = assetManager.loadTexture("Textures/Terrain/PBR/Tiles083_1K_Normal.png");
+        Texture normalMapTiles =
+            assetManager.loadTexture("Textures/Terrain/PBR/Tiles083_1K_Normal.png");
         normalMapTiles.setWrap(WrapMode.Repeat);
 
         matTerrain.setTexture("NormalMap_0", normalMapDirt);
@@ -312,7 +342,8 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         matTerrain.setTexture("NormalMap_2", normalMapSnow);
         matTerrain.setTexture("NormalMap_3", normalMapTiles);
         matTerrain.setTexture("NormalMap_4", normalMapGrass);
-//        matTerrain.setTexture("NormalMap_5", normalMapMarble);  // Adding this texture would exceed the 16 texture limit.
+        //        matTerrain.setTexture("NormalMap_5", normalMapMarble);  // Adding this texture
+        //        would exceed the 16 texture limit.
         matTerrain.setTexture("NormalMap_6", normalMapGravel);
 
         terrain.setMaterial(matTerrain);
@@ -333,13 +364,16 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         inputManager.addListener(actionListener, "delPointLight");
 
         keybindingsText = new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));
-        keybindingsText.setText("Press 'N' to toggle day/night fade (takes a moment) \nPress 'P' to toggle tri-planar mode");
+        keybindingsText.setText(
+            "Press 'N' to toggle day/night fade (takes a moment) \nPress 'P' to toggle tri-planar mode");
 
         getGuiNode().attachChild(keybindingsText);
         keybindingsText.move(new Vector3f(200, 120, 0));
 
-        currentPointLightsText = new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));
-        currentPointLightsText.setText("Current PointLights[" + currentPointLightNum + "],Press '1' addPointLight,Press '2' delPointLight");
+        currentPointLightsText =
+            new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));
+        currentPointLightsText.setText("Current PointLights[" + currentPointLightNum
+            + "],Press '1' addPointLight,Press '2' delPointLight");
         getGuiNode().attachChild(currentPointLightsText);
         currentPointLightsText.move(new Vector3f(200, 200, 0));
     }
@@ -348,7 +382,7 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
     public void simpleUpdate(float tpf) {
         super.simpleUpdate(tpf);
 
-        //smoothly transition from day to night
+        // smoothly transition from day to night
         float currentLightIntensity = ambientLight.getColor().getRed();
         float incrementPerFrame = tpf * 0.3f;
 
@@ -359,8 +393,10 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
                     currentLightIntensity = nightLightIntensity;
                 }
 
-                ambientLight.getColor().set(currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
-                directionalLight.getColor().set(currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
+                ambientLight.getColor().set(
+                    currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
+                directionalLight.getColor().set(
+                    currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
             }
         } else {
             if (ambientLight.getColor().getRed() < dayLightIntensity) {
@@ -369,8 +405,10 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
                     currentLightIntensity = dayLightIntensity;
                 }
 
-                ambientLight.getColor().set(currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
-                directionalLight.getColor().set(currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
+                ambientLight.getColor().set(
+                    currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
+                directionalLight.getColor().set(
+                    currentLightIntensity, currentLightIntensity, currentLightIntensity, 1.0f);
             }
         }
     }
@@ -391,10 +429,13 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
             e.printStackTrace();
         }
 
-        terrain = new TerrainQuad("terrain", patchSize + 1, terrainSize + 1, heightmap.getHeightMap());
-//, new LodPerspectiveCalculatorFactory(getCamera(), 4)); // add this in to see it use entropy for LOD calculations
+        terrain =
+            new TerrainQuad("terrain", patchSize + 1, terrainSize + 1, heightmap.getHeightMap());
+        //, new LodPerspectiveCalculatorFactory(getCamera(), 4)); // add this in to see it use
+        // entropy for LOD calculations
         TerrainLodControl control = new TerrainLodControl(terrain, getCamera());
-        control.setLodCalculator(new DistanceLodCalculator(patchSize + 1, 2.7f)); // patch size, and a multiplier
+        control.setLodCalculator(
+            new DistanceLodCalculator(patchSize + 1, 2.7f)); // patch size, and a multiplier
         terrain.addControl(control);
         terrain.setMaterial(matTerrain);
         terrain.setLocalTranslation(0, -100, 0);
@@ -403,7 +444,8 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
     }
 
     private void setUpLights() {
-        LightProbe probe = (LightProbe) assetManager.loadAsset("Scenes/LightProbes/quarry_Probe.j3o");
+        LightProbe probe =
+            (LightProbe) assetManager.loadAsset("Scenes/LightProbes/quarry_Probe.j3o");
 
         probe.setAreaType(LightProbe.AreaType.Spherical);
         probe.getArea().setRadius(2000);
@@ -419,42 +461,45 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         directionalLight.setColor(ColorRGBA.White);
         rootNode.addLight(ambientLight);
 
-
         // pointLights
         currentPointLightNum = 1000;
-        ColorRGBA colors[] = new ColorRGBA[]{
-                ColorRGBA.White,
-                ColorRGBA.Red,
-                ColorRGBA.Blue,
-                ColorRGBA.Green,
-                ColorRGBA.Yellow,
-                ColorRGBA.Orange,
-                ColorRGBA.Brown,
+        ColorRGBA colors[] = new ColorRGBA[] {
+            ColorRGBA.White,
+            ColorRGBA.Red,
+            ColorRGBA.Blue,
+            ColorRGBA.Green,
+            ColorRGBA.Yellow,
+            ColorRGBA.Orange,
+            ColorRGBA.Brown,
         };
         pointLights = new PointLight[currentPointLightNum];
-//        InstancedNode debugSpheres = new InstancedNode("debugSpheres");
-//        Sphere sphereMesh = new Sphere(16, 16, 1);
-//        Geometry sphere = new Geometry("Sphere");
-//        sphere.setMesh(sphereMesh);
-//        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-//        mat.getAdditionalRenderState().setWireframe(true);
-//        mat.setColor("Color", ColorRGBA.Green);
-//        mat.setBoolean("UseInstancing", true);
-//        sphere.setMaterial(mat);
+        //        InstancedNode debugSpheres = new InstancedNode("debugSpheres");
+        //        Sphere sphereMesh = new Sphere(16, 16, 1);
+        //        Geometry sphere = new Geometry("Sphere");
+        //        sphere.setMesh(sphereMesh);
+        //        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        //        mat.getAdditionalRenderState().setWireframe(true);
+        //        mat.setColor("Color", ColorRGBA.Green);
+        //        mat.setBoolean("UseInstancing", true);
+        //        sphere.setMaterial(mat);
         float xHalf = 200, yHalf = 100, zHalf = 200;
-        for(int i = 0;i < currentPointLightNum;i++){
+        for (int i = 0; i < currentPointLightNum; i++) {
             pointLights[i] = new PointLight();
             pointLights[i].setColor(colors[FastMath.nextRandomInt(0, colors.length - 1)]);
             pointLights[i].setRadius(RenderPathHelper.randomFloat(10.0f, 20.0f));
-            pointLights[i].setPosition(new Vector3f(RenderPathHelper.randomFloat(-xHalf, xHalf), RenderPathHelper.randomFloat(-yHalf, -60.0f), RenderPathHelper.randomFloat(-zHalf, zHalf)));
+            pointLights[i].setPosition(new Vector3f(RenderPathHelper.randomFloat(-xHalf, xHalf),
+                RenderPathHelper.randomFloat(-yHalf, -60.0f),
+                RenderPathHelper.randomFloat(-zHalf, zHalf)));
             rootNode.addLight(pointLights[i]);
-//            Geometry sp = sphere.clone(false);
-//            sp.setLocalTranslation(new Vector3f(RenderPathHelper.randomFloat(-xHalf, xHalf), RenderPathHelper.randomFloat(-yHalf, -60.0f), RenderPathHelper.randomFloat(-zHalf, zHalf)));
-//            sp.setLocalScale(RenderPathHelper.randomFloat(10.0f, 20.0f));
-//            debugSpheres.attachChild(sp);
+            //            Geometry sp = sphere.clone(false);
+            //            sp.setLocalTranslation(new Vector3f(RenderPathHelper.randomFloat(-xHalf,
+            //            xHalf), RenderPathHelper.randomFloat(-yHalf, -60.0f),
+            //            RenderPathHelper.randomFloat(-zHalf, zHalf)));
+            //            sp.setLocalScale(RenderPathHelper.randomFloat(10.0f, 20.0f));
+            //            debugSpheres.attachChild(sp);
         }
-//        debugSpheres.instance();
-//        rootNode.attachChild(debugSpheres);
+        //        debugSpheres.instance();
+        //        rootNode.attachChild(debugSpheres);
     }
 
     private void setUpCamera() {

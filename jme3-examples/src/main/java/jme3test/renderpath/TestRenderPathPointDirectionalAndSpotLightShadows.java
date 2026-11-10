@@ -53,26 +53,51 @@ import jme3test.light.ShadowTestUIManager;
 
 /**
  * This example shows all shadow types, check rendering performance under different rendering paths
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestRenderPathPointDirectionalAndSpotLightShadows. Checks CPU/GPU pixels and
+ Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author JohnKkk
+
  */
 public class TestRenderPathPointDirectionalAndSpotLightShadows extends RenderPathExample {
     public static final int SHADOWMAP_SIZE = 512;
 
     public static void main(String[] args) {
-        TestRenderPathPointDirectionalAndSpotLightShadows app = new TestRenderPathPointDirectionalAndSpotLightShadows();
+        TestRenderPathPointDirectionalAndSpotLightShadows app =
+            new TestRenderPathPointDirectionalAndSpotLightShadows();
         app.start();
     }
     private Node lightNode;
     private SpotLight spotLight;
-    
+
     @Override
     public void simpleInitApp() {
-        // Note that for this j3o Cube model, the value of vLightDir passed from vs to ps in MultPass LightModel is different from using SinglePass. See the lightComputeDir() function, there will be some differences when this function calculates in world space and view space. It's an existing bug in JME, so here we set it to use SinglePass instead.
+        // Note that for this j3o Cube model, the value of vLightDir passed from vs to ps in
+        // MultPass LightModel is different from using SinglePass. See the lightComputeDir()
+        // function, there will be some differences when this function calculates in world space and
+        // view space. It's an existing bug in JME, so here we set it to use SinglePass instead.
         renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
         flyCam.setMoveSpeed(10);
         cam.setLocation(new Vector3f(0.040581334f, 1.7745866f, 6.155161f));
         cam.setRotation(new Quaternion(4.3868728E-5f, 0.9999293f, -0.011230096f, 0.0039059948f));
-
 
         Node scene = (Node) assetManager.loadModel("Models/Test/CornellBox.j3o");
         scene.setShadowMode(RenderQueue.ShadowMode.CastAndReceive);
@@ -80,15 +105,14 @@ public class TestRenderPathPointDirectionalAndSpotLightShadows extends RenderPat
         rootNode.getChild("Cube").setShadowMode(RenderQueue.ShadowMode.Receive);
         lightNode = (Node) rootNode.getChild("Lamp");
         Geometry lightMdl = new Geometry("Light", new Sphere(10, 10, 0.1f));
-        //Geometry  lightMdl = new Geometry("Light", new Box(.1f,.1f,.1f));
+        // Geometry  lightMdl = new Geometry("Light", new Box(.1f,.1f,.1f));
         lightMdl.setMaterial(assetManager.loadMaterial("Common/Materials/RedColor.j3m"));
         lightMdl.setShadowMode(RenderQueue.ShadowMode.Off);
         lightNode.attachChild(lightMdl);
-        //lightMdl.setLocalTranslation(lightNode.getLocalTranslation());
-
+        // lightMdl.setLocalTranslation(lightNode.getLocalTranslation());
 
         Geometry box = new Geometry("box", new Box(0.2f, 0.2f, 0.2f));
-        //Geometry  lightMdl = new Geometry("Light", new Box(.1f,.1f,.1f));
+        // Geometry  lightMdl = new Geometry("Light", new Box(.1f,.1f,.1f));
         box.setMaterial(assetManager.loadMaterial("Common/Materials/RedColor.j3m"));
         box.setShadowMode(RenderQueue.ShadowMode.CastAndReceive);
         rootNode.attachChild(box);
@@ -96,26 +120,25 @@ public class TestRenderPathPointDirectionalAndSpotLightShadows extends RenderPat
 
         scene.getLocalLightList().get(0).setColor(ColorRGBA.Red);
 
-        PointLightShadowFilter plsf
-                = new PointLightShadowFilter(assetManager, SHADOWMAP_SIZE);
-        plsf.setLight((PointLight) scene.getLocalLightList().get(0));     
+        PointLightShadowFilter plsf = new PointLightShadowFilter(assetManager, SHADOWMAP_SIZE);
+        plsf.setLight((PointLight) scene.getLocalLightList().get(0));
         plsf.setEdgeFilteringMode(EdgeFilteringMode.PCF4);
 
-        //DIRECTIONAL LIGHT
+        // DIRECTIONAL LIGHT
         DirectionalLight directionalLight = new DirectionalLight();
         rootNode.addLight(directionalLight);
         directionalLight.setColor(ColorRGBA.Blue);
         directionalLight.setDirection(new Vector3f(-1f, -.2f, 0f));
 
-        DirectionalLightShadowFilter dlsf
-                = new DirectionalLightShadowFilter(assetManager, SHADOWMAP_SIZE*2, 4);
+        DirectionalLightShadowFilter dlsf =
+            new DirectionalLightShadowFilter(assetManager, SHADOWMAP_SIZE * 2, 4);
         dlsf.setEdgeFilteringMode(EdgeFilteringMode.PCF4);
-        dlsf.setLight(directionalLight);        
+        dlsf.setLight(directionalLight);
 
-        //SPOT LIGHT
+        // SPOT LIGHT
         spotLight = new SpotLight();
-        spotLight.setDirection(new Vector3f(1f,-1f,0f));
-        spotLight.setPosition(new Vector3f(-1f,3f,0f));
+        spotLight.setDirection(new Vector3f(1f, -1f, 0f));
+        spotLight.setPosition(new Vector3f(-1f, 3f, 0f));
         spotLight.setSpotOuterAngle(0.5f);
         spotLight.setColor(ColorRGBA.Green);
         Sphere sphere = new Sphere(8, 8, .1f);
@@ -125,8 +148,7 @@ public class TestRenderPathPointDirectionalAndSpotLightShadows extends RenderPat
         rootNode.attachChild(sphereGeometry);
         rootNode.addLight(spotLight);
 
-        SpotLightShadowFilter slsf
-                = new SpotLightShadowFilter(assetManager, SHADOWMAP_SIZE);
+        SpotLightShadowFilter slsf = new SpotLightShadowFilter(assetManager, SHADOWMAP_SIZE);
         slsf.setLight(spotLight);
         slsf.setEdgeFilteringMode(EdgeFilteringMode.PCF4);
 
@@ -143,7 +165,9 @@ public class TestRenderPathPointDirectionalAndSpotLightShadows extends RenderPat
     @Override
     public void simpleUpdate(float tpf) {
         timeElapsed += tpf;
-       lightNode.setLocalTranslation(FastMath.cos(timeElapsed), lightNode.getLocalTranslation().y, FastMath.sin(timeElapsed));
-       spotLight.setDirection(new Vector3f(FastMath.cos(-timeElapsed*.7f), -1.0f, FastMath.sin(-timeElapsed*.7f)));
+        lightNode.setLocalTranslation(FastMath.cos(timeElapsed), lightNode.getLocalTranslation().y,
+            FastMath.sin(timeElapsed));
+        spotLight.setDirection(new Vector3f(
+            FastMath.cos(-timeElapsed * .7f), -1.0f, FastMath.sin(-timeElapsed * .7f)));
     }
 }

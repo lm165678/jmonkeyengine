@@ -79,7 +79,13 @@ public class RenderManager {
     private int deferredTileSize = 16;
     private final ViewportPipelines pipelines = new ViewportPipelines(this);
 
-    /** Sets the tile width and height in pixels for managed CPU and GPU paths. */
+    /**
+     * Sets the tile width and height in pixels for managed CPU and GPU paths.
+     * Example: {@code renderManager.setDeferredTileSize(16)} before selecting
+     * {@code RenderPath.TiledDeferredGPU}. For a directly installed
+     * DeferredPipeline, use its {@code setTileSize(16)} instead. Render-thread only.
+     * @param size tile dimension, from 1 through 256 inclusive
+     */
     public void setDeferredTileSize(int size) {
         if (size < 1 || size > 256) {
             throw new IllegalArgumentException("Tile size must be 1..256");
@@ -91,7 +97,19 @@ public class RenderManager {
         return deferredTileSize;
     }
 
-    /** Changes the default strategy at the next viewport render. Render-thread only. */
+    /**
+     * Changes the default strategy at the next viewport render. Render-thread only.
+     * <pre>{@code
+     * renderManager.setDeferredTileSize(16);
+     * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
+     * // Later, return to the original renderer:
+     * renderManager.setRenderPath(RenderPath.Forward);
+     * }</pre>
+     * Applies to viewports using Inherit without an explicitly installed pipeline
+     * or TiledDeferredProcessor. To remove a direct pipeline override, first call
+     * {@code renderManager.setPipeline(viewPort, null)}.
+     * @param path concrete default path; neither null nor Inherit
+     */
     public void setRenderPath(RenderPath path) {
         if (path == null || path == RenderPath.Inherit) {
             throw new IllegalArgumentException("A concrete default path is required");
@@ -123,6 +141,19 @@ public class RenderManager {
      * RenderPath selection. Use one instance per viewport. Render-thread only.
      * A replacement takes precedence over RenderPath; remove an explicit
      * TiledDeferredProcessor before installing one.
+     * <pre>{@code
+     * DeferredPipeline pipeline = new DeferredPipeline(
+     *         assetManager, renderManager.getDeferredShadingModels());
+     * pipeline.setLightCullingMode(LightCullingMode.GPU);
+     * renderManager.setPipeline(viewPort, pipeline);
+     * // Restore the manager/viewport RenderPath settings:
+     * renderManager.setPipeline(viewPort, null);
+     * }</pre>
+     * Import DeferredPipeline and LightCullingMode from
+     * {@code com.jme3.renderer.deferred}. Removing the override does not change
+     * those RenderPath settings; it does not necessarily select Forward.
+     * @param viewport viewport owned by this manager
+     * @param pipeline replacement instance, or null to restore path selection
      */
     public void setPipeline(ViewPort viewport, RenderPipeline pipeline) {
         pipelines.set(viewport, pipeline);

@@ -31,13 +31,25 @@
  */
 package com.jme3.renderer;
 
-/** Viewport rendering strategy. Inherit is only valid as a viewport override. */
+/**
+ * Requested viewport rendering strategy, not a report of the active backend.
+ * Use {@code renderManager.setRenderPath(RenderPath.TiledDeferredGPU)} for the
+ * default or {@code viewPort.setRenderPath(RenderPath.Forward)} for one viewport.
+ * Explicitly installed pipelines take precedence over these settings.
+ * Inherit is only valid as a viewport override.
+ */
 public enum RenderPath {
+    /** Follow the manager default; only valid on ViewPort. */
     Inherit("Inherit"),
+    /** Original renderer; the RenderManager default. */
     Forward("Forward"),
+    /** Deferred opaque lighting without tiled light lists. */
     Deferred("Deferred"),
+    /** Build tiled light lists on the CPU; deferred rendering requires OpenGL 3.3. */
     TiledDeferredCPU("Tiled deferred (CPU)"),
+    /** Request compute/SSBO culling (OpenGL 4.3), with CPU fallback. */
     TiledDeferredGPU("Tiled deferred (GPU)"),
+    /** Prefer GPU tiled culling, otherwise CPU; unsupported viewports use Forward. */
     Auto("Tiled deferred (auto)");
 
     private final String description;

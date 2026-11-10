@@ -61,10 +61,30 @@ import com.jme3.util.SkyFactory;
 /**
  * Uses the terrain's lighting texture with normal maps and lights.
  *
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TerrainTestAdvancedRenderPath. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author bowens,johnKkk
+
  */
 public class TerrainTestAdvancedRenderPath extends RenderPathExample {
-
     private TerrainQuad terrain;
     private Material matTerrain;
     private Material matWire;
@@ -77,7 +97,6 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
     private float grassScale = 32;
     private float brickScale = 128;
     private float roadScale = 200;
-    
 
     public static void main(String[] args) {
         TerrainTestAdvancedRenderPath app = new TerrainTestAdvancedRenderPath();
@@ -103,38 +122,40 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         matTerrain.setFloat("Shininess", 0.0f);
 
         // ALPHA map (for splat textures)
-        matTerrain.setTexture("AlphaMap", assetManager.loadTexture("Textures/Terrain/splat/alpha1.png"));
-        matTerrain.setTexture("AlphaMap_1", assetManager.loadTexture("Textures/Terrain/splat/alpha2.png"));
+        matTerrain.setTexture(
+            "AlphaMap", assetManager.loadTexture("Textures/Terrain/splat/alpha1.png"));
+        matTerrain.setTexture(
+            "AlphaMap_1", assetManager.loadTexture("Textures/Terrain/splat/alpha2.png"));
         // this material also supports 'AlphaMap_2', so you can get up to 12 diffuse textures
-        
+
         // HEIGHTMAP image (for the terrain heightmap)
         TextureKey hmKey = new TextureKey("Textures/Terrain/splat/mountains512.png", false);
         Texture heightMapImage = assetManager.loadTexture(hmKey);
-        
+
         // DIRT texture, Diffuse textures 0 to 3 use the first AlphaMap
         Texture dirt = assetManager.loadTexture("Textures/Terrain/splat/dirt.jpg");
         dirt.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap", dirt);
         matTerrain.setFloat("DiffuseMap_0_scale", dirtScale);
-        
+
         // DARK ROCK texture
         Texture darkRock = assetManager.loadTexture("Textures/Terrain/Rock2/rock.jpg");
         darkRock.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap_1", darkRock);
         matTerrain.setFloat("DiffuseMap_1_scale", darkRockScale);
-        
+
         // PINK ROCK texture
         Texture pinkRock = assetManager.loadTexture("Textures/Terrain/Rock/Rock.PNG");
         pinkRock.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap_2", pinkRock);
         matTerrain.setFloat("DiffuseMap_2_scale", pinkRockScale);
-        
+
         // RIVER ROCK texture, this texture will use the next alphaMap: AlphaMap_1
         Texture riverRock = assetManager.loadTexture("Textures/Terrain/Pond/Pond.jpg");
         riverRock.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap_3", riverRock);
         matTerrain.setFloat("DiffuseMap_3_scale", riverRockScale);
-        
+
         // GRASS texture
         Texture grass = assetManager.loadTexture("Textures/Terrain/splat/grass.jpg");
         grass.setWrap(WrapMode.Repeat);
@@ -146,25 +167,25 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         brick.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap_5", brick);
         matTerrain.setFloat("DiffuseMap_5_scale", brickScale);
-        
+
         // ROAD texture
         Texture road = assetManager.loadTexture("Textures/Terrain/splat/road.jpg");
         road.setWrap(WrapMode.Repeat);
         matTerrain.setTexture("DiffuseMap_6", road);
         matTerrain.setFloat("DiffuseMap_6_scale", roadScale);
 
-        
         // diffuse textures 0 to 3 use AlphaMap
         // diffuse textures 4 to 7 use AlphaMap_1
         // diffuse textures 8 to 11 use AlphaMap_2
 
-        
         // NORMAL MAPS
         Texture normalMapDirt = assetManager.loadTexture("Textures/Terrain/splat/dirt_normal.png");
         normalMapDirt.setWrap(WrapMode.Repeat);
-        Texture normalMapPinkRock = assetManager.loadTexture("Textures/Terrain/Rock/Rock_normal.png");
+        Texture normalMapPinkRock =
+            assetManager.loadTexture("Textures/Terrain/Rock/Rock_normal.png");
         normalMapPinkRock.setWrap(WrapMode.Repeat);
-        Texture normalMapGrass = assetManager.loadTexture("Textures/Terrain/splat/grass_normal.jpg");
+        Texture normalMapGrass =
+            assetManager.loadTexture("Textures/Terrain/splat/grass_normal.jpg");
         normalMapGrass.setWrap(WrapMode.Repeat);
         Texture normalMapRoad = assetManager.loadTexture("Textures/Terrain/splat/road_normal.png");
         normalMapRoad.setWrap(WrapMode.Repeat);
@@ -174,12 +195,11 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         matTerrain.setTexture("NormalMap_4", normalMapGrass);
         matTerrain.setTexture("NormalMap_6", normalMapRoad);
 
-        
         // WIREFRAME material (used to debug the terrain, only useful for this test case)
         matWire = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         matWire.getAdditionalRenderState().setWireframe(true);
         matWire.setColor("Color", ColorRGBA.Green);
-        
+
         createSky();
 
         // CREATE HEIGHTMAP
@@ -202,9 +222,12 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
          * The total size is up to you. At 1025, it ran fine for me (200+FPS), however at
          * size=2049 it got really slow. But that is a jump from 2 million to 8 million triangles...
          */
-        terrain = new TerrainQuad("terrain", 65, 513, heightmap.getHeightMap());//, new LodPerspectiveCalculatorFactory(getCamera(), 4)); // add this in to see it use entropy for LOD calculations
+        terrain = new TerrainQuad("terrain", 65, 513,
+            heightmap.getHeightMap()); //, new LodPerspectiveCalculatorFactory(getCamera(), 4)); //
+        // add this in to see it use entropy for LOD calculations
         TerrainLodControl control = new TerrainLodControl(terrain, getCamera());
-        control.setLodCalculator( new DistanceLodCalculator(65, 2.7f) ); // patch size, and a multiplier
+        control.setLodCalculator(
+            new DistanceLodCalculator(65, 2.7f)); // patch size, and a multiplier
         terrain.addControl(control);
         terrain.setMaterial(matTerrain);
         terrain.setModelBound(new BoundingBox());
@@ -212,9 +235,9 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         terrain.setLocalTranslation(0, -100, 0);
         terrain.setLocalScale(1f, 1f, 1f);
         rootNode.attachChild(terrain);
-        
-        //Material debugMat = assetManager.loadMaterial("Common/Materials/VertexColor.j3m");
-        //terrain.generateDebugTangents(debugMat);
+
+        // Material debugMat = assetManager.loadMaterial("Common/Materials/VertexColor.j3m");
+        // terrain.generateDebugTangents(debugMat);
 
         DirectionalLight light = new DirectionalLight();
         light.setDirection((new Vector3f(-0.1f, -0.1f, -0.1f)).normalize());
@@ -223,7 +246,7 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         cam.setLocation(new Vector3f(0, 10, -10));
         cam.lookAtDirection(new Vector3f(0, -1.5f, -1).normalizeLocal(), Vector3f.UNIT_Y);
         flyCam.setMoveSpeed(400);
-        
+
         rootNode.attachChild(createAxisMarker(20));
 
         new RenderPathHelper(this, new Vector3f(0, cam.getHeight() / 2, 0), KeyInput.KEY_K, "K");
@@ -250,7 +273,6 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         inputManager.addListener(actionListener, "DetachControl");
     }
     final private ActionListener actionListener = new ActionListener() {
-
         @Override
         public void onAction(String name, boolean pressed, float tpf) {
             if (name.equals("wireframe") && !pressed) {
@@ -264,9 +286,10 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
                 triPlanar = !triPlanar;
                 if (triPlanar) {
                     matTerrain.setBoolean("useTriPlanarMapping", true);
-                    // Planar textures don't use the mesh's texture coordinates but real-world coordinates,
-                    // so we need to convert these texture coordinate scales into real-world scales, so it looks
-                    // the same when we switch to/from tri-planar mode. (1024 is the alphamap size.)
+                    // Planar textures don't use the mesh's texture coordinates but real-world
+                    // coordinates, so we need to convert these texture coordinate scales into
+                    // real-world scales, so it looks the same when we switch to/from tri-planar
+                    // mode. (1024 is the alphamap size.)
                     matTerrain.setFloat("DiffuseMap_0_scale", 1f / (1024f / dirtScale));
                     matTerrain.setFloat("DiffuseMap_1_scale", 1f / (1024f / darkRockScale));
                     matTerrain.setFloat("DiffuseMap_2_scale", 1f / (1024f / pinkRockScale));
@@ -276,7 +299,7 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
                     matTerrain.setFloat("DiffuseMap_6_scale", 1f / (1024f / roadScale));
                 } else {
                     matTerrain.setBoolean("useTriPlanarMapping", false);
-                    
+
                     matTerrain.setFloat("DiffuseMap_0_scale", dirtScale);
                     matTerrain.setFloat("DiffuseMap_1_scale", darkRockScale);
                     matTerrain.setFloat("DiffuseMap_2_scale", pinkRockScale);
@@ -284,19 +307,16 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
                     matTerrain.setFloat("DiffuseMap_4_scale", grassScale);
                     matTerrain.setFloat("DiffuseMap_5_scale", brickScale);
                     matTerrain.setFloat("DiffuseMap_6_scale", roadScale);
-                    
-                    
-                    
                 }
-            } if (name.equals("DetachControl") && !pressed) {
+            }
+            if (name.equals("DetachControl") && !pressed) {
                 TerrainLodControl control = terrain.getControl(TerrainLodControl.class);
-                if (control != null)
+                if (control != null) {
                     control.detachAndCleanUpControl();
-                else {
+                } else {
                     control = new TerrainLodControl(terrain, cam);
                     terrain.addControl(control);
                 }
-                    
             }
         }
     };
@@ -312,17 +332,16 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         Spatial sky = SkyFactory.createSky(assetManager, west, east, north, south, up, down);
         rootNode.attachChild(sky);
     }
-    
-    protected Node createAxisMarker(float arrowSize) {
 
+    protected Node createAxisMarker(float arrowSize) {
         Material redMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         redMat.getAdditionalRenderState().setWireframe(true);
         redMat.setColor("Color", ColorRGBA.Red);
-        
+
         Material greenMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         greenMat.getAdditionalRenderState().setWireframe(true);
         greenMat.setColor("Color", ColorRGBA.Green);
-        
+
         Material blueMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         blueMat.getAdditionalRenderState().setWireframe(true);
         blueMat.setColor("Color", ColorRGBA.Blue);
@@ -340,7 +359,7 @@ public class TerrainTestAdvancedRenderPath extends RenderPathExample {
         axis.attachChild(arrowY);
         axis.attachChild(arrowZ);
 
-        //axis.setModelBound(new BoundingBox());
+        // axis.setModelBound(new BoundingBox());
         return axis;
     }
 }

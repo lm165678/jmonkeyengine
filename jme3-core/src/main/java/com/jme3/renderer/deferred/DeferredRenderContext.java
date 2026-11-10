@@ -58,14 +58,16 @@ final class DeferredRenderContext {
     LightCullingMode cullingMode;
 
     DeferredRenderContext(RenderManager manager, ViewPort viewport, DeferredResources resources,
-                          ShadingModelRegistry models) {
+        ShadingModelRegistry models) {
         this.manager = manager;
         this.viewport = viewport;
         this.renderer = manager.getRenderer();
         this.resources = resources;
         this.models = models;
     }
-    Camera camera() { return viewport.getCamera(); }
+    Camera camera() {
+        return viewport.getCamera();
+    }
     static void uniform(Shader shader, String name, VarType type, Object value) {
         shader.getUniform(name).setValue(type, value);
     }

@@ -37,11 +37,70 @@ import java.util.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class TileLightGridTest {
- private Camera camera(){Camera c=new Camera(65,49);c.setFrustumPerspective(60,65f/49,.1f,100);c.lookAtDirection(new Vector3f(0,0,-1),Vector3f.UNIT_Y);c.update();return c;}
- @Test public void directionalCoversPartialEdgeTiles(){TileLightGrid g=new TileLightGrid(16);g.build(camera(),Arrays.asList(new DirectionalLight()));assertEquals(5,g.getColumns());assertEquals(4,g.getRows());assertEquals(1,g.getLightCount(4,3));}
- @Test public void behindCameraIsRejected(){PointLight p=new PointLight();p.setPosition(new Vector3f(0,0,10));p.setRadius(1);TileLightGrid g=new TileLightGrid(16);g.build(camera(),Arrays.asList(p));assertEquals(0,g.getLightCount(2,1));}
- @Test public void nearPlaneIntersectionIsConservative(){PointLight p=new PointLight();p.setPosition(new Vector3f(0,0,-.1f));p.setRadius(1);TileLightGrid g=new TileLightGrid(16);g.build(camera(),Arrays.asList(p));assertEquals(1,g.getLightCount(4,3));}
- @Test public void overflowNeverDropsLightsAndRebuildClears(){List<Light> lights=new ArrayList<>();for(int i=0;i<513;i++)lights.add(new DirectionalLight());TileLightGrid g=new TileLightGrid(16);g.build(camera(),lights);assertEquals(513,g.getLightCount(0,0));assertEquals(512,g.getLightIndex(0,0,512));g.build(camera(),Collections.<Light>emptyList());assertEquals(0,g.getLightCount(0,0));}
- @Test public void smallPointDoesNotCoverEntireScreen(){PointLight p=new PointLight();p.setPosition(new Vector3f(0,0,-10));p.setRadius(.1f);TileLightGrid g=new TileLightGrid(16);g.build(camera(),Arrays.asList(p));assertEquals(0,g.getLightCount(0,0));assertEquals(1,g.getLightCount(2,1));}
- @Test public void unlimitedAndDisabledLights(){PointLight p=new PointLight();p.setRadius(0);DirectionalLight d=new DirectionalLight();d.setEnabled(false);TileLightGrid g=new TileLightGrid(16);g.build(camera(),Arrays.asList(p,d));assertEquals(1,g.getLightCount(4,3));}
+    private Camera camera() {
+        Camera c = new Camera(65, 49);
+        c.setFrustumPerspective(60, 65f / 49, .1f, 100);
+        c.lookAtDirection(new Vector3f(0, 0, -1), Vector3f.UNIT_Y);
+        c.update();
+        return c;
+    }
+    @Test
+    public void directionalCoversPartialEdgeTiles() {
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), Arrays.asList(new DirectionalLight()));
+        assertEquals(5, g.getColumns());
+        assertEquals(4, g.getRows());
+        assertEquals(1, g.getLightCount(4, 3));
+    }
+    @Test
+    public void behindCameraIsRejected() {
+        PointLight p = new PointLight();
+        p.setPosition(new Vector3f(0, 0, 10));
+        p.setRadius(1);
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), Arrays.asList(p));
+        assertEquals(0, g.getLightCount(2, 1));
+    }
+    @Test
+    public void nearPlaneIntersectionIsConservative() {
+        PointLight p = new PointLight();
+        p.setPosition(new Vector3f(0, 0, -.1f));
+        p.setRadius(1);
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), Arrays.asList(p));
+        assertEquals(1, g.getLightCount(4, 3));
+    }
+    @Test
+    public void overflowNeverDropsLightsAndRebuildClears() {
+        List<Light> lights = new ArrayList<>();
+        for (int i = 0; i < 513; i++) {
+            lights.add(new DirectionalLight());
+        }
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), lights);
+        assertEquals(513, g.getLightCount(0, 0));
+        assertEquals(512, g.getLightIndex(0, 0, 512));
+        g.build(camera(), Collections.<Light>emptyList());
+        assertEquals(0, g.getLightCount(0, 0));
+    }
+    @Test
+    public void smallPointDoesNotCoverEntireScreen() {
+        PointLight p = new PointLight();
+        p.setPosition(new Vector3f(0, 0, -10));
+        p.setRadius(.1f);
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), Arrays.asList(p));
+        assertEquals(0, g.getLightCount(0, 0));
+        assertEquals(1, g.getLightCount(2, 1));
+    }
+    @Test
+    public void unlimitedAndDisabledLights() {
+        PointLight p = new PointLight();
+        p.setRadius(0);
+        DirectionalLight d = new DirectionalLight();
+        d.setEnabled(false);
+        TileLightGrid g = new TileLightGrid(16);
+        g.build(camera(), Arrays.asList(p, d));
+        assertEquals(1, g.getLightCount(4, 3));
+    }
 }

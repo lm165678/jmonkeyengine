@@ -118,11 +118,11 @@ public class J3MLoader implements AssetLoader {
         }
     }
 
-    // LightMode <MODE>
-    private void readLightMode(String statement) throws IOException{
+    // LightModel <MODE>; LightMode is a legacy alias.
+    private void readLightModel(String statement) throws IOException{
         String[] split = statement.split(whitespacePattern);
         if (split.length != 2){
-            throw new IOException("LightMode statement syntax incorrect");
+            throw new IOException("LightModel statement syntax incorrect");
         }
 
         LightMode lm = LightMode.valueOf(split[1]);
@@ -562,8 +562,8 @@ public class J3MLoader implements AssetLoader {
                 split[0].equals("TessellationControlShader") ||
                 split[0].equals("TessellationEvaluationShader")) {
             readShaderStatement(statement.getLine());
-        }else if (split[0].equals("LightMode")){
-            readLightMode(statement.getLine());
+        }else if ((split[0].equals("LightModel") || split[0].equals("LightMode"))){
+            readLightModel(statement.getLine());
         }else if (split[0].equals("LightSpace")){
             readLightSpace(statement.getLine());
         }else if (split[0].equals("ShadowMode")){
@@ -780,6 +780,12 @@ public class J3MLoader implements AssetLoader {
             }else{
                 if (statType.equals("Technique")){
                     readTechnique(statement);
+                }else if (statType.equals("DeferredLightingShader")) {
+                    String path = statement.getLine().substring("DeferredLightingShader".length()).trim();
+                    if (path.isEmpty() || !statement.getContents().isEmpty()) {
+                        throw new MatParseException("Expected DeferredLightingShader <asset path>", statement);
+                    }
+                    materialDef.setDeferredLightingShader(path);
                 }else if ((statType.equals("ShadingId") || statType.equals("ShadingModelId"))){
                     String[] tokens = statement.getLine().trim().split("\\s+");
                     if (tokens.length != 2 || !statement.getContents().isEmpty()) {

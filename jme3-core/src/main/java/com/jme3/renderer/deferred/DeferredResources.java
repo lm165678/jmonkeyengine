@@ -47,7 +47,7 @@ import com.jme3.texture.image.ColorSpace;
 import com.jme3.util.BufferUtils;
 import java.util.Map;
 
-/** Sole owner of native resources for one deferred viewport; passes borrow them. */
+/** Owns persistent light data/programs and borrows transient GBuffer targets from FrameGraph. */
 final class DeferredResources {
     static final String ROOT = "Common/MatDefs/Light/Tiled/";
     private final AssetManager assets;
@@ -66,44 +66,52 @@ final class DeferredResources {
         this.assets = assets;
         this.renderer = renderer;
     }
-    void ensureTargets(int width,int height) {
-        requireOpen();
-        if (gbuffer != null && gbuffer.getWidth()==width && gbuffer.getHeight()==height) return;
-        releaseTargets();
-        gbuffer=new FrameBuffer(width,height,1);
-        Image.Format[] formats={Image.Format.RGBA32F,Image.Format.RGBA16F,Image.Format.RGBA16F,Image.Format.RGBA16F,Image.Format.RGBA16F,Image.Format.Depth24};
-        for(int i=0;i<6;i++) {
-            targets[i]=new Texture2D(width,height,formats[i]);
-            targets[i].setMinFilter(Texture.MinFilter.NearestNoMipMaps);
-            targets[i].setMagFilter(Texture.MagFilter.Nearest);
-            if(i<5) gbuffer.addColorTexture(targets[i]); else gbuffer.setDepthTexture(targets[i]);
-        }
-        gbuffer.setMultiTarget(true);
+    AssetManager getAssetManager() {
+        return assets;
     }
-    Texture2D storage(Texture2D old,int width,int height,Image.Format format,int bytes) {
-        requireOpen();
-        if(old!=null && old.getImage().getWidth()==width && old.getImage().getHeight()==height) {
-            old.getImage().getData(0).clear(); return old;
+    void borrowTargets(com.jme3.renderer.framegraph.RenderTarget target) {
+        releaseTargets();
+        gbuffer = target.getFrameBuffer();
+        for (int i = 0; i < 5; i++) {
+            targets[i] = target.getColorTexture(i);
         }
-        if(old!=null) old.getImage().dispose();
-        Texture2D texture=new Texture2D(new Image(format,width,height,BufferUtils.createByteBuffer(bytes),ColorSpace.Linear));
-        texture.setMinFilter(Texture.MinFilter.NearestNoMipMaps); texture.setMagFilter(Texture.MagFilter.Nearest);
+        targets[5] = target.getDepthTexture();
+    }
+    Texture2D storage(Texture2D old, int width, int height, Image.Format format, int bytes) {
+        requireOpen();
+        if (old != null && old.getImage().getWidth() == width
+            && old.getImage().getHeight() == height) {
+            old.getImage().getData(0).clear();
+            return old;
+        }
+        if (old != null) {
+            old.getImage().dispose();
+        }
+        Texture2D texture = new Texture2D(new Image(
+            format, width, height, BufferUtils.createByteBuffer(bytes), ColorSpace.Linear));
+        texture.setMinFilter(Texture.MinFilter.NearestNoMipMaps);
+        texture.setMagFilter(Texture.MagFilter.Nearest);
         return texture;
     }
     void ensureGpuIndices(int records) {
         requireOpen();
-        if(gpuIndices==null || records!=gpuRecords) {
-            if(gpuIndices!=null) gpuIndices.dispose();
-            gpuIndices=new BufferObject(0,BufferObject.BufferType.ShaderStorageBufferObject);
+        if (gpuIndices == null || records != gpuRecords) {
+            if (gpuIndices != null) {
+                gpuIndices.dispose();
+            }
+            gpuIndices = new BufferObject(0, BufferObject.BufferType.ShaderStorageBufferObject);
             gpuIndices.declareField("records", VarType.IntArray);
             // std430 scalar indices use four bytes each; round allocation to 16 bytes.
-            gpuIndices.setFieldValue("records",new int[((records+3)/4)*4]);gpuRecords=records;
+            gpuIndices.setFieldValue("records", new int[((records + 3) / 4) * 4]);
+            gpuRecords = records;
         }
     }
     Shader computeShader() {
         requireOpen();
-        if(computeShader==null) {
-            computeShader=new Shader();computeShader.addSource(Shader.ShaderType.Compute,ROOT+"Cull.comp",(String)assets.loadAsset(ROOT+"Cull.comp"),"","GLSL430");
+        if (computeShader == null) {
+            computeShader = new Shader();
+            computeShader.addSource(Shader.ShaderType.Compute, ROOT + "Cull.comp",
+                (String) assets.loadAsset(ROOT + "Cull.comp"), "", "GLSL430");
         }
         return computeShader;
     }
@@ -114,47 +122,120 @@ final class DeferredResources {
             modelVersion = models.getVersion();
         }
         Map<Integer, String> customModels = models.getSources();
-        Shader shader=gpu?gpuShader:cpuShader;
-        if(shader==null) {
-            String source=(String)assets.loadAsset(ROOT+"Lighting.frag");
-            StringBuilder functions=new StringBuilder(),branches=new StringBuilder();
-            for(Map.Entry<Integer,String> entry:customModels.entrySet()) {
-                functions.append(entry.getValue()).append("\n");
-                branches.append("else if(int(base.a)==").append(entry.getKey()).append(") result+=deferredModel")
-                    .append(entry.getKey()).append("(base,n,specData,texelFetch(Ambient,pixel,0),viewDir,lightDir.xyz,color.rgb)*attenuation;\n");
+        Shader shader = gpu ? gpuShader : cpuShader;
+        if (shader == null) {
+            String source = (String) assets.loadAsset(ROOT + "Lighting.frag");
+            source = assembleLightingSource(source, customModels);
+            shader = new Shader();
+            String language = gpu ? "GLSL430" : "GLSL330";
+            shader.addSource(Shader.ShaderType.Vertex, ROOT + "Fullscreen.vert",
+                (String) assets.loadAsset(ROOT + "Fullscreen.vert"), "", language);
+            shader.addSource(Shader.ShaderType.Fragment, ROOT + "Lighting.frag", source,
+                gpu ? "#define GPU_TILES\n" : "", language);
+            if (gpu) {
+                gpuShader = shader;
+            } else {
+                cpuShader = shader;
             }
-            source=source.replace("void main(){",functions+"\nvoid main(){").replace("// CUSTOM_MODELS",branches.toString());
-            shader=new Shader();String language=gpu?"GLSL430":"GLSL330";
-            shader.addSource(Shader.ShaderType.Vertex,ROOT+"Fullscreen.vert",(String)assets.loadAsset(ROOT+"Fullscreen.vert"),"",language);
-            shader.addSource(Shader.ShaderType.Fragment,ROOT+"Lighting.frag",source,gpu?"#define GPU_TILES\n":"",language);
-            if(gpu) gpuShader=shader;else cpuShader=shader;
         }
         return shader;
     }
+    /**
+     * Generates only named function/dispatch insertion points, never edits main()
+     * or embeds knowledge of built-in surface channels. Full-surface custom models
+     * own their complete layout. The old per-light API uses a documented adapter.
+     */
+    static String assembleLightingSource(String template, Map<Integer, String> models) {
+        StringBuilder functions = new StringBuilder();
+        StringBuilder dispatch = new StringBuilder();
+        for (Map.Entry<Integer, String> entry : models.entrySet()) {
+            int id = entry.getKey();
+            String source = entry.getValue();
+            functions.append(source).append("\n");
+            boolean fullSurface =
+                java.util.regex.Pattern.compile("\\bvec4\\s+deferredSurfaceModel" + id + "\\s*\\(")
+                    .matcher(source)
+                    .find();
+            String functionName =
+                fullSurface ? "deferredSurfaceModel" + id : "shadeLegacyModel" + id;
+            if (!fullSurface) {
+                functions.append(legacyModelAdapter(id));
+            }
+            dispatch.append("    if (shadingId == ")
+                .append(id)
+                .append(") {\n")
+                .append("        return ")
+                .append(functionName)
+                .append("();\n")
+                .append("    }\n");
+        }
+        return template.replace("// CUSTOM_MODEL_FUNCTIONS", functions.toString())
+            .replace("// CUSTOM_MODEL_DISPATCH", dispatch.toString());
+    }
+
+    private static String legacyModelAdapter(int id) {
+        // This layout applies ONLY to the legacy deferredModelN per-light API.
+        // Preferred deferredSurfaceModelN functions decode their own channels.
+        return "vec4 shadeLegacyModel" + id + "() {\n"
+            + "    vec4 record0 = getGBuffer0();\n"
+            + "    vec4 record1 = getGBuffer1();\n"
+            + "    vec4 record2 = getGBuffer2();\n"
+            + "    vec4 record3 = getGBuffer3();\n"
+            + "    vec3 position = getWorldPosition();\n"
+            + "    vec3 viewDirection = getViewDirection(position);\n"
+            + "    DeferredLightList lights = getLightList();\n"
+            + "    vec3 result = record3.rgb * AmbientColor;\n"
+            + "    for (int entry = 0; entry < lights.count; ++entry) {\n"
+            + "        DeferredLight light = getLight(lights, entry, position);\n"
+            + "        result += deferredModel" + id + "(record0, record1, record2, record3,\n"
+            + "                viewDirection, light.direction, light.color) * light.attenuation;\n"
+            + "    }\n"
+            + "    return vec4(result, record3.a);\n"
+            + "}\n";
+    }
+
     void releaseTargets() {
-        if(renderer==null)return;
-        if(gbuffer!=null) {gbuffer.dispose();gbuffer=null;}
-        for(int i=0;i<targets.length;i++) if(targets[i]!=null) {targets[i].getImage().dispose();targets[i]=null;}
+        // Graph owns disposal/pooling; only clear these borrowed references.
+        gbuffer = null;
+        java.util.Arrays.fill(targets, null);
     }
     private void deleteLightingShaders() {
-        if (cpuShader != null && cpuShader.getId() != -1) cpuShader.dispose();
-        if (gpuShader != null && gpuShader.getId() != -1) gpuShader.dispose();
+        if (cpuShader != null && cpuShader.getId() != -1) {
+            cpuShader.dispose();
+        }
+        if (gpuShader != null && gpuShader.getId() != -1) {
+            gpuShader.dispose();
+        }
         cpuShader = gpuShader = null;
     }
     private void requireOpen() {
-        if (closed) throw new IllegalStateException("Deferred resources have been released");
+        if (closed) {
+            throw new IllegalStateException("Deferred resources have been released");
+        }
     }
 
     void cleanup() {
-        if (closed) return;
+        if (closed) {
+            return;
+        }
         closed = true;
         releaseTargets();
         deleteLightingShaders();
-        if (computeShader != null && computeShader.getId() != -1) computeShader.dispose();
-        if (lightTexture != null) lightTexture.getImage().dispose();
-        if (tileTexture != null) tileTexture.getImage().dispose();
-        if (gpuIndices != null) gpuIndices.dispose();
-        for (VertexBuffer buffer : quad.getBufferList()) buffer.dispose();
+        if (computeShader != null && computeShader.getId() != -1) {
+            computeShader.dispose();
+        }
+        if (lightTexture != null) {
+            lightTexture.getImage().dispose();
+        }
+        if (tileTexture != null) {
+            tileTexture.getImage().dispose();
+        }
+        if (gpuIndices != null) {
+            gpuIndices.dispose();
+        }
+        for (VertexBuffer buffer : quad.getBufferList()) {
+            buffer.dispose();
+        }
         lightTexture = tileTexture = null;
         gpuIndices = null;
         computeShader = null;

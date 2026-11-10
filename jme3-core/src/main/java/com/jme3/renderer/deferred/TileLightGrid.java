@@ -53,7 +53,9 @@ public final class TileLightGrid {
     private final Vector3f projected = new Vector3f();
 
     public TileLightGrid(int tileSize) {
-        if (tileSize <= 0) throw new IllegalArgumentException("tileSize must be positive");
+        if (tileSize <= 0) {
+            throw new IllegalArgumentException("tileSize must be positive");
+        }
         this.tileSize = tileSize;
     }
 
@@ -63,7 +65,7 @@ public final class TileLightGrid {
             throw new IllegalArgumentException("Camera dimensions must be positive");
         }
         if (camera.getViewPortLeft() != 0 || camera.getViewPortBottom() != 0
-                || camera.getViewPortRight() != 1 || camera.getViewPortTop() != 1) {
+            || camera.getViewPortRight() != 1 || camera.getViewPortTop() != 1) {
             throw new IllegalArgumentException("Tile grid requires a full-frame camera");
         }
         columns = (camera.getWidth() - 1) / tileSize + 1;
@@ -77,7 +79,9 @@ public final class TileLightGrid {
         }
         for (int i = 0; i < lights.size(); i++) {
             Light light = lights.get(i);
-            if (!light.isEnabled()) continue;
+            if (!light.isEnabled()) {
+                continue;
+            }
             Vector3f position;
             float radius;
             if (light instanceof PointLight) {
@@ -99,7 +103,9 @@ public final class TileLightGrid {
             camera.getViewMatrix().mult(position, view);
             float depth = -view.z;
             if (depth + radius < camera.getFrustumNear()
-                    || depth - radius > camera.getFrustumFar()) continue;
+                || depth - radius > camera.getFrustumFar()) {
+                continue;
+            }
             // Near-plane intersection must not project behind the eye.
             if (depth - radius <= camera.getFrustumNear()) {
                 add(i, 0, 0, columns - 1, rows - 1);
@@ -110,19 +116,23 @@ public final class TileLightGrid {
             // Project a view-space bounding box enclosing the influence sphere.
             for (int c = 0; c < 8; c++) {
                 corner.set(view.x + ((c & 1) == 0 ? -radius : radius),
-                        view.y + ((c & 2) == 0 ? -radius : radius),
-                        view.z + ((c & 4) == 0 ? -radius : radius));
+                    view.y + ((c & 2) == 0 ? -radius : radius),
+                    view.z + ((c & 4) == 0 ? -radius : radius));
                 float w = camera.getProjectionMatrix().multProj(corner, projected);
                 float x = (projected.x / w * .5f + .5f) * camera.getWidth();
                 float y = (projected.y / w * .5f + .5f) * camera.getHeight();
-                minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-                minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
             }
-            if (maxX < 0 || maxY < 0 || minX >= camera.getWidth() || minY >= camera.getHeight()) continue;
+            if (maxX < 0 || maxY < 0 || minX >= camera.getWidth() || minY >= camera.getHeight()) {
+                continue;
+            }
             add(i, Math.max(0, (int) Math.floor(minX / tileSize)),
-                    Math.max(0, (int) Math.floor(minY / tileSize)),
-                    Math.min(columns - 1, (int) Math.floor(maxX / tileSize)),
-                    Math.min(rows - 1, (int) Math.floor(maxY / tileSize)));
+                Math.max(0, (int) Math.floor(minY / tileSize)),
+                Math.min(columns - 1, (int) Math.floor(maxX / tileSize)),
+                Math.min(rows - 1, (int) Math.floor(maxY / tileSize)));
         }
     }
 
@@ -131,25 +141,40 @@ public final class TileLightGrid {
             for (int x = x0; x <= x1; x++) {
                 int tile = y * columns + x;
                 int count = counts[tile];
-                if (indices[tile] == null) indices[tile] = new int[8];
-                else if (count == indices[tile].length) indices[tile] = Arrays.copyOf(indices[tile], count * 2);
+                if (indices[tile] == null) {
+                    indices[tile] = new int[8];
+                } else if (count == indices[tile].length) {
+                    indices[tile] = Arrays.copyOf(indices[tile], count * 2);
+                }
                 indices[tile][count] = light;
                 counts[tile] = count + 1;
             }
         }
     }
 
-    public int getTileSize() { return tileSize; }
-    public int getColumns() { return columns; }
-    public int getRows() { return rows; }
-    public int getLightCount(int x, int y) { return counts[tile(x, y)]; }
+    public int getTileSize() {
+        return tileSize;
+    }
+    public int getColumns() {
+        return columns;
+    }
+    public int getRows() {
+        return rows;
+    }
+    public int getLightCount(int x, int y) {
+        return counts[tile(x, y)];
+    }
     public int getLightIndex(int x, int y, int index) {
         int tile = tile(x, y);
-        if (index < 0 || index >= counts[tile]) throw new IndexOutOfBoundsException();
+        if (index < 0 || index >= counts[tile]) {
+            throw new IndexOutOfBoundsException();
+        }
         return indices[tile][index];
     }
     private int tile(int x, int y) {
-        if (x < 0 || y < 0 || x >= columns || y >= rows) throw new IndexOutOfBoundsException();
+        if (x < 0 || y < 0 || x >= columns || y >= rows) {
+            throw new IndexOutOfBoundsException();
+        }
         return y * columns + x;
     }
 }

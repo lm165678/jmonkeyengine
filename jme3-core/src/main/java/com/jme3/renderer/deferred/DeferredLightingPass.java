@@ -56,7 +56,8 @@ final class DeferredLightingPass implements DeferredPass {
         lightingState.setDepthFunc(RenderState.TestFunction.LessOrEqual);
         lightingState.setFaceCullMode(RenderState.FaceCullMode.Off);
     }
-    @Override public boolean execute(DeferredRenderContext frame) {
+    @Override
+    public boolean execute(DeferredRenderContext frame) {
         RenderManager rm = frame.manager;
         Renderer renderer = frame.renderer;
         ViewPort vp = frame.viewport;
@@ -67,30 +68,42 @@ final class DeferredLightingPass implements DeferredPass {
         Vector3f ambient = frame.ambient;
         Shader shader = frame.resources.lightingShader(gpu, frame.models);
         renderer.setFrameBuffer(vp.getOutputFrameBuffer());
-        rm.setCamera(camera,false);
-        for (int i=0;i<6;i++) renderer.setTexture(i,frame.resources.targets[i]);
-        renderer.setTexture(6,frame.resources.lightTexture);
-        if (!gpu) renderer.setTexture(7,frame.resources.tileTexture);
-        else shader.getBufferBlock("TileIndices").setBufferObject(frame.resources.gpuIndices);
-        String[] names={"Albedo","Normal","Specular","Ambient","Reflection","Depth"};
-        for(int i=0;i<names.length;i++) uniform(shader,names[i],VarType.Int,i);
-        uniform(shader,"Lights",VarType.Int,6); uniform(shader,"Tiles",VarType.Int,7);
-        renderer.setTexture(8,frame.batch.colorRamp==null?frame.resources.targets[0]:frame.batch.colorRamp);
-        uniform(shader,"ColorRamp",VarType.Int,8);
-        uniform(shader,"Untiled",VarType.Boolean,frame.untiled);
-        uniform(shader,"Columns",VarType.Int,columns); uniform(shader,"TileSize",VarType.Int,tileSize);
-        uniform(shader,"LightCount",VarType.Int,lights.size());
-        uniform(shader,"TileCapacity",VarType.Int,tileCapacity);
-        uniform(shader,"TileTextureWidth",VarType.Int,gpu?1:frame.resources.tileTexture.getImage().getWidth());
+        rm.setCamera(camera, false);
+        for (int i = 0; i < 6; i++) {
+            renderer.setTexture(i, frame.resources.targets[i]);
+        }
+        renderer.setTexture(6, frame.resources.lightTexture);
+        if (!gpu) {
+            renderer.setTexture(7, frame.resources.tileTexture);
+        } else {
+            shader.getBufferBlock("TileIndices").setBufferObject(frame.resources.gpuIndices);
+        }
+        String[] names = {
+            "gbuffer0", "gbuffer1", "gbuffer2", "gbuffer3", "gbuffer4", "gbufferDepth"};
+        for (int i = 0; i < names.length; i++) {
+            uniform(shader, names[i], VarType.Int, i);
+        }
+        uniform(shader, "Lights", VarType.Int, 6);
+        uniform(shader, "Tiles", VarType.Int, 7);
+        renderer.setTexture(
+            8, frame.batch.colorRamp == null ? frame.resources.targets[0] : frame.batch.colorRamp);
+        uniform(shader, "ColorRamp", VarType.Int, 8);
+        uniform(shader, "Untiled", VarType.Boolean, frame.untiled);
+        uniform(shader, "Columns", VarType.Int, columns);
+        uniform(shader, "TileSize", VarType.Int, tileSize);
+        uniform(shader, "LightCount", VarType.Int, lights.size());
+        uniform(shader, "TileCapacity", VarType.Int, tileCapacity);
+        uniform(shader, "TileTextureWidth", VarType.Int,
+            gpu ? 1 : frame.resources.tileTexture.getImage().getWidth());
         inverse.set(camera.getViewProjectionMatrix()).invertLocal();
-        uniform(shader,"InverseViewProjection",VarType.Matrix4,inverse);
-        uniform(shader,"CameraPosition",VarType.Vector3,camera.getLocation());
-        uniform(shader,"AmbientColor",VarType.Vector3,ambient);
-        resolution.set(camera.getWidth(),camera.getHeight());
-        uniform(shader,"Resolution",VarType.Vector2,resolution);
+        uniform(shader, "InverseViewProjection", VarType.Matrix4, inverse);
+        uniform(shader, "CameraPosition", VarType.Vector3, camera.getLocation());
+        uniform(shader, "AmbientColor", VarType.Vector3, ambient);
+        resolution.set(camera.getWidth(), camera.getHeight());
+        uniform(shader, "Resolution", VarType.Vector2, resolution);
         renderer.applyRenderState(lightingState);
         renderer.setShader(shader);
-        renderer.renderMesh(frame.resources.quad,0,1,null);
+        renderer.renderMesh(frame.resources.quad, 0, 1, null);
         return true;
     }
 }

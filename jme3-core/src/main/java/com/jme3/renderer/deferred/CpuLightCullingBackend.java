@@ -40,30 +40,50 @@ import java.util.List;
 
 final class CpuLightCullingBackend implements LightCullingBackend {
     private TileLightGrid grid;
-    @Override public void reset() { grid = null; }
-    @Override public boolean prepare(DeferredRenderContext frame) {
+    @Override
+    public void reset() {
+        grid = null;
+    }
+    @Override
+    public boolean prepare(DeferredRenderContext frame) {
         Camera camera = frame.camera();
         List<Light> lights = frame.lights;
         DeferredResources r = frame.resources;
         int maxTexture = frame.renderer.getLimits().get(Limits.TextureSize);
-        if (grid == null || grid.getTileSize() != frame.tileSize) grid = new TileLightGrid(frame.tileSize);
-        grid.build(camera,lights);
-        int tileCount=grid.getColumns()*grid.getRows();
-        long entries=tileCount*2L;
-        for(int y=0;y<grid.getRows();y++) for(int x=0;x<grid.getColumns();x++) entries+=grid.getLightCount(x,y);
-        if(entries>Math.min(16777216L,(long)maxTexture*maxTexture)) {
-            frame.fallbackReason="CPU light index capacity exceeded; retaining forward queue"; return false;
+        if (grid == null || grid.getTileSize() != frame.tileSize) {
+            grid = new TileLightGrid(frame.tileSize);
         }
-        int width = Math.min(maxTexture, Math.max(1024, (int)((entries + maxTexture - 1) / maxTexture)));
-        int height = ((int)entries + width - 1) / width;
-        r.tileTexture=r.storage(r.tileTexture,width,height,Image.Format.R32F,width*height*4);
-        ByteBuffer data=r.tileTexture.getImage().getData(0);
-        int offset=tileCount*2;
-        for(int y=0;y<grid.getRows();y++) for(int x=0;x<grid.getColumns();x++) {
-            int tile=y*grid.getColumns()+x,count=grid.getLightCount(x,y);
-            data.putFloat(tile*8,offset);data.putFloat(tile*8+4,count);
-            for(int i=0;i<count;i++) data.putFloat(offset++*4,grid.getLightIndex(x,y,i));
+        grid.build(camera, lights);
+        int tileCount = grid.getColumns() * grid.getRows();
+        long entries = tileCount * 2L;
+        for (int y = 0; y < grid.getRows(); y++) {
+            for (int x = 0; x < grid.getColumns(); x++) {
+                entries += grid.getLightCount(x, y);
+            }
         }
-        data.clear();r.tileTexture.getImage().setUpdateNeeded();return true;
+        if (entries > Math.min(16777216L, (long) maxTexture * maxTexture)) {
+            frame.fallbackReason = "CPU light index capacity exceeded; retaining forward queue";
+            return false;
+        }
+        int width =
+            Math.min(maxTexture, Math.max(1024, (int) ((entries + maxTexture - 1) / maxTexture)));
+        int height = ((int) entries + width - 1) / width;
+        r.tileTexture =
+            r.storage(r.tileTexture, width, height, Image.Format.R32F, width * height * 4);
+        ByteBuffer data = r.tileTexture.getImage().getData(0);
+        int offset = tileCount * 2;
+        for (int y = 0; y < grid.getRows(); y++) {
+            for (int x = 0; x < grid.getColumns(); x++) {
+                int tile = y * grid.getColumns() + x, count = grid.getLightCount(x, y);
+                data.putFloat(tile * 8, offset);
+                data.putFloat(tile * 8 + 4, count);
+                for (int i = 0; i < count; i++) {
+                    data.putFloat(offset++ * 4, grid.getLightIndex(x, y, i));
+                }
+            }
+        }
+        data.clear();
+        r.tileTexture.getImage().setUpdateNeeded();
+        return true;
     }
 }

@@ -35,17 +35,42 @@ import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.ViewPort;
 import com.jme3.renderer.queue.RenderQueue;
 
-/** Leaves all geometry for the engine's existing Forward queue renderer. */
+/**
+ * Leaves all geometry for the engine's existing Forward queue renderer.
+ * <pre>{@code
+ * // Force this viewport to use Forward even when the manager requests deferred.
+ * renderManager.setPipeline(viewPort, new ForwardPipeline());
+ * // Later, restore manager/viewport RenderPath selection:
+ * renderManager.setPipeline(viewPort, null);
+ * }</pre>
+ * Install on the render thread and use a separate instance per viewport.
+ * RenderManager owns initialization and cleanup. Removing this override does
+ * not change the underlying RenderPath settings.
+ */
 public final class ForwardPipeline implements RenderPipeline {
     private boolean initialized;
-    @Override public void initialize(RenderManager manager, ViewPort viewport) {
-        if (initialized) throw new IllegalStateException("Pipeline already initialized");
+    @Override
+    public void initialize(RenderManager manager, ViewPort viewport) {
+        if (initialized) {
+            throw new IllegalStateException("Pipeline already initialized");
+        }
         initialized = true;
     }
-    @Override public boolean isInitialized() { return initialized; }
-    @Override public void reshape(int width, int height) { }
-    @Override public void render(RenderQueue queue) {
-        if (!initialized) throw new IllegalStateException("Pipeline not initialized");
+    @Override
+    public boolean isInitialized() {
+        return initialized;
     }
-    @Override public void cleanup() { initialized = false; }
+    @Override
+    public void reshape(int width, int height) {
+    }
+    @Override
+    public void render(RenderQueue queue) {
+        if (!initialized) {
+            throw new IllegalStateException("Pipeline not initialized");
+        }
+    }
+    @Override
+    public void cleanup() {
+        initialized = false;
+    }
 }

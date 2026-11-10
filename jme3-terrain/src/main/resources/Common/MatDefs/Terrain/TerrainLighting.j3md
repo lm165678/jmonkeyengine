@@ -109,7 +109,7 @@ MaterialDef Terrain Lighting {
 
     Technique {
 
-        LightMode MultiPass
+        LightModel MultiPass
 
         VertexShader GLSL100:   Common/MatDefs/Terrain/TerrainLighting.vert
         FragmentShader GLSL100: Common/MatDefs/Terrain/TerrainLighting.frag
@@ -174,7 +174,7 @@ MaterialDef Terrain Lighting {
 
     Technique {
 
-        LightMode SinglePass
+        LightModel SinglePass
 
         VertexShader GLSL100:   Common/MatDefs/Terrain/SPTerrainLighting.vert
         FragmentShader GLSL100: Common/MatDefs/Terrain/SPTerrainLighting.frag
@@ -302,7 +302,7 @@ MaterialDef Terrain Lighting {
 
     Technique GBuffer {
 
-        LightMode DeferredSurface
+        LightModel DeferredSurface
 
         VertexShader GLSL330:   Common/MatDefs/Terrain/SPTerrainLighting.vert
         FragmentShader GLSL330: Common/MatDefs/Terrain/SPTerrainLighting.frag

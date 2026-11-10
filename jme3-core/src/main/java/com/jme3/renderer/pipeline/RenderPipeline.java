@@ -42,11 +42,41 @@ import com.jme3.renderer.queue.RenderQueue;
  * normally. Implementations remove only geometry they have consumed.
  * initialize must not be called twice without cleanup; cleanup is idempotent.
  * A pipeline must restore temporary renderer overrides even when rendering fails.
+ *
+ * <p>Install an implementation with
+ * {@code renderManager.setPipeline(viewPort, pipeline)}. Remove it with
+ * {@code renderManager.setPipeline(viewPort, null)} to restore RenderPath selection.
+ * The manager owns lifecycle calls; application code configures the implementation
+ * rather than manually calling initialize/render/cleanup. To change configuration
+ * from another thread, schedule it with {@code application.enqueue(...)}.</p>
  */
 public interface RenderPipeline {
+    /**
+     * Initializes this instance for one viewport; the graphics context is current.
+     * @param manager owning render manager
+     * @param viewport owning viewport
+     */
     void initialize(RenderManager manager, ViewPort viewport);
+    /** @return whether initialization has completed and cleanup has not occurred */
     boolean isInitialized();
+    /**
+     * Notifies the pipeline of viewport size changes; release/recreate size-dependent
+     * resources as needed. Called by the manager rather than application code.
+     * @param width viewport width in pixels
+     * @param height viewport height in pixels
+     */
     void reshape(int width, int height);
+    /**
+     * Consumes supported opaque geometry after auxiliary postQueue passes. Leave
+     * unsupported geometry in the queue for the original renderer. Transparent,
+     * sky and GUI queues remain under RenderManager control.
+     * @param queue current viewport queue, borrowed for this call
+     */
     void render(RenderQueue queue);
+    /**
+     * Releases owned resources and borrowed references. Must tolerate repeated calls
+     * and partially completed initialization. Use NativeObject.dispose for owned
+     * GPU objects so the engine's resource manager handles their deletion.
+     */
     void cleanup();
 }

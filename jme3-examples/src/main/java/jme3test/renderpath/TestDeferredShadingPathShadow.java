@@ -21,7 +21,28 @@ import com.jme3.shadow.DirectionalLightShadowFilter;
 
 /**
  * Under the deferred rendering path, only screen space post processing shadows can be used.<br/>
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestDeferredShadingPathShadow. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author JohnKkk
+
  */
 public class TestDeferredShadingPathShadow extends RenderPathExample implements ActionListener {
     private RenderPath currentRenderPath;
@@ -31,7 +52,7 @@ public class TestDeferredShadingPathShadow extends RenderPathExample implements 
         guiFont = assetManager.loadFont("Interface/Fonts/Default.fnt");
         hitText = new BitmapText(guiFont, false);
         hitText.setSize(guiFont.getCharSet().getRenderedSize());
-        hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+        hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         hitText.setLocalTranslation(0, cam.getHeight(), 0);
         guiNode.attachChild(hitText);
     }
@@ -56,7 +77,6 @@ public class TestDeferredShadingPathShadow extends RenderPathExample implements 
         planeGeo.setMaterial(planeMat);
         rootNode.attachChild(planeGeo);
 
-
         DirectionalLight sun = new DirectionalLight();
         sun.setDirection((new Vector3f(-0.5f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
@@ -68,14 +88,16 @@ public class TestDeferredShadingPathShadow extends RenderPathExample implements 
         sun.setDirection((new Vector3f(0.5f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
         rootNode.addLight(sun);
-        DirectionalLightShadowFilter dlsf2 = new DirectionalLightShadowFilter(assetManager, 1024, 1);
+        DirectionalLightShadowFilter dlsf2 =
+            new DirectionalLightShadowFilter(assetManager, 1024, 1);
         dlsf2.setLight(sun);
 
         sun = new DirectionalLight();
         sun.setDirection((new Vector3f(0.0f, -0.5f, -0.5f)).normalizeLocal());
         sun.setColor(ColorRGBA.White);
         rootNode.addLight(sun);
-        DirectionalLightShadowFilter dlsf3 = new DirectionalLightShadowFilter(assetManager, 1024, 1);
+        DirectionalLightShadowFilter dlsf3 =
+            new DirectionalLightShadowFilter(assetManager, 1024, 1);
         dlsf3.setLight(sun);
 
         FilterPostProcessor fpp = new FilterPostProcessor(assetManager);
@@ -88,23 +110,24 @@ public class TestDeferredShadingPathShadow extends RenderPathExample implements 
         inputManager.addMapping("toggleRenderPath", new KeyTrigger(KeyInput.KEY_SPACE));
 
         currentRenderPath = RenderPath.Forward;
-        renderManager.setRenderPath(currentRenderPath);
+        useRenderPath(currentRenderPath);
         makeHudText();
 
         flyCam.setMoveSpeed(20.0f);
     }
 
     public static void main(String[] args) {
-        TestDeferredShadingPathShadow testDeferredShadingPathShadow = new TestDeferredShadingPathShadow();
+        TestDeferredShadingPathShadow testDeferredShadingPathShadow =
+            new TestDeferredShadingPathShadow();
         testDeferredShadingPathShadow.start();
     }
 
     @Override
     public void onAction(String name, boolean isPressed, float tpf) {
-        if(name.equals("toggleRenderPath") && !isPressed){
+        if (name.equals("toggleRenderPath") && !isPressed) {
             currentRenderPath = RenderPathHelper.next(currentRenderPath);
-            renderManager.setRenderPath(currentRenderPath);
-            hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+            useRenderPath(currentRenderPath);
+            hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         }
     }
 }

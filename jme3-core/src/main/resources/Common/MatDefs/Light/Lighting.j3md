@@ -135,7 +135,7 @@ MaterialDef Phong Lighting {
     }
 
     Technique {
-        LightMode SinglePass
+        LightModel SinglePass
 
         VertexShader GLSL310 GLSL300 GLSL100 GLSL150:   Common/MatDefs/Light/SPLighting.vert
         FragmentShader GLSL310 GLSL300 GLSL100 GLSL150: Common/MatDefs/Light/SPLighting.frag
@@ -182,7 +182,7 @@ MaterialDef Phong Lighting {
 
     Technique {
 
-        LightMode MultiPass
+        LightModel MultiPass
 
         VertexShader GLSL310 GLSL300 GLSL100 GLSL150:   Common/MatDefs/Light/Lighting.vert
         FragmentShader GLSL310 GLSL300 GLSL100 GLSL150: Common/MatDefs/Light/Lighting.frag
@@ -341,8 +341,16 @@ MaterialDef Phong Lighting {
     }
 
 
+    // Deferred path: this technique renders mesh geometry into the GBuffer.
+    // VS: Common/MatDefs/Light/SPLighting.vert
+    // FS: Common/MatDefs/Light/SPLighting.frag, compiled with DEFERRED_GBUFFER below.
+    // DeferredPipeline then uses Tiled/Fullscreen.vert + Tiled/Lighting.frag.
+    // The shared lighting FS reads shadingId 1 and evaluates Blinn-Phong direct lighting; VertexLighting is baked in the surface pass.
+    // Built-in direct-light branches are in that shared FS; this material does not
+    // declare a separate DeferredLightingShader. Custom models use that declaration
+    // to contribute a deferredLighting(...) function to the shared lighting FS.
     Technique GBuffer {
-        LightMode DeferredSurface
+        LightModel DeferredSurface
 
         VertexShader GLSL330:   Common/MatDefs/Light/SPLighting.vert
         FragmentShader GLSL330: Common/MatDefs/Light/SPLighting.frag

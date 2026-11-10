@@ -27,8 +27,30 @@ import com.jme3.util.TangentBinormalGenerator;
 import com.jme3.util.mikktspace.MikktspaceTangentGenerator;
 
 /**
- * This example demonstrates unified handling of several built-in shading models under the same render path.
+ * This example demonstrates unified handling of several built-in shading models under the same
+ render path.
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestShadingModel. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author JohnKkk
+
  */
 public class TestShadingModel extends RenderPathExample {
     private DirectionalLight dl;
@@ -43,14 +65,14 @@ public class TestShadingModel extends RenderPathExample {
 
     @Override
     public void simpleInitApp() {
-
         // UNLIT
         Material unlitMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         unlitMat.setTexture("ColorMap", assetManager.loadTexture("Textures/Terrain/Pond/Pond.jpg"));
         Sphere sp = new Sphere(15, 15, 1.0f);
         Geometry unlitSphere = new Geometry("unlitSphere", sp);
         unlitSphere.setLocalTranslation(-5, 0, 0);
-        unlitSphere.setLocalRotation(new Quaternion(new float[]{(float) Math.toRadians(-90), 0, 0}));
+        unlitSphere.setLocalRotation(
+            new Quaternion(new float[] {(float) Math.toRadians(-90), 0, 0}));
         unlitSphere.setMaterial(unlitMat);
         rootNode.attachChild(unlitSphere);
 
@@ -85,20 +107,22 @@ public class TestShadingModel extends RenderPathExample {
             fpp.setNumSamples(numSamples);
         }
 
-//        fpp.addFilter(new FXAAFilter());
+        //        fpp.addFilter(new FXAAFilter());
         fpp.addFilter(new ToneMapFilter(Vector3f.UNIT_XYZ.mult(1.0f)));
-//        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
+        //        fpp.addFilter(new SSAOFilter(0.5f, 3, 0.2f, 0.2f));
         viewPort.addProcessor(fpp);
 
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Sky_Cloudy.hdr", SkyFactory.EnvMapType.EquirectMap);
-        Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Path.hdr", SkyFactory.EnvMapType.EquirectMap);
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds", SkyFactory.EnvMapType.CubeMap);
-        //Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/road.hdr", SkyFactory.EnvMapType.EquirectMap);
+        // Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Sky_Cloudy.hdr",
+        // SkyFactory.EnvMapType.EquirectMap);
+        Spatial sky = SkyFactory.createSky(
+            assetManager, "Textures/Sky/Path.hdr", SkyFactory.EnvMapType.EquirectMap);
+        // Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds",
+        // SkyFactory.EnvMapType.CubeMap); Spatial sky = SkyFactory.createSky(assetManager,
+        // "Textures/Sky/road.hdr", SkyFactory.EnvMapType.EquirectMap);
         rootNode.attachChild(sky);
 
         pbrMat = assetManager.loadMaterial("Models/Tank/tank.j3m");
         model.setMaterial(pbrMat);
-
 
         final EnvironmentCamera envCam = new EnvironmentCamera(256, new Vector3f(0, 3f, 0));
         stateManager.attach(envCam);
@@ -114,18 +138,19 @@ public class TestShadingModel extends RenderPathExample {
 
         if (frame == 2) {
             modelNode.removeFromParent();
-            final LightProbe probe = LightProbeFactory.makeProbe(stateManager.getState(EnvironmentCamera.class), rootNode, new JobProgressAdapter<LightProbe>() {
-
-                @Override
-                public void done(LightProbe result) {
-                    System.err.println("Done rendering env maps");
-                    tex = EnvMapUtils.getCubeMapCrossDebugViewWithMipMaps(result.getPrefilteredEnvMap(), assetManager);
-                }
-            });
+            final LightProbe probe =
+                LightProbeFactory.makeProbe(stateManager.getState(EnvironmentCamera.class),
+                    rootNode, new JobProgressAdapter<LightProbe>() {
+                        @Override
+                        public void done(LightProbe result) {
+                            System.err.println("Done rendering env maps");
+                            tex = EnvMapUtils.getCubeMapCrossDebugViewWithMipMaps(
+                                result.getPrefilteredEnvMap(), assetManager);
+                        }
+                    });
             probe.getArea().setRadius(100);
             rootNode.addLight(probe);
-            //getStateManager().getState(EnvironmentManager.class).addEnvProbe(probe);
-
+            // getStateManager().getState(EnvironmentManager.class).addEnvProbe(probe);
         }
         if (frame > 10 && modelNode.getParent() == null) {
             rootNode.attachChild(modelNode);

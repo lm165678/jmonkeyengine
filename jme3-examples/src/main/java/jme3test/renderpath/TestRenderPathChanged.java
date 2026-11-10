@@ -19,7 +19,28 @@ import com.jme3.scene.Node;
 
 /**
  * This demonstrates how to switch the rendering path at runtime.<br/>
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TestRenderPathChanged. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author JohnKkk
+
  */
 public class TestRenderPathChanged extends RenderPathExample implements ActionListener {
     private RenderPath currentRenderPath;
@@ -29,7 +50,7 @@ public class TestRenderPathChanged extends RenderPathExample implements ActionLi
         guiFont = assetManager.loadFont("Interface/Fonts/Default.fnt");
         hitText = new BitmapText(guiFont, false);
         hitText.setSize(guiFont.getCharSet().getRenderedSize());
-        hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+        hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         hitText.setLocalTranslation(0, cam.getHeight(), 0);
         guiNode.attachChild(hitText);
     }
@@ -76,13 +97,12 @@ public class TestRenderPathChanged extends RenderPathExample implements ActionLi
         cam.setLocation(new Vector3f(-26.85569f, 15.701239f, -19.206047f));
         cam.lookAtDirection(new Vector3f(0.13871355f, -0.6151029f, 0.7761488f), Vector3f.UNIT_Y);
 
-
         inputManager.addListener(this, "toggleRenderPath");
         inputManager.addMapping("toggleRenderPath", new KeyTrigger(KeyInput.KEY_SPACE));
 
         // set RenderPath
         currentRenderPath = RenderPath.Forward;
-        renderManager.setRenderPath(currentRenderPath);
+        useRenderPath(currentRenderPath);
         makeHudText();
 
         flyCam.setMoveSpeed(20.0f);
@@ -90,10 +110,10 @@ public class TestRenderPathChanged extends RenderPathExample implements ActionLi
 
     @Override
     public void onAction(String name, boolean isPressed, float tpf) {
-        if(name.equals("toggleRenderPath") && !isPressed){
-            currentRenderPath=RenderPathHelper.next(currentRenderPath);
-            renderManager.setRenderPath(currentRenderPath);
-            hitText.setText("RendererPath : "+ currentRenderPath.getInfo());
+        if (name.equals("toggleRenderPath") && !isPressed) {
+            currentRenderPath = RenderPathHelper.next(currentRenderPath);
+            useRenderPath(currentRenderPath);
+            hitText.setText("RendererPath : " + currentRenderPath.getInfo());
         }
     }
 

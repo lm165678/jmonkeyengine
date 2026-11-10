@@ -7,12 +7,12 @@ in vec3 inNormal;
 in vec2 inTexCoord;
 out vec3 normal;
 out vec2 uv;
-void main(){
- gl_Position = g_WorldViewProjectionMatrix * vec4(inPosition,1.0);
- #ifdef PBR
- normal = normalize(mat3(g_WorldMatrix)*inNormal);
- #else
- normal = normalize(transpose(mat3(g_ViewMatrix)) * g_NormalMatrix * inNormal);
- #endif
- uv = inTexCoord;
+void main() {
+    gl_Position = g_WorldViewProjectionMatrix * vec4(inPosition, 1.0);
+#ifdef PBR
+    normal = normalize(mat3(g_WorldMatrix) * inNormal);
+#else
+    normal = normalize(transpose(mat3(g_ViewMatrix)) * g_NormalMatrix * inNormal);
+#endif
+    uv = inTexCoord;
 }

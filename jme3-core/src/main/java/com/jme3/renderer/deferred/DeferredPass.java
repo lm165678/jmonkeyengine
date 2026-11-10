@@ -34,5 +34,6 @@ package com.jme3.renderer.deferred;
 /** A stage may return false only before consuming geometry, to retain Forward rendering. */
 interface DeferredPass {
     boolean execute(DeferredRenderContext frame);
-    default void reset() { }
+    default void reset() {
+    }
 }

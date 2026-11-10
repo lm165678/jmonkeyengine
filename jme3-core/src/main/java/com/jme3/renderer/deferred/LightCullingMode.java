@@ -33,5 +33,18 @@ package com.jme3.renderer.deferred;
 
 import com.jme3.light.Light;
 
-/** Light-list construction policy, independent of the rendering pipeline. */
-public enum LightCullingMode { None, CPU, GPU, Auto }
+/**
+ * Light-list construction policy, independent of the rendering pipeline.
+ * Use {@code pipeline.setLightCullingMode(LightCullingMode.GPU)} on a
+ * {@link DeferredPipeline}; inspect its active path after rendering for fallback.
+ */
+public enum LightCullingMode {
+    /** Deferred lighting without tiled light lists; this does not select Forward. */
+    None,
+    /** Build tile light lists on the CPU. */
+    CPU,
+    /** Request OpenGL 4.3/SSBO compute culling; fall back to CPU if unavailable. */
+    GPU,
+    /** Prefer GPU culling when supported and within the SSBO budget, otherwise CPU. */
+    Auto
+}

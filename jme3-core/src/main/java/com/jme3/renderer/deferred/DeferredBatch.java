@@ -57,12 +57,16 @@ final class DeferredBatch {
     }
 
     boolean matches(LightList list, Texture ramp) {
-        if (colorRamp != ramp) return false;
+        if (colorRamp != ramp) {
+            return false;
+        }
         int count = 0;
         for (Light light : list) {
             if (!(light instanceof LightProbe)) {
                 count++;
-                if (!identities.contains(light)) return false;
+                if (!identities.contains(light)) {
+                    return false;
+                }
             }
         }
         return count == identities.size();

@@ -1,7 +1,9 @@
 MaterialDef Custom Deferred Lambert {
-    ShadingId 7
+    // Material-owned lighting: the engine loads this source and assigns the ID.
+    // Application code only constructs Material with this .j3md asset.
+    DeferredLightingShader Materials/Tiled/CustomLambert.frag
     MaterialParameters {
-        Int DeferredShadingId : 7
+        Int DeferredShadingId : 0
         Boolean UseMaterialColors : true
         Color Diffuse : 0.8 0.2 0.1 1.0
         Color Ambient : 0.8 0.2 0.1 1.0
@@ -9,7 +11,7 @@ MaterialDef Custom Deferred Lambert {
         Float Shininess : 1.0
     }
     Technique {
-        LightMode MultiPass
+        LightModel MultiPass
         VertexShader GLSL150: Common/MatDefs/Light/Lighting.vert
         FragmentShader GLSL150: Common/MatDefs/Light/Lighting.frag
         WorldParameters {
@@ -27,7 +29,7 @@ MaterialDef Custom Deferred Lambert {
     }
     Technique GBuffer {
         VertexShader GLSL330: Common/MatDefs/Light/Tiled/GBuffer.vert
-        FragmentShader GLSL330: Common/MatDefs/Light/Tiled/GBuffer.frag
+        FragmentShader GLSL330: Materials/Tiled/CustomLambertGBuffer.frag
         WorldParameters {
             WorldViewProjectionMatrix
             WorldMatrix
@@ -35,6 +37,7 @@ MaterialDef Custom Deferred Lambert {
             ViewMatrix
         }
         Defines {
+            DEFERRED_GBUFFER
             MATERIAL_COLORS : UseMaterialColors
         }
     }

@@ -232,7 +232,7 @@ MaterialDef PBR Terrain {
 
     Technique {
 
-        LightMode SinglePassAndImageBased
+        LightModel SinglePassAndImageBased
 
         VertexShader    GLSL300 GLSL150 GLSL130 GLSL100:   Common/MatDefs/Terrain/PBRTerrain.vert
         FragmentShader  GLSL300 GLSL150 GLSL130 GLSL100: Common/MatDefs/Terrain/PBRTerrain.frag
@@ -388,7 +388,7 @@ MaterialDef PBR Terrain {
 
     Technique GBuffer {
 
-        LightMode DeferredSurface
+        LightModel DeferredSurface
 
         VertexShader GLSL330:   Common/MatDefs/Terrain/PBRTerrain.vert
         FragmentShader GLSL330: Common/MatDefs/Terrain/PBRTerrain.frag

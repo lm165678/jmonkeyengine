@@ -56,10 +56,30 @@ import com.jme3.texture.Texture.WrapMode;
  * The only difference is it uses a much smaller heightmap, so it won't use
  * all the device's memory.
  *
+ * <p>Pipeline/FrameGraph usage: run main() from jme3-examples with OpenGL 4.3
+ * for GPU culling. Existing scene controls remain available; helper-based scenes
+ * use SPACE (terrain scenes: K). Configuration runs on the render thread.</p>
+ * <pre>{@code
+ * renderManager.setDeferredTileSize(16);
+ * useRenderPath(RenderPath.TiledDeferredGPU);
+ * // Switch back using the original Forward renderer:
+ * useRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
+ * with the shared model registry, select LightCullingMode and tile size, or
+ * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * Query its active path and fallback reason after rendering; a GPU request may
+ * fall back to CPU or Forward on unsupported contexts/materials.</p>
+ * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader
+ * and provide default Forward/GBuffer techniques; application code does not load
+ * or register a .frag. See Materials/Tiled/CustomLambert.j3md for a complete asset.</p>
+ * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
+ * -PrenderPathExample=TerrainTestAndroidRenderPath. Checks CPU/GPU pixels and Forward round trips;
+ * renderPipelineSuite additionally checks direct Pipeline installation.</p>
  * @author bowens,johnKkk
+
  */
 public class TerrainTestAndroidRenderPath extends RenderPathExample {
-
     private TerrainQuad terrain;
     private Material matRock;
     private Material matWire;
@@ -92,10 +112,12 @@ public class TerrainTestAndroidRenderPath extends RenderPathExample {
         matRock.setBoolean("useTriPlanarMapping", false);
 
         // ALPHA map (for splat textures)
-        matRock.setTexture("Alpha", assetManager.loadTexture("Textures/Terrain/splat/alphamap.png"));
+        matRock.setTexture(
+            "Alpha", assetManager.loadTexture("Textures/Terrain/splat/alphamap.png"));
 
         // HEIGHTMAP image (for the terrain heightmap)
-        Texture heightMapImage = assetManager.loadTexture("Textures/Terrain/splat/mountains128.png");
+        Texture heightMapImage =
+            assetManager.loadTexture("Textures/Terrain/splat/mountains128.png");
 
         // GRASS texture
         Texture grass = assetManager.loadTexture("Textures/Terrain/splat/grass.jpg");
@@ -136,7 +158,8 @@ public class TerrainTestAndroidRenderPath extends RenderPathExample {
          */
         terrain = new TerrainQuad("terrain", 33, 129, heightmap.getHeightMap());
         TerrainLodControl control = new TerrainLodControl(terrain, getCamera());
-        control.setLodCalculator( new DistanceLodCalculator(33, 2.7f) ); // patch size, and a multiplier
+        control.setLodCalculator(
+            new DistanceLodCalculator(33, 2.7f)); // patch size, and a multiplier
         terrain.addControl(control);
         terrain.setMaterial(matRock);
         terrain.setLocalTranslation(0, -100, 0);
@@ -169,7 +192,6 @@ public class TerrainTestAndroidRenderPath extends RenderPathExample {
         inputManager.addListener(actionListener, "triPlanar");
     }
     final private ActionListener actionListener = new ActionListener() {
-
         @Override
         public void onAction(String name, boolean pressed, float tpf) {
             if (name.equals("wireframe") && !pressed) {
@@ -183,9 +205,9 @@ public class TerrainTestAndroidRenderPath extends RenderPathExample {
                 triPlanar = !triPlanar;
                 if (triPlanar) {
                     matRock.setBoolean("useTriPlanarMapping", true);
-                    // Planar textures don't use the mesh's texture coordinates but real-world coordinates,
-                    // so we need to convert these texture-coordinate scales into real-world scales so it looks
-                    // the same when we switch to tri-planar mode.
+                    // Planar textures don't use the mesh's texture coordinates but real-world
+                    // coordinates, so we need to convert these texture-coordinate scales into
+                    // real-world scales so it looks the same when we switch to tri-planar mode.
                     matRock.setFloat("Tex1Scale", 1f / (512f / grassScale));
                     matRock.setFloat("Tex2Scale", 1f / (512f / dirtScale));
                     matRock.setFloat("Tex3Scale", 1f / (512f / rockScale));

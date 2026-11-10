@@ -44,4 +44,13 @@ public class ShadingIdExportTest {
   MaterialDef definition=new MaterialDef(null,"Legacy");ByteArrayOutputStream output=new ByteArrayOutputStream();
   new J3mdExporter().save(definition,output);assertFalse(output.toString("UTF-8").contains("ShadingId"));
  }
+ @Test public void preservesMaterialOwnedLightingAndExportsLightModel() throws Exception {
+  MaterialDef definition=new MaterialDef(null,"Automatic");definition.setDeferredLightingShader("Materials/Auto.frag");
+  com.jme3.material.TechniqueDef technique=new com.jme3.material.TechniqueDef("Default",0);
+  technique.setLightMode(com.jme3.material.TechniqueDef.LightMode.MultiPass);
+  technique.setShaderFile("test.vert","test.frag","GLSL100","GLSL100");definition.addTechniqueDef(technique);
+  ByteArrayOutputStream output=new ByteArrayOutputStream();new J3mdExporter().save(definition,output);
+  String text=output.toString("UTF-8");assertTrue(text.contains("DeferredLightingShader Materials/Auto.frag"));
+  assertTrue(text.contains("LightModel MultiPass"));assertFalse(text.contains("LightMode MultiPass"));assertFalse(text.contains("ShadingId"));
+ }
 }

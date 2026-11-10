@@ -18,67 +18,96 @@ public class DeferredResourcesTest {
     private static class TrackingRenderer extends NullRenderer {
         final NativeObjectManager objects = new NativeObjectManager();
         private int nextId = 1;
-        void register(NativeObject object) { object.setId(nextId++); objects.registerObject(object); }
+        void register(NativeObject object) {
+            object.setId(nextId++);
+            objects.registerObject(object);
+        }
         void registerTargets(DeferredResources resources) {
             register(resources.gbuffer);
-            for (com.jme3.texture.Texture texture : resources.targets) register(texture.getImage());
+            for (com.jme3.texture.Texture texture : resources.targets) {
+                register(texture.getImage());
+            }
         }
-        void flush() { objects.deleteUnused(this); }
-        final Set<Object> deleted = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
+        void flush() {
+            objects.deleteUnused(this);
+        }
+        final Set<Object> deleted =
+            Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
         private void deleted(NativeObject object) {
             assertTrue("Resource deleted twice", deleted.add(object));
             object.resetObject();
         }
-        @Override public void deleteImage(Image image) { deleted(image); }
-        @Override public void deleteFrameBuffer(FrameBuffer buffer) { deleted(buffer); }
-        @Override public void deleteBuffer(BufferObject buffer) { deleted(buffer); }
-        @Override public void deleteShader(Shader shader) { deleted(shader); }
+        @Override
+        public void deleteImage(Image image) {
+            deleted(image);
+        }
+        @Override
+        public void deleteFrameBuffer(FrameBuffer buffer) {
+            deleted(buffer);
+        }
+        @Override
+        public void deleteBuffer(BufferObject buffer) {
+            deleted(buffer);
+        }
+        @Override
+        public void deleteShader(Shader shader) {
+            deleted(shader);
+        }
     }
 
-    @Test public void resizeAndCleanupReleaseEachAllocationExactlyOnce() {
+    @Test
+    public void borrowedTargetsAreNotDisposedAndOwnedBuffersReleaseOnce() {
         TrackingRenderer renderer = new TrackingRenderer();
         DeferredResources resources = new DeferredResources(null, renderer);
-        resources.ensureTargets(65, 49);
+        com.jme3.renderer.framegraph.RenderTargetDefinition definition =
+            new com.jme3.renderer.framegraph.RenderTargetDefinition(1f, 1, Image.Format.Depth24,
+                Image.Format.RGBA32F, Image.Format.RGBA16F, Image.Format.RGBA16F,
+                Image.Format.RGBA16F, Image.Format.RGBA16F);
+        com.jme3.renderer.framegraph.RenderTarget target = definition.create(renderer, 65, 49);
+        resources.borrowTargets(target);
         renderer.registerTargets(resources);
-        FrameBuffer old = resources.gbuffer;
-        Image oldColor = resources.targets[0].getImage();
-        resources.ensureTargets(65, 49);
-        assertSame(old, resources.gbuffer);
-        assertTrue(renderer.deleted.isEmpty());
-        resources.ensureTargets(97, 73);
+        resources.releaseTargets();
         renderer.flush();
-        renderer.registerTargets(resources);
-        assertTrue(renderer.deleted.contains(old));
-        assertTrue(renderer.deleted.contains(oldColor));
-        assertEquals(7, renderer.deleted.size());
+        assertTrue(renderer.deleted.isEmpty());
+        resources.borrowTargets(target);
         resources.ensureGpuIndices(40);
         renderer.register(resources.gpuIndices);
-        BufferObject indices = resources.gpuIndices;
+        BufferObject old = resources.gpuIndices;
         resources.ensureGpuIndices(40);
-        assertSame(indices, resources.gpuIndices);
+        assertSame(old, resources.gpuIndices);
         resources.ensureGpuIndices(80);
         renderer.flush();
+        assertTrue(renderer.deleted.contains(old));
         renderer.register(resources.gpuIndices);
-        assertTrue(renderer.deleted.contains(indices));
-        FrameBuffer last = resources.gbuffer;
-        Image lastColor = resources.targets[0].getImage();
         resources.cleanup();
         renderer.flush();
-        assertTrue(renderer.deleted.contains(last));
-        assertTrue(renderer.deleted.contains(lastColor));
-        int deletions = renderer.deleted.size();
-        resources.cleanup();
-        renderer.flush();
-        assertEquals(deletions, renderer.deleted.size());
+        assertEquals(2, renderer.deleted.size());
         assertNull(resources.gbuffer);
+        assertNull(resources.targets[0]);
         assertNull(resources.gpuIndices);
-        try { resources.ensureTargets(8, 8); fail(); } catch (IllegalStateException expected) { }
+        resources.cleanup();
+        renderer.flush();
+        assertEquals(2, renderer.deleted.size());
+        definition.destroy(target);
+        renderer.flush();
+        assertEquals(9, renderer.deleted.size());
+        renderer.objects.deleteAllObjects(renderer);
+        assertEquals(9, renderer.deleted.size());
+        try {
+            resources.ensureGpuIndices(8);
+            fail();
+        } catch (IllegalStateException expected) {
+        }
     }
 
-    @Test public void modelChangesInvalidateLightingButKeepComputeProgram() {
+    @Test
+    public void modelChangesInvalidateLightingButKeepComputeProgram() {
         TrackingRenderer renderer = new TrackingRenderer();
         DesktopAssetManager assets = new DesktopAssetManager(false) {
-            @Override public Object loadAsset(String name) { return "void main(){\n// CUSTOM_MODELS\n}"; }
+            @Override
+            public Object loadAsset(String name) {
+                return "// CUSTOM_MODEL_FUNCTIONS\nvec4 subfaceShading(int shadingId) {\n// CUSTOM_MODEL_DISPATCH\nreturn vec4(0.0);\n}";
+            }
         };
         DeferredResources resources = new DeferredResources(assets, renderer);
         ShadingModelRegistry registry = new ShadingModelRegistry();
@@ -96,5 +125,21 @@ public class DeferredResourcesTest {
         resources.cleanup();
         renderer.flush();
         assertTrue(renderer.deleted.contains(compute));
+    }
+
+    @Test
+    public void fullSurfaceDispatchHasNoLegacyLayoutAdapter() {
+        java.util.Map<Integer, String> models = new java.util.TreeMap<>();
+        models.put(9, "vec4 deferredSurfaceModel9() { return getGBuffer4(); }");
+        models.put(10,
+            "vec3 deferredModel10(vec4 a, vec4 b, vec4 c, vec4 d, vec3 v, vec3 l, vec3 color) { return a.rgb; }");
+        String source = DeferredResources.assembleLightingSource(
+            "// CUSTOM_MODEL_FUNCTIONS\n// CUSTOM_MODEL_DISPATCH", models);
+        assertTrue(source.contains("if (shadingId == 9)"));
+        assertTrue(source.contains("return deferredSurfaceModel9();"));
+        assertFalse(source.contains("shadeLegacyModel9"));
+        assertTrue(source.contains("shadeLegacyModel10"));
+        assertFalse(source.contains("int(base.a)"));
+        assertFalse(source.contains("// CUSTOM_MODEL_DISPATCH"));
     }
 }

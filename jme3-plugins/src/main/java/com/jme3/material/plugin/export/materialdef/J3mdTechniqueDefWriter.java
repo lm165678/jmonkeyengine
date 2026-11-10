@@ -35,7 +35,7 @@ public class J3mdTechniqueDefWriter {
 
         //Light mode
         if(techniqueDef.getLightMode() != TechniqueDef.LightMode.Disable ){
-            out.write("        LightMode ");
+            out.write("        LightModel ");
             out.write(techniqueDef.getLightMode().name());
             out.write("\n\n");
         }

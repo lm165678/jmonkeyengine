@@ -52,6 +52,12 @@ import com.jme3.renderer.RenderPath;
 import com.jme3.renderer.Renderer;
 import com.jme3.renderer.ViewPort;
 import com.jme3.renderer.pipeline.RenderPipeline;
+import com.jme3.renderer.framegraph.FrameGraph;
+import com.jme3.renderer.framegraph.ResourceHandle;
+import com.jme3.renderer.framegraph.RenderTarget;
+import com.jme3.renderer.framegraph.RenderTargetDefinition;
+import com.jme3.texture.FrameBuffer;
+import com.jme3.texture.Image;
 import com.jme3.renderer.queue.GeometryList;
 import com.jme3.renderer.queue.RenderQueue;
 import com.jme3.scene.Geometry;
@@ -64,6 +70,34 @@ import java.util.Objects;
 /**
  * Deferred opaque pipeline. Passes operate on borrowed frame data; resources
  * belong to this viewport alone. Culling policy is separate from pipeline type.
+ *
+ * <p>Install from {@code SimpleApplication.simpleInitApp()} or another render-thread
+ * callback. Share the manager's registry to reuse its custom shading models:</p>
+ * <pre>{@code
+ * DeferredPipeline pipeline = new DeferredPipeline(
+ *         assetManager, renderManager.getDeferredShadingModels());
+ * pipeline.setLightCullingMode(LightCullingMode.GPU);
+ * pipeline.setTileSize(16);
+ * renderManager.setPipeline(viewPort, pipeline);
+ *
+ * // Change the backend without replacing the pipeline.
+ * pipeline.setLightCullingMode(LightCullingMode.CPU);
+ * pipeline.setLightCullingMode(LightCullingMode.Auto);
+ *
+ * // Explicitly use Forward for this viewport.
+ * renderManager.setPipeline(viewPort, new ForwardPipeline());
+ *
+ * // Or return control to RenderPath selection and select Forward.
+ * renderManager.setPipeline(viewPort, null);
+ * viewPort.setRenderPath(RenderPath.Inherit);
+ * renderManager.setRenderPath(RenderPath.Forward);
+ * }</pre>
+ * <p>{@code ForwardPipeline} is in {@code com.jme3.renderer.pipeline};
+ * {@code RenderPath} is in {@code com.jme3.renderer}. The manager initializes,
+ * resizes and cleans up the installed pipeline. Do not call these lifecycle
+ * methods yourself while it is installed, or share an instance across viewports.
+ * A directly installed pipeline takes precedence over RenderPath selection.</p>
+ * @see RenderManager#setPipeline(ViewPort, RenderPipeline)
  */
 public final class DeferredPipeline implements RenderPipeline {
     private final AssetManager assets;
@@ -74,6 +108,7 @@ public final class DeferredPipeline implements RenderPipeline {
     private final DeferredPass surfacePass = new GBufferPass();
     private final DeferredPass lightingPass = new DeferredLightingPass();
     private DeferredRenderContext frame;
+    private FrameGraph graph;
     private RenderManager rm;
     private ViewPort vp;
     private Renderer renderer;
@@ -84,49 +119,189 @@ public final class DeferredPipeline implements RenderPipeline {
     private RenderPath activePath = RenderPath.Forward;
     private String fallbackReason = "";
 
-    public DeferredPipeline(AssetManager assets) { this(assets, new ShadingModelRegistry()); }
+    /**
+     * Creates a pipeline with a private model registry, default Auto culling and
+     * 16-pixel tiles. Use the two-argument constructor to share custom models.
+     * @param assets non-null asset manager used to load pipeline shaders
+     */
+    public DeferredPipeline(AssetManager assets) {
+        this(assets, new ShadingModelRegistry());
+    }
+    /**
+     * Creates a pipeline using an existing registry, without allocating GPU resources.
+     * Example: {@code new DeferredPipeline(assetManager,
+     * renderManager.getDeferredShadingModels())}. Install with RenderManager.setPipeline; the
+     * manager owns its lifecycle.
+     * @param assets non-null asset manager
+     * @param models non-null registry, which may be shared by multiple pipelines
+     */
     public DeferredPipeline(AssetManager assets, ShadingModelRegistry models) {
         this.assets = Objects.requireNonNull(assets);
         this.models = Objects.requireNonNull(models);
     }
-    public ShadingModelRegistry getShadingModels() { return models; }
-    public void setLightCullingMode(LightCullingMode mode) { cullingMode = Objects.requireNonNull(mode); }
-    public LightCullingMode getLightCullingMode() { return cullingMode; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    /**
+     * Returns the initialized graph for read-only execution-order/pool diagnostics.
+     * Do not execute, clear or close it while this pipeline is installed.
+     * @return graph after initialization, otherwise null
+     */
+    public FrameGraph getFrameGraph() {
+        return graph;
+    }
+    public ShadingModelRegistry getShadingModels() {
+        return models;
+    }
+    /**
+     * Selects light-list construction on the render thread, for example
+     * {@code pipeline.setLightCullingMode(LightCullingMode.GPU)}.
+     * GPU and Auto can fall back to CPU; unsupported deferred viewport states
+     * use Forward. After rendering, inspect {@link #getActivePath()} and
+     * {@link #getFallbackReason()} rather than assuming the request was used.
+     * None still uses deferred lighting, but does not build tiled light lists.
+     * @param mode non-null requested culling policy
+     */
+    public void setLightCullingMode(LightCullingMode mode) {
+        cullingMode = Objects.requireNonNull(mode);
+    }
+    public LightCullingMode getLightCullingMode() {
+        return cullingMode;
+    }
+    /**
+     * Enables deferred rendering or leaves the opaque queue to Forward when false.
+     * Example: {@code pipeline.setEnabled(false)} temporarily bypasses this pipeline
+     * without releasing its resources or removing its viewport override.
+     * @param enabled true to render supported opaque geometry through deferred passes
+     */
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+    /**
+     * Sets tile width and height in pixels on the render thread.
+     * Example: {@code pipeline.setTileSize(16)}. Values need not be powers of two.
+     * Tune against representative scenes; smaller tiles can increase CPU binning
+     * cost. RenderManager.setDeferredTileSize does not configure this directly
+     * installed pipeline.
+     * @param size tile dimension, from 1 through 256 inclusive
+     */
     public void setTileSize(int size) {
-        if (size < 1 || size > 256) throw new IllegalArgumentException("Tile size must be 1..256");
+        if (size < 1 || size > 256) {
+            throw new IllegalArgumentException("Tile size must be 1..256");
+        }
         tileSize = size;
     }
-    public int getTileSize() { return tileSize; }
-    public RenderPath getActivePath() { return activePath; }
-    public int getDeferredGeometryCount() { return deferredCount; }
-    public int getForwardGeometryCount() { return forwardCount; }
-    public String getFallbackReason() { return fallbackReason; }
+    public int getTileSize() {
+        return tileSize;
+    }
+    /**
+     * Returns the last reported concrete path, initially Forward. Query after the
+     * viewport has rendered (for example in a SceneProcessor.postFrame callback).
+     * This is not a per-geometry report: unsupported geometry can still use Forward,
+     * and multiple independent light scopes can choose different culling backends.
+     * @return most recently reported rendering path
+     */
+    public RenderPath getActivePath() {
+        return activePath;
+    }
+    /** @return opaque geometries consumed by deferred passes in the latest render */
+    public int getDeferredGeometryCount() {
+        return deferredCount;
+    }
+    /** @return opaque geometries left for Forward; excludes transparent/GUI queues */
+    public int getForwardGeometryCount() {
+        return forwardCount;
+    }
+    /**
+     * Returns the current diagnostic text, or an empty string if none was recorded.
+     * Query after rendering alongside getActivePath and the geometry counts.
+     * This is not an aggregate reason list for all geometry/light scopes, and an
+     * empty string does not imply every geometry was rendered through deferred.
+     * @return fallback diagnostic, never null
+     */
+    public String getFallbackReason() {
+        return fallbackReason;
+    }
 
-    @Override public void initialize(RenderManager manager, ViewPort viewport) {
-        if (frame != null) throw new IllegalStateException("Pipeline already initialized");
+    @Override
+    public void initialize(RenderManager manager, ViewPort viewport) {
+        if (frame != null) {
+            throw new IllegalStateException("Pipeline already initialized");
+        }
         rm = Objects.requireNonNull(manager);
         vp = Objects.requireNonNull(viewport);
         renderer = manager.getRenderer();
         frame = new DeferredRenderContext(rm, vp, new DeferredResources(assets, renderer), models);
+        graph = new FrameGraph();
+        // Persistent light textures/buffers and program caches are borrowed;
+        // the graph owns the transient GBuffer and its physical allocation pool.
+        ResourceHandle<DeferredRenderContext> lights =
+            graph.importResource("Lights", DeferredRenderContext.class, () -> frame);
+        ResourceHandle<RenderTarget> surfaces = graph.createResource("GBuffer",
+            new RenderTargetDefinition(1f, 1, Image.Format.Depth24, Image.Format.RGBA32F,
+                Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F,
+                Image.Format.RGBA16F));
+        ResourceHandle<FrameBuffer> output = graph.importResource(
+            "ViewportOutput", FrameBuffer.class, () -> vp.getOutputFrameBuffer());
+        graph
+            .addPass("LightCulling",
+                context -> {
+                    if (!cullingPass.execute(context.get(lights))) {
+                        context.abort();
+                    }
+                })
+            .write(lights);
+        graph
+            .addPass("GBuffer",
+                context -> {
+                    DeferredRenderContext data = context.get(lights);
+                    data.resources.borrowTargets(context.get(surfaces));
+                    surfacePass.execute(data);
+                })
+            .read(lights)
+            .write(surfaces);
+        graph
+            .addPass("DeferredLighting",
+                context -> {
+                    context.get(surfaces);
+                    context.get(output);
+                    lightingPass.execute(context.get(lights));
+                })
+            .read(lights)
+            .read(surfaces)
+            .write(output);
+        graph.compile();
     }
-    @Override public boolean isInitialized() { return frame != null; }
-    @Override public void reshape(int width, int height) {
-        if (frame != null) frame.resources.releaseTargets();
+    @Override
+    public boolean isInitialized() {
+        return frame != null;
+    }
+    @Override
+    public void reshape(int width, int height) {
+        if (frame != null) {
+            frame.resources.releaseTargets();
+        }
+        if (graph != null) {
+            graph.clearResources();
+        }
     }
     private boolean supported(Geometry geometry) {
         Material material = geometry.getMaterial();
         MaterialDef def = material.getMaterialDef();
-        int id = def.getShadingId();
-        if (id == 0 || !models.supports(id)
-                || def.getTechniqueDefs("GBuffer") == null || material.isTransparent()) return false;
+        int id = models.resolve(def, assets);
+        if (id == 0 || !models.supports(id) || def.getTechniqueDefs("GBuffer") == null
+            || material.isTransparent()) {
+            return false;
+        }
         RenderState state = material.getAdditionalRenderState();
         if (state.getBlendMode() != RenderState.BlendMode.Off || state.isWireframe()
-                || !state.isDepthTest() || !state.isDepthWrite() || !state.isColorWrite()
-                || state.isStencilTest() || state.isPolyOffset()
-                || state.getDepthFunc() != RenderState.TestFunction.LessOrEqual) return false;
+            || !state.isDepthTest() || !state.isDepthWrite() || !state.isColorWrite()
+            || state.isStencilTest() || state.isPolyOffset()
+            || state.getDepthFunc() != RenderState.TestFunction.LessOrEqual) {
+            return false;
+        }
         if (material.getActiveTechnique() != null
-                && !TechniqueDef.DEFAULT_TECHNIQUE_NAME.equals(material.getActiveTechnique().getDef().getName())) return false;
+            && !TechniqueDef.DEFAULT_TECHNIQUE_NAME.equals(
+                material.getActiveTechnique().getDef().getName())) {
+            return false;
+        }
         // A GBuffer technique explicitly opts into the surface contract for its model ID.
         return true;
     }
@@ -135,27 +310,41 @@ public final class DeferredPipeline implements RenderPipeline {
         for (int i = 0; i < list.size(); i++) {
             Light l = list.get(i);
             if (!(l instanceof AmbientLight || l instanceof DirectionalLight
-                    || l instanceof PointLight || l instanceof SpotLight || l instanceof LightProbe)) return false;
+                    || l instanceof PointLight || l instanceof SpotLight
+                    || l instanceof LightProbe)) {
+                return false;
+            }
         }
         return true;
     }
 
-    @Override public void render(RenderQueue queue) {
-        if (frame == null) throw new IllegalStateException("Pipeline not initialized");
+    @Override
+    public void render(RenderQueue queue) {
+        if (frame == null) {
+            throw new IllegalStateException("Pipeline not initialized");
+        }
         try {
             renderFrame(queue);
         } finally {
             // Retain list capacity, not scene objects or material textures.
-            for (DeferredBatch batch : batches) batch.reset();
+            for (DeferredBatch batch : batches) {
+                batch.reset();
+            }
             forward.clear();
             frame.lights.clear();
         }
     }
 
     private void renderFrame(RenderQueue queue) {
-        deferredCount = 0; forwardCount = queue.getOpaqueQueue().size();
-        activePath = RenderPath.Forward; fallbackReason = "";
-        if (!enabled) { frame.resources.releaseTargets(); return; }
+        deferredCount = 0;
+        forwardCount = queue.getOpaqueQueue().size();
+        activePath = RenderPath.Forward;
+        fallbackReason = "";
+        if (!enabled) {
+            frame.resources.releaseTargets();
+            graph.clearResources();
+            return;
+        }
         renderer.setFrameBuffer(vp.getOutputFrameBuffer());
         if (renderer.getCurrentFrameBufferSamples() > 1) {
             fallbackReason = "Multisampled targets retain forward rendering; use FXAA for deferred";
@@ -163,21 +352,24 @@ public final class DeferredPipeline implements RenderPipeline {
         }
         Camera camera = vp.getCamera();
         if (camera.getWidth() <= 0 || camera.getHeight() <= 0) {
-            fallbackReason = "Viewport has no drawable area"; return;
+            fallbackReason = "Viewport has no drawable area";
+            return;
         }
         EnumSet<Caps> caps = renderer.getCaps();
         if (!caps.containsAll(EnumSet.of(Caps.GLSL330, Caps.FrameBufferMRT, Caps.FloatColorBuffer))
-                || renderer.getLimits().get(Limits.FrameBufferMrtAttachments) < 5) {
-            fallbackReason = "Requires GLSL330 and five floating-point MRT attachments"; return;
+            || renderer.getLimits().get(Limits.FrameBufferMrtAttachments) < 5) {
+            fallbackReason = "Requires GLSL330 and five floating-point MRT attachments";
+            return;
         }
         if (camera.getViewPortLeft() != 0 || camera.getViewPortBottom() != 0
-                || camera.getViewPortRight() != 1 || camera.getViewPortTop() != 1
-                || !vp.isClearDepth() || rm.getForcedTechnique() != null
-                || rm.getForcedMaterial() != null
-                || (vp.getOutputFrameBuffer() != null && vp.getOutputFrameBuffer().getSamples() > 1)
-                || rm.getForcedRenderState() != null || !rm.getForcedMatParams().isEmpty()
-                || rm.getLightFilter() == null || rm.getLightFilter().getClass() != DefaultLightFilter.class) {
-            fallbackReason = "Viewport or render overrides require forward rendering"; return;
+            || camera.getViewPortRight() != 1 || camera.getViewPortTop() != 1 || !vp.isClearDepth()
+            || rm.getForcedTechnique() != null || rm.getForcedMaterial() != null
+            || (vp.getOutputFrameBuffer() != null && vp.getOutputFrameBuffer().getSamples() > 1)
+            || rm.getForcedRenderState() != null || !rm.getForcedMatParams().isEmpty()
+            || rm.getLightFilter() == null
+            || rm.getLightFilter().getClass() != DefaultLightFilter.class) {
+            fallbackReason = "Viewport or render overrides require forward rendering";
+            return;
         }
         forward.clear();
         batchCount = 0;
@@ -197,7 +389,9 @@ public final class DeferredPipeline implements RenderPipeline {
                 }
             }
             if (selected == null) {
-                if (batchCount == batches.size()) batches.add(new DeferredBatch());
+                if (batchCount == batches.size()) {
+                    batches.add(new DeferredBatch());
+                }
                 selected = batches.get(batchCount++);
                 selected.reset();
                 selected.colorRamp = ramp;
@@ -212,11 +406,16 @@ public final class DeferredPipeline implements RenderPipeline {
         }
         for (int i = 0; i < batchCount; i++) {
             DeferredBatch batch = batches.get(i);
-            if (renderBatch(batch)) deferredCount += batch.geometries.size();
-            else forward.addAll(batch.geometries);
+            if (renderBatch(batch)) {
+                deferredCount += batch.geometries.size();
+            } else {
+                forward.addAll(batch.geometries);
+            }
         }
         opaque.clear();
-        for (Geometry geometry : forward) opaque.add(geometry);
+        for (Geometry geometry : forward) {
+            opaque.add(geometry);
+        }
         forwardCount = forward.size();
     }
 
@@ -226,27 +425,35 @@ public final class DeferredPipeline implements RenderPipeline {
         frame.cullingMode = cullingMode;
         String oldTechnique = rm.getForcedTechnique();
         try {
-            if (!cullingPass.execute(frame)) {
+            if (!graph.execute(rm, vp)) {
                 fallbackReason = frame.fallbackReason;
                 return false;
             }
-            if (!frame.fallbackReason.isEmpty()) fallbackReason = frame.fallbackReason;
-            frame.resources.ensureTargets(vp.getCamera().getWidth(), vp.getCamera().getHeight());
+            if (!frame.fallbackReason.isEmpty()) {
+                fallbackReason = frame.fallbackReason;
+            }
             activePath = frame.untiled ? RenderPath.Deferred
-                    : frame.gpu ? RenderPath.TiledDeferredGPU : RenderPath.TiledDeferredCPU;
-            surfacePass.execute(frame);
-            lightingPass.execute(frame);
+                : frame.gpu            ? RenderPath.TiledDeferredGPU
+                                       : RenderPath.TiledDeferredCPU;
             return true;
         } finally {
             rm.setForcedTechnique(oldTechnique);
             renderer.setFrameBuffer(vp.getOutputFrameBuffer());
             renderer.setBackgroundColor(vp.getBackgroundColor());
             rm.setCamera(vp.getCamera(), false);
+            frame.resources.releaseTargets();
             frame.batch = null;
         }
     }
-    @Override public void cleanup() {
-        if (frame != null) frame.resources.cleanup();
+    @Override
+    public void cleanup() {
+        if (graph != null) {
+            graph.close();
+            graph = null;
+        }
+        if (frame != null) {
+            frame.resources.cleanup();
+        }
         surfacePass.reset();
         cullingPass.reset();
         frame = null;
