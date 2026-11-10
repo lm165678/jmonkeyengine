@@ -1,4 +1,5 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 
 #if defined(HAS_GLOWMAP) || defined(HAS_COLORMAP) || (defined(HAS_LIGHTMAP) && !defined(SEPARATE_TEXCOORD))
     #define NEED_TEXCOORD1
@@ -47,4 +48,8 @@ void main(){
     #endif
 
     gl_FragColor = color;
+    #ifdef DEFERRED_GBUFFER
+    writeDeferredSurface(color.rgb,vec3(0.0,0.0,1.0),1.0,vec3(0.0),
+                         color.rgb,color.a,vec3(0.0),0.0,m_DeferredShadingId);
+    #endif
 }

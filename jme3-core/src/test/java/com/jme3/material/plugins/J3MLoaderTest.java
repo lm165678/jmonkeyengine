@@ -64,6 +64,27 @@ public class J3MLoaderTest {
     }
 
     @Test
+    public void shadingIdIsOptional() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Legacy {\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals(0, ((MaterialDef) j3MLoader.load(assetInfo)).getShadingId());
+    }
+
+    @Test
+    public void shadingIdIsParsed() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Deferred {\n ShadingId 65535\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals(65535, ((MaterialDef) j3MLoader.load(assetInfo)).getShadingId());
+    }
+
+    @Test(expected = IOException.class)
+    public void invalidShadingIdIsRejected() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Invalid {\n ShadingId -1\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        j3MLoader.load(assetInfo);
+    }
+
+    @Test
     public void fixedPipelineTechnique_shouldBeIgnored() throws IOException {
         when(assetInfo.openStream()).thenReturn(J3MLoader.class.getResourceAsStream("/no-shader-specified.j3md"));
         MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);

@@ -1,6 +1,10 @@
 MaterialDef Phong Lighting {
+    ShadingId 1
 
     MaterialParameters {
+        Texture2D DeferredLightData -LINEAR
+        Int DeferredLightCount
+        Int DeferredShadingId
 
         // Compute vertex lighting in the shader
         // For better performance
@@ -336,4 +340,51 @@ MaterialDef Phong Lighting {
         }
     }
 
+
+    Technique GBuffer {
+        LightMode DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/SPLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/SPLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            NormalMatrix
+            WorldViewMatrix
+            ViewMatrix
+            CameraPosition
+            WorldMatrix
+            ViewProjectionMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            VERTEX_COLOR : UseVertexColor
+            VERTEX_LIGHTING : VertexLighting
+            MATERIAL_COLORS : UseMaterialColors
+            DIFFUSEMAP : DiffuseMap
+            NORMALMAP : NormalMap
+            SPECULARMAP : SpecularMap
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            ALPHAMAP : AlphaMap
+            COLORRAMP : ColorRamp
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            USE_REFLECTION : EnvMap
+            SPHERE_MAP : EnvMapAsSphereMap
+            NUM_BONES : NumberOfBones
+            INSTANCING : UseInstancing
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+
+            // fog - jayfella
+            USE_FOG : UseFog
+            FOG_LINEAR : LinearFog
+            FOG_EXP : ExpFog
+            FOG_EXPSQ : ExpSqFog
+        }
+    }
 }

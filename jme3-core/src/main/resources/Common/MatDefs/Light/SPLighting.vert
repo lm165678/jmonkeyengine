@@ -20,7 +20,20 @@ uniform vec4 m_Specular;
 uniform float m_Shininess;
 
 #if defined(VERTEX_LIGHTING)
+    #ifdef DEFERRED_GBUFFER
+    uniform sampler2D m_DeferredLightData;
+    uniform int m_DeferredLightCount;
+    vec4 deferredVertexLight(int index) {
+        int record=index%3;
+        vec4 color=texelFetch(m_DeferredLightData,ivec2(0,index/3),0);
+        vec4 value=texelFetch(m_DeferredLightData,ivec2(record,index/3),0);
+        if(record==1) value.xyz=(g_ViewMatrix*vec4(value.xyz,clamp(color.w,0.0,1.0))).xyz;
+        else if(record==2) value.xyz=(g_ViewMatrix*vec4(value.xyz,0.0)).xyz;
+        return value;
+    }
+    #else
     uniform vec4 g_LightData[NB_LIGHTS];
+    #endif
 #endif
 uniform vec4 g_AmbientLightColor;
 varying vec2 texCoord;
@@ -147,9 +160,18 @@ void main(){
         vec3 specularAccum = vec3(0.0);
         vec4 diffuseColor;
         vec3 specularColor;
+        #ifdef DEFERRED_GBUFFER
+        for (int i=0;i<m_DeferredLightCount*3;i+=3){
+        #else
         for (int i =0;i < NB_LIGHTS; i+=3){
+        #endif
+            #ifdef DEFERRED_GBUFFER
+            vec4 lightColor=deferredVertexLight(i);
+            vec4 lightData1=deferredVertexLight(i+1);
+            #else
             vec4 lightColor = g_LightData[i];            
-            vec4 lightData1 = g_LightData[i+1];            
+            vec4 lightData1 = g_LightData[i+1];
+            #endif
             #ifdef MATERIAL_COLORS
               diffuseColor  = m_Diffuse * vec4(lightColor.rgb, 1.0);                
               specularColor = m_Specular.rgb * lightColor.rgb;
@@ -169,7 +191,11 @@ void main(){
                 // allow use of control flow
             if(lightColor.w > 1.0){
             #endif
+               #ifdef DEFERRED_GBUFFER
+               vec4 lightDirection=deferredVertexLight(i+2);
+               #else
                vec4 lightDirection = g_LightData[i+2];
+               #endif
                spotFallOff = computeSpotFalloff(lightDirection, lightVec);
             #if __VERSION__ >= 110
             }

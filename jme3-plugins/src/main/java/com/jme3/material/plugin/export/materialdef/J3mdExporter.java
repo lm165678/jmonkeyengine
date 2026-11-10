@@ -49,6 +49,9 @@ public class J3mdExporter {
 //        }
 
         out.write("MaterialDef " + matDef.getName() + " {\n");
+        if (matDef.getShadingId() != 0) {
+            out.write("    ShadingId " + matDef.getShadingId() + "\n");
+        }
         out.write("    MaterialParameters {\n");
         for (MatParam matParam : matDef.getMaterialParams()) {
             paramWriter.write(matParam, out);

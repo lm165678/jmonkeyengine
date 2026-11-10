@@ -38,6 +38,15 @@ package com.jme3.renderer.opengl;
  */
 public interface GL4 extends GL3 {
 
+    int GL_COMPUTE_SHADER = 0x91B9;
+    int GL_SHADER_STORAGE_BARRIER_BIT = 0x2000;
+    default void glDispatchCompute(int x, int y, int z) {
+        throw new UnsupportedOperationException("Compute shaders are unavailable");
+    }
+    default void glMemoryBarrier(int barriers) {
+        throw new UnsupportedOperationException("Memory barriers are unavailable");
+    }
+
     public static final int GL_TESS_CONTROL_SHADER = 0x8E88;
     public static final int GL_TESS_EVALUATION_SHADER = 0x8E87;
     public static final int GL_PATCHES = 0xE;

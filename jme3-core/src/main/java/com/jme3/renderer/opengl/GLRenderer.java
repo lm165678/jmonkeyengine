@@ -300,6 +300,7 @@ public final class GLRenderer implements Renderer {
         }
 
         limits.put(Limits.FragmentTextureUnits, getInteger(GL.GL_MAX_TEXTURE_IMAGE_UNITS));
+        context.boundTextures = new Image[getInteger(GL.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS)];
 
         if (caps.contains(Caps.OpenGLES20)) {
             limits.put(Limits.FragmentUniformVectors, getInteger(GL.GL_MAX_FRAGMENT_UNIFORM_VECTORS));
@@ -1356,6 +1357,11 @@ public final class GLRenderer implements Renderer {
 
     public int convertShaderType(ShaderType type) {
         switch (type) {
+            case Compute:
+                if (!caps.contains(Caps.OpenGL43)) {
+                    throw new UnsupportedOperationException("Compute requires OpenGL 4.3");
+                }
+                return GL4.GL_COMPUTE_SHADER;
             case Fragment:
                 return GL.GL_FRAGMENT_SHADER;
             case Vertex:
@@ -1599,6 +1605,23 @@ public final class GLRenderer implements Renderer {
             updateShaderBufferBlocks(shader);
             bindProgram(shader);
         }
+    }
+
+    @Override
+    public void dispatchCompute(int x, int y, int z) {
+        if (!caps.contains(Caps.OpenGL43) || gl4 == null) {
+            throw new UnsupportedOperationException("Compute requires OpenGL 4.3");
+        }
+        if (x < 1 || y < 1 || z < 1 || x > 65535 || y > 65535 || z > 65535) {
+            throw new IllegalArgumentException("Compute group counts outside portable limits");
+        }
+        gl4.glDispatchCompute(x, y, z);
+        gl4.glMemoryBarrier(GL4.GL_SHADER_STORAGE_BARRIER_BIT);
+    }
+
+    @Override
+    public int getCurrentFrameBufferSamples() {
+        return Math.max(1, getInteger(0x80A9)); // GL_SAMPLES
     }
 
     @Override
@@ -2545,6 +2568,10 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public void setTexture(int unit, Texture tex) {
+        if (unit < 0 || unit >= context.boundTextures.length) {
+            throw new RendererException("Texture unit " + unit + " exceeds hardware capacity "
+                    + context.boundTextures.length);
+        }
         Image image = tex.getImage();
         if (image.isUpdateNeeded() || (image.isGeneratedMipmapsRequired() && !image.isMipmapsGenerated())) {
             // Check NPOT requirements

@@ -74,6 +74,12 @@ public class ViewPort {
     protected final ColorRGBA backColor = new ColorRGBA(0,0,0,0);
     protected boolean clearDepth = false, clearColor = false, clearStencil = false;
     private boolean enabled = true;
+    private RenderPath renderPath = RenderPath.Inherit;
+
+    /** Overrides the manager's rendering path for this viewport. Render-thread only. */
+    public void setRenderPath(RenderPath path) { renderPath=java.util.Objects.requireNonNull(path); }
+    public RenderPath getRenderPath() { return renderPath; }
+
 
     /**
      * Create a new viewport. User code should generally use these methods instead:<br>

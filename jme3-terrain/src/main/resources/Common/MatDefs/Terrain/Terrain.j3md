@@ -1,6 +1,9 @@
 MaterialDef Terrain {
+    ShadingModelId 3
+
 
 	MaterialParameters {
+        Int DeferredShadingId
 
         // use tri-planar mapping
         Boolean useTriPlanarMapping
@@ -29,4 +32,18 @@ MaterialDef Terrain {
 	
     Technique {
     }
+
+    Technique GBuffer {
+		VertexShader GLSL330:   Common/MatDefs/Terrain/Terrain.vert
+		FragmentShader GLSL330: Common/MatDefs/Terrain/Terrain.frag
+
+		WorldParameters {
+			WorldViewProjectionMatrix
+		}
+
+        Defines {
+            DEFERRED_GBUFFER
+            TRI_PLANAR_MAPPING : useTriPlanarMapping
+        }
+	}
 }

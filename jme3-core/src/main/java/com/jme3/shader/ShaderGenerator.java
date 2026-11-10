@@ -129,7 +129,7 @@ public abstract class ShaderGenerator {
     protected String buildShader(List<ShaderNode> shaderNodes, ShaderGenerationInfo info, ShaderType type) {
         if (type == ShaderType.TessellationControl ||
             type == ShaderType.TessellationEvaluation || 
-            type == ShaderType.Geometry) {
+            type == ShaderType.Geometry || type == ShaderType.Compute) {
             // TODO: Those are not supported.
             // Too much code assumes that type is either Vertex or Fragment
             return null;

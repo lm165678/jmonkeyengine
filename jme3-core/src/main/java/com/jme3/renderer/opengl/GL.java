@@ -45,6 +45,8 @@ import java.nio.ShortBuffer;
  */
 public interface GL {
 
+    public static final int GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4D;
+
     public static final int GL_ALPHA = 0x1906;
     public static final int GL_ALWAYS = 0x207;
     public static final int GL_ARRAY_BUFFER = 0x8892;

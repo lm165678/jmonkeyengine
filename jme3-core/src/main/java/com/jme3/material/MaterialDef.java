@@ -51,6 +51,7 @@ public class MaterialDef{
 
     private String name;
     private String assetName;
+    private int shadingId;
     private AssetManager assetManager;
 
     private Map<String, List<TechniqueDef>> techniques;
@@ -84,6 +85,33 @@ public class MaterialDef{
      */
     public String getAssetName() {
         return assetName;
+    }
+
+    /**
+     * Returns the deferred shading model identifier. Zero opts out of deferred
+     * shading, preserving the existing forward rendering path.
+     * @return shading model identifier, or zero for forward rendering
+     */
+    public int getShadingModelId() { return shadingId; }
+
+    public void setShadingModelId(int id) { setShadingId(id); }
+
+    public void setShadingModel(ShadingModel model) { setShadingId(model.getId()); }
+
+    public int getShadingId() {
+        return shadingId;
+    }
+
+    /**
+     * Selects a deferred shading model. The renderer must also recognize the
+     * identifier and the material must provide a compatible G-buffer technique.
+     * @param shadingId identifier in the unsigned 16-bit range; zero opts out
+     */
+    public void setShadingId(int shadingId) {
+        if (shadingId < 0 || shadingId > 65535) {
+            throw new IllegalArgumentException("ShadingId must be between 0 and 65535");
+        }
+        this.shadingId = shadingId;
     }
 
     /**

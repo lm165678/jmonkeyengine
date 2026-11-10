@@ -168,6 +168,14 @@ public interface Renderer {
      */
     public void setShader(Shader shader);
 
+    /** Dispatches the current compute shader and makes SSBO writes visible. */
+    default void dispatchCompute(int groupsX, int groupsY, int groupsZ) {
+        throw new UnsupportedOperationException("Compute shaders are unavailable");
+    }
+
+    /** Number of samples in the currently bound framebuffer (one if unknown). */
+    default int getCurrentFrameBufferSamples() { return 1; }
+
     /**
      * Deletes a shader. This method also deletes
      * the attached shader sources.

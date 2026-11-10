@@ -1,0 +1,41 @@
+MaterialDef Custom Deferred Lambert {
+    ShadingId 7
+    MaterialParameters {
+        Int DeferredShadingId : 7
+        Boolean UseMaterialColors : true
+        Color Diffuse : 0.8 0.2 0.1 1.0
+        Color Ambient : 0.8 0.2 0.1 1.0
+        Color Specular : 0.0 0.0 0.0 1.0
+        Float Shininess : 1.0
+    }
+    Technique {
+        LightMode MultiPass
+        VertexShader GLSL150: Common/MatDefs/Light/Lighting.vert
+        FragmentShader GLSL150: Common/MatDefs/Light/Lighting.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+            NormalMatrix
+            WorldViewMatrix
+            ViewMatrix
+            CameraPosition
+            WorldMatrix
+            ViewProjectionMatrix
+        }
+        Defines {
+            MATERIAL_COLORS : UseMaterialColors
+        }
+    }
+    Technique GBuffer {
+        VertexShader GLSL330: Common/MatDefs/Light/Tiled/GBuffer.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/Tiled/GBuffer.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+            WorldMatrix
+            NormalMatrix
+            ViewMatrix
+        }
+        Defines {
+            MATERIAL_COLORS : UseMaterialColors
+        }
+    }
+}

@@ -1,5 +1,79 @@
 //apply plugin:'application'
 
+task tiledSceneBenchmark(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.renderpath.BenchmarkTiledDeferred'
+    classpath = sourceSets.main.runtimeClasspath
+    if (project.hasProperty('nearView')) args '--near'
+    if (project.hasProperty('downView')) args '--down'
+}
+
+task renderPathSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.renderpath.RenderPathSmoke'
+    classpath = sourceSets.main.runtimeClasspath
+    args project.findProperty('renderPathExample') ?: 'TestDeferredShading'
+    if (project.hasProperty('renderPathView')) args project.property('renderPathView')
+}
+
+def renderPathScenes = [
+    'TerrainTestAdvancedRenderPath', 'TerrainTestAndroidRenderPath',
+    'TestDeferredPBRShading', 'TestDeferredShading', 'TestDeferredShadingPathShadow',
+    'TestPBRTerrainAdvancedRenderPath', 'TestPBRTerrainRenderPath',
+    'TestRenderPathChanged', 'TestRenderPathPointDirectionalAndSpotLightShadows',
+    'TestShadingModel', 'TestSimpleDeferredLighting', 'TestTileBasedDeferredShading',
+    'TestDeferredFeatures', 'TestRenderPathIsolation', 'TestDeferredTerrainFeatures'
+]
+task renderPathSuite {
+    group = 'verification'
+    description = 'Runs all ported render-path scenes and feature/isolation pixel regressions.'
+}
+
+task renderPipelineSuite {
+    group = 'verification'
+    description = 'Checks direct Pipeline installation, CPU/GPU policies and replacement lifecycle.'
+}
+def previousDirectPipelineTask = null
+['TestDeferredFeatures', 'TestRenderPathIsolation'].each { scene ->
+    def directTask = tasks.create(name: "renderPipelineCheck${scene}", type: JavaExec) {
+        dependsOn 'classes'
+        main = 'jme3test.renderpath.RenderPathSmoke'
+        classpath = sourceSets.main.runtimeClasspath
+        args scene
+        systemProperty 'renderpath.direct', 'true'
+    }
+    if (previousDirectPipelineTask != null) directTask.mustRunAfter previousDirectPipelineTask
+    previousDirectPipelineTask = directTask
+    renderPipelineSuite.dependsOn directTask
+}
+def previousSceneTask = null
+renderPathScenes.each { scene ->
+    def sceneTask = tasks.create(name: "renderPathCheck${scene}", type: JavaExec) {
+        dependsOn 'classes'
+        main = 'jme3test.renderpath.RenderPathSmoke'
+        classpath = sourceSets.main.runtimeClasspath
+        args scene
+    }
+    // Keep graphics checks sequential even when Gradle parallelism is enabled.
+    if (previousSceneTask != null) sceneTask.mustRunAfter previousSceneTask
+    previousSceneTask = sceneTask
+    renderPathSuite.dependsOn sceneTask
+}
+
+// Offscreen regression checks for the optional tiled deferred renderer.
+['tiledDeferredSmoke': [], 'tiledDeferredSmokeGL33': ['--gl33'],
+ 'tiledDeferredSmokeOverflow': ['--overflow'],
+ 'tiledDeferredBenchmark': ['--benchmark']].each { taskName, extraArgs ->
+    tasks.create(name: taskName, type: JavaExec) {
+        group = 'verification'
+        description = 'Checks tiled deferred rendering and Forward mode round trips offscreen.'
+        dependsOn 'classes'
+        main = 'jme3test.light.TestTiledDeferred'
+        classpath = sourceSets.main.runtimeClasspath
+        args(['--smoke'] + extraArgs)
+    }
+}
+
 if (!hasProperty('mainClass')) {
     ext.mainClass = 'jme3test.TestChooser'
 }

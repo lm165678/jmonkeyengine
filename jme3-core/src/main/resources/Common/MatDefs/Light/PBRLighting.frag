@@ -1,4 +1,5 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 #import "Common/ShaderLib/PBR.glsllib"
 #import "Common/ShaderLib/Parallax.glsllib"
 #import "Common/ShaderLib/Lighting.glsllib"
@@ -226,6 +227,7 @@ void main(){
 
 
     float ndotv = max( dot( normal, viewDir ),0.0);
+    #ifndef DEFERRED_GBUFFER
     for( int i = 0;i < NB_LIGHTS; i+=3){
         vec4 lightColor = g_LightData[i];
         vec4 lightData1 = g_LightData[i+1];                
@@ -257,6 +259,8 @@ void main(){
         
         gl_FragColor.rgb += directLighting * fallOff;
     }
+
+    #endif
 
     #if NB_PROBES >= 1
         vec3 color1 = vec3(0.0);
@@ -314,5 +318,9 @@ void main(){
         gl_FragColor += emissive * pow(emissive.a, m_EmissivePower) * m_EmissiveIntensity;
     #endif
     gl_FragColor.a = alpha;
+    #ifdef DEFERRED_GBUFFER
+    writeDeferredSurface(diffuseColor.rgb,normal,Roughness,fZero,
+                         gl_FragColor.rgb,alpha,vec3(0.0),0.0,m_DeferredShadingId);
+    #endif
    
 }

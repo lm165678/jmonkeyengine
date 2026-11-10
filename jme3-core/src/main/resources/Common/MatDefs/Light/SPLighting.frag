@@ -1,4 +1,5 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 #import "Common/ShaderLib/Parallax.glsllib"
 #import "Common/ShaderLib/Optics.glsllib"
 #ifndef VERTEX_LIGHTING
@@ -181,6 +182,62 @@ void main(){
        #endif
        specularColor.rgb *= lightMapColor;
        diffuseColor.rgb  *= lightMapColor;
+    #endif
+
+    #ifdef DEFERRED_GBUFFER
+        vec3 deferredDiffuse;
+        vec3 deferredSpec=vec3(0.0);
+        vec3 deferredBase;
+        vec3 deferredN=vec3(0.0,0.0,1.0);
+        vec3 deferredRef=vec3(0.0);
+        float deferredFlags=0.0;
+        float deferredParameter=1.0;
+        int deferredModel=m_DeferredShadingId;
+        #ifdef VERTEX_LIGHTING
+            // Preserve vertex-lighting interpolation, but compose through the
+            // deferred path. Direct lighting is evaluated by the vertex shader.
+            deferredDiffuse=vec3(0.0);
+            deferredBase=AmbientSum*diffuseColor.rgb+DiffuseSum.rgb*diffuseColor.rgb+SpecularSum*specularColor.rgb;
+            deferredModel=3;
+        #else
+            deferredDiffuse=DiffuseSum.rgb*diffuseColor.rgb;
+            deferredSpec=SpecularSum*specularColor.rgb;
+            deferredBase=AmbientSum*diffuseColor.rgb;
+            deferredParameter=m_Shininess;
+            #ifdef NORMALMAP
+                deferredN=normalize(transpose(mat3(g_ViewMatrix))*tbnMat*normal);
+            #else
+                deferredN=normalize(transpose(mat3(g_ViewMatrix))*normal);
+            #endif
+            #ifdef USE_REFLECTION
+                vec4 environment=Optics_GetEnvColor(m_EnvMap,refVec.xyz);
+                deferredRef=environment.rgb*refVec.w*specularColor.rgb;
+                deferredSpec*=1.0-refVec.w;
+                deferredFlags+=2.0;
+            #endif
+            #ifdef COLORRAMP
+                deferredFlags+=1.0;
+            #endif
+        #endif
+        #ifdef USE_FOG
+            float fogTransmission=1.0;
+            #ifdef FOG_LINEAR
+                float f=clamp((m_LinearFog.y-fog_distance)/(m_LinearFog.y-m_LinearFog.x),0.0,1.0);
+                deferredBase=mix(m_FogColor.rgb,deferredBase,f);fogTransmission*=f;
+            #endif
+            #ifdef FOG_EXP
+                float e=clamp(exp(-fog_distance*m_ExpFog),0.0,1.0);
+                deferredBase=mix(m_FogColor.rgb,deferredBase,e);fogTransmission*=e;
+            #endif
+            #ifdef FOG_EXPSQ
+                float q=clamp(exp(-pow(fog_distance*m_ExpSqFog,2.0)),0.0,1.0);
+                deferredBase=mix(m_FogColor.rgb,deferredBase,q);fogTransmission*=q;
+            #endif
+            deferredDiffuse*=fogTransmission;deferredSpec*=fogTransmission;deferredRef*=fogTransmission;
+        #endif
+        writeDeferredSurface(deferredDiffuse,deferredN,deferredParameter,deferredSpec,
+                             deferredBase,alpha,deferredRef,deferredFlags,deferredModel);
+        return;
     #endif
 
     #ifdef VERTEX_LIGHTING

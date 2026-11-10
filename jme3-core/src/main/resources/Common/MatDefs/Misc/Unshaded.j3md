@@ -1,6 +1,8 @@
 MaterialDef Unshaded {
+    ShadingId 3
 
     MaterialParameters {
+        Int DeferredShadingId
         Texture2D ColorMap
         Texture2D LightMap
         Color Color (Color)
@@ -192,6 +194,32 @@ MaterialDef Unshaded {
             NUM_BONES : NumberOfBones
             INSTANCING : UseInstancing
             HAS_POINTSIZE : PointSize
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+        }
+    }
+
+    Technique GBuffer {
+        VertexShader GLSL330:   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330: Common/MatDefs/Misc/Unshaded.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            INSTANCING : UseInstancing
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            HAS_COLORMAP : ColorMap
+            HAS_LIGHTMAP : LightMap
+            HAS_VERTEXCOLOR : VertexColor
+            HAS_POINTSIZE : PointSize
+            HAS_COLOR : Color
+            NUM_BONES : NumberOfBones
+            DISCARD_ALPHA : AlphaDiscardThreshold
             NUM_MORPH_TARGETS: NumberOfMorphTargets
             NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
         }

@@ -628,6 +628,12 @@ public class LwjglGL extends LwjglRender implements GL, GL2, GL3, GL4 {
     }
 
     @Override
+    public void glDispatchCompute(int x, int y, int z) { GL43.glDispatchCompute(x, y, z); }
+
+    @Override
+    public void glMemoryBarrier(int barriers) { org.lwjgl.opengl.GL42.glMemoryBarrier(barriers); }
+
+    @Override
     public void glDeleteVertexArrays(final IntBuffer arrays) {
         checkLimit(arrays);
         ARBVertexArrayObject.glDeleteVertexArrays(arrays);

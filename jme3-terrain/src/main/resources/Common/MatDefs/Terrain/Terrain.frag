@@ -1,3 +1,5 @@
+#import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 uniform sampler2D m_Alpha;
 uniform sampler2D m_Tex1;
 uniform sampler2D m_Tex2;
@@ -59,5 +61,9 @@ void main(void)
 	outColor = mix( outColor, tex2, alpha.g ); // Green channel
 	outColor = mix( outColor, tex3, alpha.b ); // Blue channel
 	gl_FragColor = outColor;
+#ifdef DEFERRED_GBUFFER
+    writeDeferredSurface(vec3(0.0), vec3(0.0,1.0,0.0), 0.0,
+        vec3(0.0), gl_FragColor.rgb, gl_FragColor.a, vec3(0.0), 0.0, m_DeferredShadingId);
+#endif
 }
 

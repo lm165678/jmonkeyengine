@@ -1,0 +1,21 @@
+// Shared MRT surface encoding. The ordinary forward shader remains unchanged.
+#ifdef DEFERRED_GBUFFER
+uniform int m_DeferredShadingId;
+layout(location=0) out vec4 deferredAlbedo;
+layout(location=1) out vec4 deferredNormal;
+layout(location=2) out vec4 deferredSpecular;
+layout(location=3) out vec4 deferredIndirect;
+layout(location=4) out vec4 deferredReflection;
+vec4 deferredSurfaceColor;
+#undef gl_FragColor
+#define gl_FragColor deferredSurfaceColor
+void writeDeferredSurface(vec3 diffuse, vec3 normal, float parameter,
+                          vec3 specular, vec3 indirect, float alpha,
+                          vec3 reflection, float flags, int model) {
+    deferredAlbedo=vec4(diffuse,float(model));
+    deferredNormal=vec4(normal,parameter);
+    deferredSpecular=vec4(specular,0.0);
+    deferredIndirect=vec4(indirect,alpha);
+    deferredReflection=vec4(reflection,flags);
+}
+#endif

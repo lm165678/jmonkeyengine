@@ -31,6 +31,11 @@
  */
 package com.jme3.renderer;
 
+import com.jme3.renderer.deferred.TiledDeferredProcessor;
+import com.jme3.renderer.pipeline.RenderPipeline;
+import com.jme3.renderer.pipeline.ViewportPipelines;
+import com.jme3.renderer.deferred.ShadingModelRegistry;
+import java.util.Objects;
 import com.jme3.light.DefaultLightFilter;
 import com.jme3.light.LightFilter;
 import com.jme3.light.LightList;
@@ -70,6 +75,82 @@ import java.util.logging.Logger;
  * @see Spatial
  */
 public class RenderManager {
+    private RenderPath renderPath = RenderPath.Forward;
+    private int deferredTileSize = 16;
+    private final ViewportPipelines pipelines = new ViewportPipelines(this);
+
+    /** Sets the tile width and height in pixels for managed CPU and GPU paths. */
+    public void setDeferredTileSize(int size) {
+        if (size < 1 || size > 256) {
+            throw new IllegalArgumentException("Tile size must be 1..256");
+        }
+        deferredTileSize = size;
+    }
+
+    public int getDeferredTileSize() {
+        return deferredTileSize;
+    }
+
+    /** Changes the default strategy at the next viewport render. Render-thread only. */
+    public void setRenderPath(RenderPath path) {
+        if (path == null || path == RenderPath.Inherit) {
+            throw new IllegalArgumentException("A concrete default path is required");
+        }
+        renderPath = path;
+    }
+
+    public RenderPath getRenderPath() {
+        return renderPath;
+    }
+
+    /**
+     * Registers a custom deferred model for all managed viewports. Registration
+     * survives Forward transitions and viewport recreation. Render-thread only.
+     * @see TiledDeferredProcessor#registerShadingModel(int, String)
+     */
+    public void registerDeferredShadingModel(int id, String glsl) {
+        pipelines.getShadingModels().register(id, glsl);
+    }
+
+    /** The shared registry used by the manager's default deferred pipelines. */
+    public ShadingModelRegistry getDeferredShadingModels() {
+        return pipelines.getShadingModels();
+    }
+
+    /**
+     * Installs a replacement opaque pipeline for a viewport owned by this manager.
+     * The manager owns initialization, resize and cleanup. Pass null to return to
+     * RenderPath selection. Use one instance per viewport. Render-thread only.
+     * A replacement takes precedence over RenderPath; remove an explicit
+     * TiledDeferredProcessor before installing one.
+     */
+    public void setPipeline(ViewPort viewport, RenderPipeline pipeline) {
+        pipelines.set(viewport, pipeline);
+    }
+
+    /** Returns the installed/allocated pipeline, or null for ordinary Forward. */
+    public RenderPipeline getPipeline(ViewPort viewport) {
+        return pipelines.get(viewport);
+    }
+
+    /** Compatibility diagnostic accessor for the default managed adapter. */
+    public TiledDeferredProcessor getRenderPipeline(ViewPort viewport) {
+        RenderPipeline pipeline = getPipeline(viewport);
+        return pipeline instanceof TiledDeferredProcessor ? (TiledDeferredProcessor) pipeline : null;
+    }
+
+    /** Releases pipelines owned by this manager while the graphics context is current. */
+    public void cleanupRenderPaths() {
+        pipelines.cleanup();
+    }
+
+    private void cleanupRenderPath(ViewPort viewport) {
+        pipelines.remove(viewport);
+    }
+
+    private void renderOpaquePath(ViewPort viewport) {
+        pipelines.render(viewport);
+    }
 
     private static final Logger logger = Logger.getLogger(RenderManager.class.getName());
     private final Renderer renderer;
@@ -129,6 +210,7 @@ public class RenderManager {
     public boolean removePreView(String viewName) {
         for (int i = 0; i < preViewPorts.size(); i++) {
             if (preViewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(preViewPorts.get(i));
                 preViewPorts.remove(i);
                 return true;
             }
@@ -145,7 +227,9 @@ public class RenderManager {
      * @see #createPreView(java.lang.String, com.jme3.renderer.Camera) 
      */
     public boolean removePreView(ViewPort view) {
-        return preViewPorts.remove(view);
+        boolean removed=preViewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -176,6 +260,7 @@ public class RenderManager {
     public boolean removeMainView(String viewName) {
         for (int i = 0; i < viewPorts.size(); i++) {
             if (viewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(viewPorts.get(i));
                 viewPorts.remove(i);
                 return true;
             }
@@ -192,7 +277,9 @@ public class RenderManager {
      * @see #createMainView(java.lang.String, com.jme3.renderer.Camera) 
      */
     public boolean removeMainView(ViewPort view) {
-        return viewPorts.remove(view);
+        boolean removed=viewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -223,6 +310,7 @@ public class RenderManager {
     public boolean removePostView(String viewName) {
         for (int i = 0; i < postViewPorts.size(); i++) {
             if (postViewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(postViewPorts.get(i));
                 postViewPorts.remove(i);
 
                 return true;
@@ -240,7 +328,9 @@ public class RenderManager {
      * @see #createPostView(java.lang.String, com.jme3.renderer.Camera) 
      */
     public boolean removePostView(ViewPort view) {
-        return postViewPorts.remove(view);
+        boolean removed=postViewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -305,6 +395,7 @@ public class RenderManager {
     }
 
     private void notifyReshape(ViewPort vp, int w, int h) {
+        pipelines.reshape(vp, w, h);
         List<SceneProcessor> processors = vp.getProcessors();
         for (SceneProcessor proc : processors) {
             if (!proc.isInitialized()) {
@@ -354,6 +445,11 @@ public class RenderManager {
      */
     public void setForcedMaterial(Material mat) {
         forcedMaterial = mat;
+    }
+
+    /** Returns the material override, or null when normal materials are used. */
+    public Material getForcedMaterial() {
+        return forcedMaterial;
     }
 
     /**
@@ -594,12 +690,12 @@ public class RenderManager {
                     //forcing forced technique renderState
                     forcedRenderState = geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState();
                 }
-                // use geometry's material
-                material.render(geom, lightList, this);
-                material.selectTechnique(previousTechniqueName, this);
-
-                //restoring forcedRenderState
-                forcedRenderState = tmpRs;
+                try {
+                    material.render(geom, lightList, this);
+                } finally {
+                    forcedRenderState = tmpRs;
+                    material.selectTechnique(previousTechniqueName, this);
+                }
 
                 //Reverted this part from revision 6197
                 //If forcedTechnique does not exists, and forcedMaterial is not set, the geom MUST NOT be rendered
@@ -1100,9 +1196,11 @@ public class RenderManager {
             if (prof!=null) prof.vpStep(VpStep.PostQueue, vp, null);
             for (SceneProcessor proc : processors.getArray()) {
                 if (prof != null) prof.spStep(SpStep.ProcPostQueue, proc.getClass().getSimpleName());
-                proc.postQueue(vp.getQueue());
+                if (!(proc instanceof TiledDeferredProcessor)) proc.postQueue(vp.getQueue());
             }
         }
+
+        renderOpaquePath(vp);
 
         if (prof!=null) prof.vpStep(VpStep.FlushQueue, vp, null);
         flushQueue(vp);

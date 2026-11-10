@@ -99,6 +99,8 @@ public class TechniqueDef implements Savable, Cloneable {
          * Also Light probes are passed to the shader.
          */
         SinglePassAndImageBased,
+        /** Ambient and probe evaluation for a deferred material surface pass. */
+        DeferredSurface,
 
         /**
          * @deprecated OpenGL1 is not supported anymore

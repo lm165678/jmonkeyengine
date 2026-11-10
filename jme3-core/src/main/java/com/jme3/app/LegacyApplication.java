@@ -788,6 +788,7 @@ public class LegacyApplication implements Application, SystemListener {
     @Override
     public void destroy(){
         stateManager.cleanup();
+        if(renderManager!=null)renderManager.cleanupRenderPaths();
 
         destroyInput();
         if (audioRenderer != null)

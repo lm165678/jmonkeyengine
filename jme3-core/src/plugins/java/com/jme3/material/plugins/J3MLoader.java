@@ -652,6 +652,9 @@ public class J3MLoader implements AssetLoader {
             case StaticPass:
                 technique.setLogic(new StaticPassLightingLogic(technique));
                 break;
+            case DeferredSurface:
+                technique.setLogic(new DeferredSurfaceLightingLogic(technique));
+                break;
             case SinglePassAndImageBased:
                 technique.setLogic(new SinglePassAndImageBasedLightingLogic(technique));
                 break;
@@ -777,6 +780,16 @@ public class J3MLoader implements AssetLoader {
             }else{
                 if (statType.equals("Technique")){
                     readTechnique(statement);
+                }else if ((statType.equals("ShadingId") || statType.equals("ShadingModelId"))){
+                    String[] tokens = statement.getLine().trim().split("\\s+");
+                    if (tokens.length != 2 || !statement.getContents().isEmpty()) {
+                        throw new MatParseException("Expected ShadingId <integer>", statement);
+                    }
+                    try {
+                        materialDef.setShadingId(Integer.parseInt(tokens[1]));
+                    } catch (IllegalArgumentException exception) {
+                        throw new MatParseException("ShadingId must be between 0 and 65535", statement);
+                    }
                 }else if (statType.equals("MaterialParameters")){
                     readMaterialParams(statement.getContents());
                 }else{
