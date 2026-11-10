@@ -1,0 +1,64 @@
+#import "Common/ShaderLib/PBR.glsllib"
+
+// PBR-only layout; record4 holds terrain factors, NOT a Phong reflection color.
+// gbuffer0.rgb: diffuse response; .a: shared shadingId
+// gbuffer1.xyz: world normal; .w: roughness
+// gbuffer2.rgb: F0
+// gbuffer3.rgb: precomputed IBL/indirect/emissive; .a: opacity
+// gbuffer4.rg: terrain light/sun factors; .a: terrain modifier flags
+struct PbrSurface {
+    vec3 diffuse;
+    vec3 normal;
+    float roughness;
+    vec3 f0;
+    vec3 indirect;
+    float opacity;
+    vec2 terrainFactors;
+    int flags;
+};
+PbrSurface decodePbrSurface() {
+    vec4 record0 = getGBuffer0();
+    vec4 record1 = getGBuffer1();
+    vec4 record2 = getGBuffer2();
+    vec4 record3 = getGBuffer3();
+    vec4 record4 = getGBuffer4();
+
+    PbrSurface surface;
+    surface.diffuse = record0.rgb;
+    surface.normal = normalize(record1.xyz);
+    surface.roughness = record1.w;
+    surface.f0 = record2.rgb;
+    surface.indirect = record3.rgb;
+    surface.opacity = record3.a;
+    surface.terrainFactors = record4.rg;
+    surface.flags = int(record4.a);
+    return surface;
+}
+vec3 evaluatePbrLight(PbrSurface surface, vec3 viewDirection, DeferredLight light) {
+    if (light.attenuation <= 0.0) {
+        return vec3(0.0);
+    }
+    vec3 diffuse;
+    vec3 specular;
+    PBR_ComputeDirectLight(surface.normal, light.direction, viewDirection, light.color, surface.f0,
+                           surface.roughness, max(dot(surface.normal, viewDirection), 0.0), diffuse,
+                           specular);
+    float surfaceFactor = 1.0;
+    if ((surface.flags & 1) != 0) {
+        surfaceFactor =
+            surface.terrainFactors.x * (light.attenuation == 1.0 ? surface.terrainFactors.y : 1.0);
+    }
+    return (surface.diffuse * diffuse + specular) * light.attenuation * surfaceFactor;
+}
+vec4 shadePbrSurface() {
+    PbrSurface surface = decodePbrSurface();
+    vec3 position = getWorldPosition();
+    vec3 viewDirection = getViewDirection(position);
+    DeferredLightList lights = getLightList();
+    vec3 result = surface.indirect;
+    for (int entry = 0; entry < lights.count; ++entry) {
+        DeferredLight light = getLight(lights, entry, position);
+        result += evaluatePbrLight(surface, viewDirection, light);
+    }
+    return vec4(result, surface.opacity);
+}

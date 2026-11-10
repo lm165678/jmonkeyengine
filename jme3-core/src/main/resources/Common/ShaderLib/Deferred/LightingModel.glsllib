@@ -1,0 +1,70 @@
+#import "Common/ShaderLib/BlinnPhongLighting.glsllib"
+uniform sampler2D ColorRamp;
+
+// Lighting-only layout. Do not apply these meanings to PBR or custom models.
+// gbuffer0.rgb: diffuse; .a: shared shadingId metadata
+// gbuffer1.xyz: world normal; .w: shininess
+// gbuffer2.rgb: specular color
+// gbuffer3.rgb: precomputed indirect/emissive; .a: opacity
+// gbuffer4.rgb: reflection; .a: flags (bit 0 ColorRamp, bit 1 reflection)
+struct LightingSurface {
+    vec3 diffuse;
+    vec3 normal;
+    float shininess;
+    vec3 specular;
+    vec3 indirect;
+    float opacity;
+    vec3 reflection;
+    int flags;
+};
+LightingSurface decodeLightingSurface() {
+    vec4 record0 = getGBuffer0();
+    vec4 record1 = getGBuffer1();
+    vec4 record2 = getGBuffer2();
+    vec4 record3 = getGBuffer3();
+    vec4 record4 = getGBuffer4();
+
+    LightingSurface surface;
+    surface.diffuse = record0.rgb;
+    surface.normal = normalize(record1.xyz);
+    surface.shininess = record1.w;
+    surface.specular = record2.rgb;
+    surface.indirect = record3.rgb;
+    surface.opacity = record3.a;
+    surface.reflection = record4.rgb;
+    surface.flags = int(record4.a);
+    return surface;
+}
+vec3 evaluateLightingLight(LightingSurface surface, vec3 viewDirection, DeferredLight light) {
+    // Retain the existing zero-contribution rule. Legacy ramps/reflections can
+    // contribute even at zero falloff and therefore cannot use this shortcut.
+    if (light.attenuation <= 0.0 && surface.flags == 0 &&
+        all(equal(surface.reflection, vec3(0.0)))) {
+        return vec3(0.0);
+    }
+    vec2 factors = computeLighting(surface.normal, viewDirection, light.direction,
+                                   light.attenuation, surface.shininess);
+    if ((surface.flags & 1) != 0) {
+        vec3 diffuseRamp = texture(ColorRamp, vec2(factors.x, 0.0)).rgb;
+        vec3 specularRamp = texture(ColorRamp, vec2(factors.y, 0.0)).rgb;
+        vec3 specularTerm = surface.specular;
+        if ((surface.flags & 2) != 0) {
+            specularTerm = surface.specular * factors.y + surface.reflection;
+        }
+        return (surface.diffuse * diffuseRamp + specularTerm * specularRamp) * light.color;
+    }
+    return (surface.diffuse * factors.x + surface.specular * factors.y + surface.reflection) *
+           light.color;
+}
+vec4 shadeLightingSurface() {
+    LightingSurface surface = decodeLightingSurface();
+    vec3 position = getWorldPosition();
+    vec3 viewDirection = getViewDirection(position);
+    DeferredLightList lights = getLightList();
+    vec3 result = surface.indirect;
+    for (int entry = 0; entry < lights.count; ++entry) {
+        DeferredLight light = getLight(lights, entry, position);
+        result += evaluateLightingLight(surface, viewDirection, light);
+    }
+    return vec4(result, surface.opacity);
+}

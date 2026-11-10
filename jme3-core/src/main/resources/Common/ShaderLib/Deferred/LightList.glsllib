@@ -1,0 +1,80 @@
+// Light storage is independent of any surface model/GBuffer attribute layout.
+#import "Common/ShaderLib/Lighting.glsllib"
+uniform sampler2D Lights;
+uniform sampler2D Tiles;
+uniform vec3 AmbientColor;
+uniform bool Untiled;
+uniform int Columns;
+uniform int TileSize;
+uniform int LightCount;
+uniform int TileTextureWidth;
+uniform int TileCapacity;
+
+#ifdef GPU_TILES
+layout(std430) buffer TileIndices {
+    int tileRecords[];
+};
+#endif
+
+struct DeferredLightList {
+    int offset;
+    int count;
+    bool allLights;
+};
+struct DeferredLight {
+    vec3 color;
+    vec3 direction;
+    float attenuation;
+};
+int readLightIndex(int address) {
+#ifdef GPU_TILES
+    return tileRecords[address];
+#else
+    ivec2 coordinate = ivec2(address % TileTextureWidth, address / TileTextureWidth);
+    return int(texelFetch(Tiles, coordinate, 0).r);
+#endif
+}
+DeferredLightList getLightList() {
+    DeferredLightList list;
+    list.offset = 0;
+    list.count = LightCount;
+    list.allLights = Untiled;
+    if (Untiled) {
+        return list;
+    }
+
+    ivec2 pixel = getGBufferPixel();
+    int tile = (pixel.y / TileSize) * Columns + pixel.x / TileSize;
+#ifdef GPU_TILES
+    list.offset = tile * (TileCapacity + 1) + 1;
+    list.count = readLightIndex(list.offset - 1);
+    // Preserve all illumination if the bounded GPU list overflows.
+    if (list.count > TileCapacity) {
+        list.count = LightCount;
+        list.allLights = true;
+    }
+#else
+    list.offset = readLightIndex(tile * 2);
+    list.count = readLightIndex(tile * 2 + 1);
+#endif
+    return list;
+}
+DeferredLight getLight(DeferredLightList list, int entry, vec3 worldPosition) {
+    int index = list.allLights ? entry : readLightIndex(list.offset + entry);
+    vec4 colorAndType = texelFetch(Lights, ivec2(0, index), 0);
+    vec4 positionAndRadius = texelFetch(Lights, ivec2(1, index), 0);
+    vec4 spotDirection = texelFetch(Lights, ivec2(2, index), 0);
+    vec4 directionAndAttenuation;
+    vec3 lightVector;
+    lightComputeDir(worldPosition, colorAndType.w, positionAndRadius, directionAndAttenuation,
+                    lightVector);
+
+    DeferredLight light;
+    light.color = colorAndType.rgb;
+    light.direction = directionAndAttenuation.xyz;
+    light.attenuation = directionAndAttenuation.w;
+    if (colorAndType.w > 1.5) {
+        light.attenuation *= computeSpotFalloff(spotDirection, lightVector);
+    }
+    return light;
+}
