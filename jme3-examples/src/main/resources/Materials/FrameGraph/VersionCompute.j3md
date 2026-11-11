@@ -1,0 +1,9 @@
+MaterialDef FrameGraph Compute {
+    MaterialParameters {
+        Boolean Increment
+        BufferObject Values
+    }
+    Technique {
+        ComputeShader GLSL430: Materials/FrameGraph/VersionCompute.comp
+    }
+}

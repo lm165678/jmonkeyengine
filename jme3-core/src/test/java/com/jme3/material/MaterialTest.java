@@ -65,6 +65,26 @@ public class MaterialTest {
         }
     });
 
+    @Test(expected = UnsupportedOperationException.class)
+    public void computeDispatchRequiresBackendCapability() {
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        material.dispatchCompute(renderManager, 1, 1, 1);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void graphicsTechniqueCannotBeDispatchedAsCompute() {
+        caps(Caps.OpenGL43, Caps.GLSL100);
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        material.dispatchCompute(renderManager, 1, 1, 1);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void computeDispatchRejectsEmptyWorkgroups() {
+        caps(Caps.OpenGL43);
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        material.dispatchCompute(renderManager, 0, 1, 1);
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testSelectNonExistentTechnique() {
         material("Common/MatDefs/Gui/Gui.j3md");

@@ -8,6 +8,237 @@ import static org.junit.Assert.*;
 
 public class FrameGraphTest {
     @Test
+    public void resourceExpansionRetainsProducersOfExternalOutputs() {
+        Definition definition = new Definition();
+        StringBuilder external = new StringBuilder();
+        try (FrameGraph graph = new FrameGraph()) {
+            graph.addResourceExpansionPass("Effect", planned -> {
+                ResourceHandle<StringBuilder> source = planned.createResource("Source", definition);
+                ResourceHandle<StringBuilder> output = planned.importResource("Output", StringBuilder.class,
+                        () -> external);
+                planned.addPass("Produce", pass -> pass.get(source).append("result")).write(source);
+                planned.addPass("Present", pass -> pass.get(output).append(pass.get(source)))
+                        .read(source).write(output);
+            });
+            graph.execute(manager, viewport);
+            assertEquals("result", external.toString());
+            assertEquals(1, definition.created);
+            assertTrue(graph.getCulledPasses().isEmpty());
+        }
+    }
+
+    @Test
+    public void resourceExpansionCullsDeadWorkWithoutReorderingFollowingPasses() {
+        Definition definition = new Definition();
+        List<String> calls = new ArrayList<>();
+        try (FrameGraph graph = new FrameGraph()) {
+            graph.addPass("Before", pass -> calls.add("before")).sideEffect();
+            graph.addResourceExpansionPass("Group", planned -> {
+                ResourceHandle<StringBuilder> unused = planned.createResource("Unused", definition);
+                planned.addPass("Dead", pass -> fail("Dead expanded pass executed")).write(unused);
+                planned.addPass("Required", pass -> calls.add("required")).sideEffect();
+                planned.addResourceExpansionPass("Nested", nested -> {
+                    nested.addPass("Check", pass -> calls.add("nested")).sideEffect();
+                });
+            });
+            graph.addPass("After", pass -> calls.add("after")).sideEffect();
+            graph.execute(manager, viewport);
+            assertEquals(Arrays.asList("before", "required", "nested", "after"), calls);
+            assertTrue(graph.getCulledPasses().contains("Group/Dead"));
+            assertFalse(graph.getExecutedPasses().contains("Group/Dead"));
+            assertEquals(0, definition.created);
+        }
+    }
+
+    @Test
+    public void historyInvalidationRetainsAllocationAndRemovalReleasesName() {
+        Definition definition = new Definition();
+        try (FrameGraph graph = new FrameGraph()) {
+            ResourceHandle<StringBuilder> history = graph.findOrCreatePersistentResource("History", definition);
+            graph.addPass("Write", pass -> pass.get(history).append("old")).write(history);
+            graph.exportResource(history);
+            graph.execute(manager, viewport);
+            assertTrue(graph.isPersistentResourceValid("History"));
+            assertTrue(graph.invalidatePersistentResource("History"));
+            assertFalse(graph.isPersistentResourceValid("History"));
+            fails(() -> graph.getExported(history));
+            assertEquals(0, definition.destroyed);
+            graph.execute(manager, viewport);
+            assertEquals(1, definition.created);
+            fails(() -> graph.removePersistentResource("History"));
+            graph.beginFrame();
+            assertTrue(graph.removePersistentResource("History"));
+            assertEquals(1, definition.destroyed);
+            Definition replacement = new Definition();
+            ResourceHandle<StringBuilder> next = graph.findOrCreatePersistentResource("History", replacement);
+            graph.addPass("New", pass -> pass.get(next).append("new")).write(next);
+            graph.execute(manager, viewport);
+            assertTrue(graph.isPersistentResourceValid("History"));
+            assertEquals(1, replacement.created);
+            assertFalse(graph.invalidatePersistentResource("Missing"));
+        }
+    }
+
+    @Test
+    public void trimmingHonorsAgeExportsAndPersistentOwnership() {
+        Definition definition = new Definition();
+        try (FrameGraph graph = new FrameGraph()) {
+            ResourceHandle<StringBuilder> temporary = graph.createResource("Temporary", definition);
+            ResourceHandle<StringBuilder> history = graph.findOrCreatePersistentResource("History", definition);
+            graph.addPass("Temp", pass -> pass.get(temporary).append("x")).write(temporary);
+            graph.addPass("History", pass -> pass.get(history).append("h")).write(history);
+            graph.exportResource(temporary);
+            graph.execute(manager, viewport);
+            assertEquals(0, graph.trimUnusedResources(0));
+            assertEquals(1, graph.getPoolStats().retainedTransientAllocations);
+            graph.beginFrame();
+            assertEquals(0, graph.trimUnusedResources(1));
+            graph.execute(manager, viewport);
+            assertEquals(1, graph.trimUnusedResources(1));
+            assertEquals(1, definition.destroyed);
+            assertEquals(0, graph.getPoolStats().transientAllocations);
+            assertEquals(1, graph.getPoolStats().persistentAllocations);
+            assertTrue(graph.isPersistentResourceValid("History"));
+            fails(() -> graph.trimUnusedResources(-1));
+        }
+        assertEquals(2, definition.destroyed);
+    }
+
+    @Test
+    public void diagnosticsExposeLifetimesCullingAndReuseWithoutAllocation() {
+        Definition definition = new Definition();
+        try (FrameGraph graph = new FrameGraph()) {
+            ResourceHandle<StringBuilder> live = graph.createResource("Live", definition);
+            ResourceHandle<StringBuilder> dead = graph.createResource("Dead", definition);
+            graph.addPass("Draw", pass -> pass.get(live).append("draw")).write(live).sideEffect();
+            graph.addPass("Unused", pass -> fail("Culled pass executed")).write(dead);
+            String report = graph.describe();
+            assertTrue(report.contains("CULLED Unused"));
+            assertTrue(report.contains("write=[Live]"));
+            assertTrue(report.contains("Dead kind=transient lifetime=[-1,-1]"));
+            assertEquals(0, definition.created);
+            graph.execute(manager, viewport);
+            graph.execute(manager, viewport);
+            assertEquals(1, graph.getPoolStats().totalTransientAllocations);
+            assertEquals(1, graph.getPoolStats().transientReuses);
+            assertEquals(1, graph.trimUnusedResources(0));
+            graph.execute(manager, viewport);
+            assertEquals(2, graph.getPoolStats().totalTransientAllocations);
+        }
+    }
+
+    @Test
+    public void resourceMaintenanceCannotRunInsideDrawingPass() {
+        try (FrameGraph graph = new FrameGraph()) {
+            ResourceHandle<StringBuilder> history = graph.findOrCreatePersistentResource("H", new Definition());
+            graph.addPass("Draw", pass -> {
+                fails(() -> graph.trimUnusedResources(0));
+                fails(() -> graph.invalidatePersistentResource("H"));
+                fails(() -> graph.removePersistentResource("H"));
+            }).write(history);
+            graph.execute(manager, viewport);
+        }
+    }
+
+    @Test
+    public void plannedTargetsUseTheCameraSizeAfterPreFrame() {
+        FrameGraph graph = new FrameGraph();
+        Definition definition = new Definition();
+        graph.addPass("PreFrame", context -> viewport.getCamera().resize(40, 30, false)).sideEffect();
+        graph.addExpansionPass("Draw", current -> {
+            ResourceHandle<StringBuilder> target = current.createResource("Target", definition);
+            current.addPass("Write", context -> context.get(target).append("draw")).write(target);
+        });
+        graph.execute(manager, viewport);
+        assertEquals(Collections.singletonList("40x30"), definition.sizes);
+        graph.close();
+    }
+
+    @Test
+    public void planningCannotRetroactivelyExtendAnExpiredTransient() {
+        FrameGraph graph = new FrameGraph();
+        Definition definition = new Definition();
+        ResourceHandle<StringBuilder> transientValue = graph.createResource("Transient", definition);
+        graph.addPass("Write", context -> context.get(transientValue).append("old"))
+            .write(transientValue).sideEffect();
+        graph.addExpansionPass("Late", current -> {
+            current.addPass("Read", context -> context.get(transientValue)).read(transientValue);
+        });
+        fails(() -> graph.execute(manager, viewport));
+        graph.close();
+        assertEquals(1, definition.destroyed);
+    }
+
+    @Test
+    public void expansionsShareOneScheduleAndPoolAndExposeExecutedNames() {
+        FrameGraph graph = new FrameGraph();
+        Definition definition = new Definition();
+        List<String> calls = new ArrayList<>();
+        graph.addExpansionPass("First", current -> {
+            ResourceHandle<StringBuilder> value = current.createResource("Target", definition);
+            current.addPass("Write", context -> {
+                context.get(value).setLength(0);
+                context.get(value).append("first");
+                calls.add("first");
+            }).write(value);
+            current.addPass("Read", context -> {
+                assertEquals("first", context.get(value).toString());
+            }).read(value).sideEffect();
+        });
+        graph.addExpansionPass("Second", current -> {
+            current.addExpansionPass("Nested", nested -> {
+                ResourceHandle<StringBuilder> value = nested.createResource("Target", definition);
+                nested.addPass("Write", context -> {
+                    context.get(value).setLength(0);
+                    context.get(value).append("second");
+                    calls.add("second");
+                }).write(value);
+            });
+        });
+        graph.addPass("End", context -> calls.add("end")).sideEffect();
+        graph.execute(manager, viewport);
+        assertEquals(Arrays.asList("first", "second", "end"), calls);
+        assertEquals(Arrays.asList("First", "First/Write", "First/Read", "Second",
+            "Second/Nested", "Second/Nested/Write", "End"), graph.getExecutedPasses());
+        assertEquals(graph.getExecutionOrder(), graph.getExecutedPasses());
+        assertEquals(1, definition.created);
+        fails(() -> graph.execute(manager, viewport));
+        graph.beginFrame();
+        graph.addPass("Next", context -> {}).sideEffect();
+        graph.execute(manager, viewport);
+        assertEquals(Collections.singletonList("Next"), graph.getExecutedPasses());
+        graph.close();
+        assertEquals(1, definition.destroyed);
+    }
+
+    @Test
+    public void captureGroupsAreBalancedWhenAPassFails() {
+        List<String> markers = new ArrayList<>();
+        RenderManager debugManager = new RenderManager(new NullRenderer() {
+            @Override
+            public void pushDebugGroup(String name) {
+                markers.add("begin " + name);
+            }
+
+            @Override
+            public void popDebugGroup() {
+                markers.add("end");
+            }
+        });
+        FrameGraph graph = new FrameGraph();
+        graph.addExpansionPass("Group", current -> {
+            current.addPass("Failure", context -> {
+                throw new IllegalStateException("expected");
+            }).sideEffect();
+        });
+        graph.addPass("Unreached", context -> fail()).sideEffect();
+        fails(() -> graph.execute(debugManager, viewport));
+        assertEquals(Arrays.asList("begin graph/Group", "end", "begin graph/Group/Failure", "end"), markers);
+        assertEquals(Arrays.asList("Group", "Group/Failure"), graph.getExecutedPasses());
+        graph.close();
+    }
+
+    @Test
     public void dynamicFramesReuseAllocationsButRejectExpiredHandlesAndPasses() {
         FrameGraph graph = new FrameGraph();
         Definition definition = new Definition();

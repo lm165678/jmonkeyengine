@@ -75,10 +75,20 @@ public class TestFrameGraph extends RenderPathExample {
         // 第一步：创建图。先声明资源和 Pass，最后统一编译依赖关系。
         FrameGraph result = new FrameGraph();
         // 第二步：声明与视口等大的 HDR/深度目标；此处不立即分配显存。
-        // FrameGraph 在执行时按需分配，并负责复用、尺寸变化和释放。
+        // createResource 总是声明一个新的逻辑临时资源，同一轮建图重名会报错。
+        // 如果多个方法需要重复获取同一目标，可改用 findOrCreate("HDR", definition)：
+        // 本轮已有同名且定义相等的临时资源就返回它，不会创建第二个目标。
+        // 两者都是临时资源：FrameGraph 按需分配，最后一个使用者结束后可复用其存储。
+        // 即使底层纹理还在池里，也不能依赖上一帧内容；Opaque 必须重新写入。
+        // 本例是静态图，不调用 beginFrame，因此句柄可随已编译的图重复执行。
+        // 动态图调用 beginFrame 后所有旧句柄失效；完整对照见 TestDynamicFrameGraph。
         ResourceHandle<RenderTarget> hdr = result.createResource(
             "HDR", new RenderTargetDefinition(1f, 1, Image.Format.Depth24, Image.Format.RGBA16F));
-        // 第三步：导入视口输出。它由外部拥有，图不会销毁它；null 表示默认帧缓冲。
+        // 第三步：导入视口输出。它由外部拥有，图不会创建或销毁它。
+        // getter 每次执行首次访问时调用一次；返回 null 表示默认帧缓冲，否则是离屏目标。
+        // importResource 只登记资源，并不自动输出画面；下面 Resolve 才执行实际复制。
+        // 若要由 FG 创建并保留上一帧内容，应使用 findOrCreatePersistentResource，
+        // 而不是 importResource；首次/尺寸变化后需初始化，并由 FG 负责释放。
         ResourceHandle<FrameBuffer> output =
             result.importResource("Viewport", FrameBuffer.class, viewPort::getOutputFrameBuffer);
         // 第四步：添加不透明绘制 Pass，绑定并清空 HDR，然后绘制不透明队列。

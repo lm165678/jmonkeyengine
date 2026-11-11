@@ -34,8 +34,10 @@ package com.jme3.renderer.framegraph;
 /**
  * Render-thread pass body. Declare every resource read/write when adding the pass;
  * access it with context.get(handle). Restore temporary renderer overrides in a
- * finally block. Renderer.dispatchCompute supplies its SSBO memory barrier;
- * graph dependencies order commands, not arbitrary raw OpenGL memory operations.
+ * finally block. Explicit ResourceAccess.STORAGE_BUFFER/STORAGE_IMAGE writes enable
+ * automatic GPU barriers based on consumer usages. Legacy read/write declarations
+ * cannot infer shader stores inside callbacks. Ordinary coherent raster passes do
+ * not require a new GL capability. See TestFrameGraphVersions for complete usage.
  */
 @FunctionalInterface
 public interface FrameGraphPass {

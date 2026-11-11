@@ -112,6 +112,12 @@ public abstract class AbstractShadowFilter<T extends AbstractShadowRenderer> ext
     }
 
     @Override
+    public void appendPostQueuePasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        if (isEnabled()) {
+            shadowRenderer.appendPostQueuePasses(graph, queue);
+        }
+    }
+
     protected void postQueue(RenderQueue queue) {
         shadowRenderer.postQueue(queue);
          if(shadowRenderer.skipPostPass){
@@ -316,6 +322,18 @@ public abstract class AbstractShadowFilter<T extends AbstractShadowRenderer> ext
      */
     public int getNumShadowMaps() {
         return shadowRenderer.getNumShadowMaps();
+    }
+
+    /**
+     * Returns the graph used by this filter's shadow renderer to generate maps.
+     * <pre>{@code
+     * // 渲染后查看阴影图生成顺序；滤镜的屏幕空间应用在 FPP 图中。
+     * System.out.println(shadowFilter.getFrameGraph().getExecutionOrder());
+     * }</pre>
+     * @return engine-owned graph for diagnostics only
+     */
+    public com.jme3.renderer.framegraph.FrameGraph getFrameGraph() {
+        return shadowRenderer.getFrameGraph();
     }
 
     /**

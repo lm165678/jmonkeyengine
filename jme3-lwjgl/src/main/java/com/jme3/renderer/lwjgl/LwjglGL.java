@@ -27,6 +27,28 @@ public final class LwjglGL implements GL, GL2, GL3, GL4 {
     }
     
     @Override
+    public void glPushDebugGroup(String name) {
+        if (GLContext.getCapabilities().OpenGL43 || GLContext.getCapabilities().GL_KHR_debug) {
+            byte[] bytes = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            // OpenGL guarantees at least 1024 bytes; use a conservative bounded label.
+            int length = Math.min(bytes.length, 1000);
+            while (length < bytes.length && (bytes[length] & 0xc0) == 0x80) {
+                length--;
+            }
+            ByteBuffer label = org.lwjgl.BufferUtils.createByteBuffer(length);
+            label.put(bytes, 0, length).flip();
+            KHRDebug.glPushDebugGroup(KHRDebug.GL_DEBUG_SOURCE_APPLICATION, 0, label);
+        }
+    }
+
+    @Override
+    public void glPopDebugGroup() {
+        if (GLContext.getCapabilities().OpenGL43 || GLContext.getCapabilities().GL_KHR_debug) {
+            KHRDebug.glPopDebugGroup();
+        }
+    }
+
+    @Override
     public void resetStats() {
     }
     
@@ -280,6 +302,11 @@ public final class LwjglGL implements GL, GL2, GL3, GL4 {
         GL11.glGetBoolean(param1, param2);
     }
     
+    @Override
+    public int glGetBufferParameter(int target, int parameter) {
+        return GL15.glGetBufferParameteri(target, parameter);
+    }
+
     @Override
     public void glGetBufferSubData(int target, long offset, ByteBuffer data) {
         checkLimit(data);

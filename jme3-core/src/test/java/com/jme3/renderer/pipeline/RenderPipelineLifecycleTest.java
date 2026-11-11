@@ -101,8 +101,9 @@ public class RenderPipelineLifecycleTest {
             manager.renderViewPort(view, 0);
             fail();
         } catch (IllegalStateException error) {
-            assertEquals("initialization", error.getMessage());
-            assertEquals(1, error.getSuppressed().length);
+            assertEquals("FrameGraph pass failed: OpaquePipeline", error.getMessage());
+            assertEquals("initialization", error.getCause().getMessage());
+            assertEquals(1, error.getCause().getSuppressed().length);
         }
         assertNull(manager.getPipeline(view));
         assertEquals(Arrays.asList("initialize", "cleanup"), pipeline.events);

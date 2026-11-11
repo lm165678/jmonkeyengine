@@ -116,6 +116,16 @@ public final class GLRenderer implements Renderer {
     }
 
     @Override
+    public void pushDebugGroup(String name) {
+        gl.glPushDebugGroup(name);
+    }
+
+    @Override
+    public void popDebugGroup() {
+        gl.glPopDebugGroup();
+    }
+
+    @Override
     public Statistics getStatistics() {
         return statistics;
     }
@@ -1620,6 +1630,17 @@ public final class GLRenderer implements Renderer {
     }
 
     @Override
+    public void memoryBarrier(int barriers) {
+        if (barriers == 0) {
+            return;
+        }
+        if (!caps.contains(Caps.OpenGL43) || gl4 == null) {
+            throw new UnsupportedOperationException("Graph storage barriers require OpenGL 4.3");
+        }
+        gl4.glMemoryBarrier(barriers);
+    }
+
+    @Override
     public int getCurrentFrameBufferSamples() {
         return Math.max(1, getInteger(0x80A9)); // GL_SAMPLES
     }
@@ -2802,6 +2823,40 @@ public final class GLRenderer implements Renderer {
         }
 
         bo.clearUpdateNeeded();
+    }
+
+    @Override
+    public void readBufferData(BufferObject buffer, long byteOffset, ByteBuffer destination) {
+        if (buffer == null || destination == null || byteOffset < 0
+                || !destination.isDirect() || destination.isReadOnly()) {
+            throw new IllegalArgumentException("Readback requires a direct writable buffer and non-negative offset");
+        }
+        if (gl3 == null || !caps.contains(Caps.OpenGL31)
+                || !caps.contains(buffer.getBufferType().getRequiredCaps())) {
+            throw new UnsupportedOperationException("GPU buffer readback is unavailable");
+        }
+        if (buffer.getId() < 0) {
+            throw new IllegalArgumentException("Cannot read an unallocated GPU buffer");
+        }
+        // COPY_READ_BUFFER has independent binding state; indexed SSBO/UBO bindings are untouched.
+        final int copyReadBuffer = 0x8F36;
+        final int bufferSize = 0x8764;
+        int previous = getInteger(copyReadBuffer);
+        try {
+            gl.glBindBuffer(copyReadBuffer, buffer.getId());
+            long size = gl3.glGetBufferParameter(copyReadBuffer, bufferSize);
+            if (byteOffset > size || destination.remaining() > size - byteOffset) {
+                throw new IllegalArgumentException("Readback range exceeds GPU buffer storage");
+            }
+            if (destination.hasRemaining()) {
+                if (caps.contains(Caps.OpenGL43)) {
+                    memoryBarrier(0x200); // BUFFER_UPDATE: also safe outside a FrameGraph.
+                }
+                gl.glGetBufferSubData(copyReadBuffer, byteOffset, destination.duplicate());
+            }
+        } finally {
+            gl.glBindBuffer(copyReadBuffer, previous);
+        }
     }
 
     @Override

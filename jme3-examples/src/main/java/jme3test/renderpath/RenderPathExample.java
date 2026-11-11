@@ -8,7 +8,7 @@ import com.jme3.system.AppSettings;
  * using OpenGL 4.3 for GPU culling (CPU deferred needs OpenGL 3.3 and five MRTs).
  * Call useRenderPath from initialization/input callbacks on the render thread.
  * It installs DeferredPipeline/ForwardPipeline through RenderManager.setPipeline;
- * DeferredPipeline executes its FrameGraph internally. See RenderPathHelper.apply
+ * DeferredPipeline registers its passes in the shared viewport FrameGraph. See RenderPathHelper.apply
  * for the complete public API sequence, including shared model registry and tile size.
  * To use the manager's legacy global selection instead, first remove the override:
  * renderManager.setPipeline(viewPort, null), then setRenderPath(...).

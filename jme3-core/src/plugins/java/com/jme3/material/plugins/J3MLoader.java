@@ -559,6 +559,7 @@ public class J3MLoader implements AssetLoader {
         if (split[0].equals("VertexShader") ||
                 split[0].equals("FragmentShader") ||
                 split[0].equals("GeometryShader") ||
+                split[0].equals("ComputeShader") ||
                 split[0].equals("TessellationControlShader") ||
                 split[0].equals("TessellationEvaluationShader")) {
             readShaderStatement(statement.getLine());
@@ -664,6 +665,10 @@ public class J3MLoader implements AssetLoader {
 
         List<TechniqueDef> techniqueDefs = new ArrayList<>();
 
+        boolean compute = shaderNames.containsKey(Shader.ShaderType.Compute);
+        if (compute && (shaderNames.size() != 1 || isUseNodes)) {
+            throw new IOException("Compute technique cannot contain graphics shaders or shader nodes");
+        }
         if(isUseNodes){
             //used for caching later, the shader here is not a file.
             
@@ -672,7 +677,7 @@ public class J3MLoader implements AssetLoader {
             // is now done by TechniqueDef.
             technique.setShaderFile(technique.hashCode() + "", technique.hashCode() + "", "GLSL100", "GLSL100");
             techniqueDefs.add(technique);
-        }else if (shaderNames.containsKey(Shader.ShaderType.Vertex) && shaderNames.containsKey(Shader.ShaderType.Fragment)) {
+        }else if (compute || shaderNames.containsKey(Shader.ShaderType.Vertex) && shaderNames.containsKey(Shader.ShaderType.Fragment)) {
             if (shaderLanguages.size() > 1) {
                 for (int i = 1; i < shaderLanguages.size(); i++) {
                     cloner.clearIndex();

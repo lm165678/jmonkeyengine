@@ -140,9 +140,9 @@ public final class DeferredPipeline implements RenderPipeline {
         this.models = Objects.requireNonNull(models);
     }
     /**
-     * Returns the initialized graph for read-only execution-order/pool diagnostics.
+     * Returns the shared viewport graph for read-only execution-order/pool diagnostics.
      * Do not execute, clear or close it while this pipeline is installed.
-     * @return graph after initialization, otherwise null
+     * @return shared graph after pass registration, otherwise null
      */
     public FrameGraph getFrameGraph() {
         return graph;
@@ -229,45 +229,6 @@ public final class DeferredPipeline implements RenderPipeline {
         vp = Objects.requireNonNull(viewport);
         renderer = manager.getRenderer();
         frame = new DeferredRenderContext(rm, vp, new DeferredResources(assets, renderer), models);
-        graph = new FrameGraph();
-        // Persistent light textures/buffers and program caches are borrowed;
-        // the graph owns the transient GBuffer and its physical allocation pool.
-        ResourceHandle<DeferredRenderContext> lights =
-            graph.importResource("Lights", DeferredRenderContext.class, () -> frame);
-        ResourceHandle<RenderTarget> surfaces = graph.createResource("GBuffer",
-            new RenderTargetDefinition(1f, 1, Image.Format.Depth24, Image.Format.RGBA32F,
-                Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F,
-                Image.Format.RGBA16F));
-        ResourceHandle<FrameBuffer> output = graph.importResource(
-            "ViewportOutput", FrameBuffer.class, () -> vp.getOutputFrameBuffer());
-        graph
-            .addPass("LightCulling",
-                context -> {
-                    if (!cullingPass.execute(context.get(lights))) {
-                        context.abort();
-                    }
-                })
-            .write(lights);
-        graph
-            .addPass("GBuffer",
-                context -> {
-                    DeferredRenderContext data = context.get(lights);
-                    data.resources.borrowTargets(context.get(surfaces));
-                    surfacePass.execute(data);
-                })
-            .read(lights)
-            .write(surfaces);
-        graph
-            .addPass("DeferredLighting",
-                context -> {
-                    context.get(surfaces);
-                    context.get(output);
-                    lightingPass.execute(context.get(lights));
-                })
-            .read(lights)
-            .read(surfaces)
-            .write(output);
-        graph.compile();
     }
     @Override
     public boolean isInitialized() {
@@ -278,9 +239,7 @@ public final class DeferredPipeline implements RenderPipeline {
         if (frame != null) {
             frame.resources.releaseTargets();
         }
-        if (graph != null) {
-            graph.clearResources();
-        }
+
     }
     private boolean supported(Geometry geometry) {
         Material material = geometry.getMaterial();
@@ -320,19 +279,27 @@ public final class DeferredPipeline implements RenderPipeline {
 
     @Override
     public void render(RenderQueue queue) {
+        try (FrameGraph standalone = new FrameGraph()) {
+            standalone.addExpansionPass("Deferred", current -> appendPasses(current, queue));
+            standalone.execute(rm, vp, queue);
+        }
+        graph = null;
+    }
+
+    @Override
+    public void appendPasses(FrameGraph graph, RenderQueue queue) {
         if (frame == null) {
             throw new IllegalStateException("Pipeline not initialized");
         }
-        try {
-            renderFrame(queue);
-        } finally {
-            // Retain list capacity, not scene objects or material textures.
+        this.graph = graph; // Borrowed viewport graph; never close/clear it from this pipeline.
+        renderFrame(queue);
+        graph.addPass("ReleaseFrameReferences", context -> {
             for (DeferredBatch batch : batches) {
                 batch.reset();
             }
             forward.clear();
             frame.lights.clear();
-        }
+        }).sideEffect();
     }
 
     private void renderFrame(RenderQueue queue) {
@@ -342,7 +309,6 @@ public final class DeferredPipeline implements RenderPipeline {
         fallbackReason = "";
         if (!enabled) {
             frame.resources.releaseTargets();
-            graph.clearResources();
             return;
         }
         renderer.setFrameBuffer(vp.getOutputFrameBuffer());
@@ -405,52 +371,64 @@ public final class DeferredPipeline implements RenderPipeline {
             selected.geometries.add(geometry);
         }
         for (int i = 0; i < batchCount; i++) {
-            DeferredBatch batch = batches.get(i);
-            if (renderBatch(batch)) {
-                deferredCount += batch.geometries.size();
-            } else {
-                forward.addAll(batch.geometries);
+            appendBatch(batches.get(i), i);
+        }
+        graph.addPass("ForwardFallbackQueue", context -> {
+            opaque.clear();
+            for (Geometry geometry : forward) {
+                opaque.add(geometry);
             }
-        }
-        opaque.clear();
-        for (Geometry geometry : forward) {
-            opaque.add(geometry);
-        }
-        forwardCount = forward.size();
+            forwardCount = forward.size();
+        }).sideEffect();
     }
 
-    private boolean renderBatch(DeferredBatch batch) {
-        frame.batch = batch;
-        frame.tileSize = tileSize;
-        frame.cullingMode = cullingMode;
-        String oldTechnique = rm.getForcedTechnique();
-        try {
-            if (!graph.execute(rm, vp)) {
-                fallbackReason = frame.fallbackReason;
-                return false;
-            }
+    private void appendBatch(DeferredBatch batch, int index) {
+        String name = "Batch[" + index + "]/";
+        boolean[] ready = {false};
+        ResourceHandle<RenderTarget> surfaces = graph.createResource(name + "GBuffer",
+            new RenderTargetDefinition(1f, 1, Image.Format.Depth24, Image.Format.RGBA32F,
+                Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F));
+        ResourceHandle<FrameBuffer> output = graph.importResource(name + "Output",
+            FrameBuffer.class, () -> vp.getOutputFrameBuffer());
+        graph.addPass(name + "LightCulling", context -> {
+            frame.batch = batch;
+            frame.tileSize = tileSize;
+            frame.cullingMode = cullingMode;
+            ready[0] = cullingPass.execute(frame);
             if (!frame.fallbackReason.isEmpty()) {
                 fallbackReason = frame.fallbackReason;
             }
-            activePath = frame.untiled ? RenderPath.Deferred
-                : frame.gpu            ? RenderPath.TiledDeferredGPU
-                                       : RenderPath.TiledDeferredCPU;
-            return true;
-        } finally {
-            rm.setForcedTechnique(oldTechnique);
+            if (!ready[0]) {
+                forward.addAll(batch.geometries);
+            }
+        }).sideEffect();
+        graph.addPass(name + "GBuffer", context -> {
+            if (ready[0]) {
+                frame.resources.borrowTargets(context.get(surfaces));
+                surfacePass.execute(frame);
+            }
+        }).write(surfaces);
+        graph.addPass(name + "Lighting", context -> {
+            if (ready[0]) {
+                context.get(surfaces);
+                context.get(output);
+                lightingPass.execute(frame);
+                deferredCount += batch.geometries.size();
+                activePath = frame.untiled ? RenderPath.Deferred
+                    : frame.gpu ? RenderPath.TiledDeferredGPU : RenderPath.TiledDeferredCPU;
+            }
+        }).read(surfaces).write(output);
+        graph.addPass(name + "Restore", context -> {
             renderer.setFrameBuffer(vp.getOutputFrameBuffer());
             renderer.setBackgroundColor(vp.getBackgroundColor());
             rm.setCamera(vp.getCamera(), false);
             frame.resources.releaseTargets();
             frame.batch = null;
-        }
+        }).sideEffect();
     }
     @Override
     public void cleanup() {
-        if (graph != null) {
-            graph.close();
-            graph = null;
-        }
+        graph = null;
         if (frame != null) {
             frame.resources.cleanup();
         }

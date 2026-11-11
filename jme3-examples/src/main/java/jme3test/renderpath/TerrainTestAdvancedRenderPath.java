@@ -72,7 +72,7 @@ import com.jme3.util.SkyFactory;
  * }</pre>
  * <p>RenderPathHelper.apply shows the full public API: install DeferredPipeline
  * with the shared model registry, select LightCullingMode and tile size, or
- * install ForwardPipeline. DeferredPipeline owns its FrameGraph and GBuffer pool.
+ * install ForwardPipeline. DeferredPipeline appends passes to the viewport FrameGraph and its GBuffer pool.
  * Query its active path and fallback reason after rendering; a GPU request may
  * fall back to CPU or Forward on unsupported contexts/materials.</p>
  * <p>Load materials from .j3md. Custom definitions declare DeferredLightingShader

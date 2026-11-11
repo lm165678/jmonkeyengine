@@ -79,4 +79,13 @@ public interface RenderPipeline {
      * GPU objects so the engine's resource manager handles their deletion.
      */
     void cleanup();
+    /**
+     * Appends opaque work to the viewport's graph. Native pipelines override this
+     * to expose their individual passes; existing implementations remain compatible.
+     * @param graph shared viewport graph
+     * @param queue scene queue
+     */
+    default void appendPasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        graph.addPass("Render", context -> render(queue)).sideEffect();
+    }
 }

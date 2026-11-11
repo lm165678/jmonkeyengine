@@ -54,6 +54,28 @@ import java.util.EnumSet;
  * @author Kirill Vainer
  */
 public interface Renderer {
+    /**
+     * Begins a named GPU capture group. Unsupported backends safely do nothing.
+     * FrameGraph calls this automatically for each pass; pair manual calls in
+     * try/finally with popDebugGroup, on the render thread.
+     * <pre>{@code
+     * // FG 已自动添加标记；手工渲染时也可这样标记自己的绘制。
+     * renderer.pushDebugGroup("Custom/Draw");
+     * try {
+     *     renderManager.renderGeometry(geometry);
+     * } finally {
+     *     renderer.popDebugGroup();
+     * }
+     * }</pre>
+     * @param name capture label
+     */
+    default void pushDebugGroup(String name) {
+    }
+
+    /** Ends the current capture group; no-op on unsupported backends. */
+    default void popDebugGroup() {
+    }
+
 
     /**
      * Detects available capabilities of the GPU. 
@@ -173,6 +195,23 @@ public interface Renderer {
         throw new UnsupportedOperationException("Compute shaders are unavailable");
     }
 
+    /**
+     * Publishes incoherent shader writes for subsequent GPU accesses. Bits use the
+     * OpenGL memory-barrier mask; -1 means all barrier bits. Unsupported backends
+     * must fail rather than silently omit synchronization. This is not a CPU fence.
+     * <pre>{@code
+     * // 通常由 FG 根据 ResourceAccess 自动调用，应用无需手动设置。
+     * // 低层代码在 FG 之外直接写入 GPU 存储时，可保守同步后续所有访问：
+     * renderer.memoryBarrier(-1);
+     * }</pre>
+     * @param barriers OpenGL barrier bits, zero for no operation
+     */
+    default void memoryBarrier(int barriers) {
+        if (barriers != 0) {
+            throw new UnsupportedOperationException("GPU memory barriers are unavailable");
+        }
+    }
+
     /** Number of samples in the currently bound framebuffer (one if unknown). */
     default int getCurrentFrameBufferSamples() { return 1; }
 
@@ -282,6 +321,29 @@ public interface Renderer {
      * @param bo the buffer object to upload.
      */
     public void updateBufferData(BufferObject bo);
+
+    /**
+     * Blocking GPU buffer download. Does not upload pending CPU-side changes or
+     * mutate the BufferObject's field values. Writes destination.remaining() bytes
+     * without changing its position/limit. Render-thread only; may stall the GPU.
+     * <pre>{@code
+     * // 第一步：缓冲先由材质/renderer 上传或由 compute 写入。
+     * // 第二步：准备 direct 缓冲；读取整数时使用 nativeOrder。
+     * ByteBuffer bytes = BufferUtils.createByteBuffer(16);
+     * renderer.readBufferData(buffer, 0, bytes);
+     * int value = bytes.getInt(0);
+     * // 第三步：FG 中把该 Pass 声明为 read(handle, ResourceAccess.BUFFER_TRANSFER)。
+     * // 同一 SSBO 被 shader 读取则用 STORAGE_BUFFER；此处是下载操作。
+     * // 调试或偶尔取结果可用；不要用每帧阻塞读回来实现常规渲染管线。
+     * }</pre>
+     * @param buffer already allocated GPU buffer
+     * @param byteOffset non-negative byte offset in GPU storage
+     * @param destination direct writable buffer; current position/limit delimit the download
+     */
+    default void readBufferData(BufferObject buffer, long byteOffset, ByteBuffer destination) {
+        throw new UnsupportedOperationException("Buffer readback is unavailable");
+    }
+
 
     /**
      * Deletes a vertex buffer from the GPU.

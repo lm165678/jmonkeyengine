@@ -1,3 +1,11 @@
+task frameGraphVersionsSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Checks FG resource versions, canonical imports and compute-to-readback barriers.'
+    main = 'jme3test.renderpath.TestFrameGraphVersions'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
 task frameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
     group = 'verification'
     main = 'jme3test.renderpath.TestFrameGraph'
@@ -10,6 +18,25 @@ task dynamicFrameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
     main = 'jme3test.renderpath.TestDynamicFrameGraph'
     classpath = sourceSets.main.runtimeClasspath
     args '--smoke'
+}
+
+task engineFrameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Checks viewport FG stages, shadow filters, Bloom, FXAA and path round trips.'
+    main = 'jme3test.renderpath.RenderPathSmoke'
+    classpath = sourceSets.main.runtimeClasspath
+    args 'TestEngineFrameGraph'
+    systemProperty 'framegraph.prepasses', 'true'
+}
+
+['frameGraphFilterSmoke': ['--smoke'],
+ 'frameGraphFilterSmokeMSAA': ['--smoke', '--msaa']].each { taskName, arguments ->
+    tasks.create(name: taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        main = 'jme3test.renderpath.TestFrameGraphFilters'
+        classpath = sourceSets.main.runtimeClasspath
+        args arguments
+    }
 }
 
 //apply plugin:'application'

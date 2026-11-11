@@ -187,12 +187,21 @@ public class BufferObject extends NativeObject {
     }
 
     /**
-     * Sets the buffer's type.
+     * Sets the buffer's type. Reapplying the same type is allowed after upload;
+     * changing an allocated buffer to another type is rejected.
+     * <pre>{@code
+     * // 同一 SSBO 可反复绑定到材质，不会因为已经上传而报错。
+     * material.setShaderStorageBufferObject("Values", buffer);
+     * // 已上传后不可把它改为 UBO；需要另建符合用途的 BufferObject。
+     * }</pre>
      *
      * @param bufferType the buffer's type.
      */
     public void setBufferType(final BufferType bufferType) {
-
+        java.util.Objects.requireNonNull(bufferType);
+        if (this.bufferType == bufferType) {
+            return;
+        }
         if (getId() != -1) {
             throw new IllegalStateException("Can't change buffer's type when this buffer is already initialized.");
         }

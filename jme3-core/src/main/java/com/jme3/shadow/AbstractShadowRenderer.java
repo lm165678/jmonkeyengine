@@ -31,6 +31,8 @@
  */
 package com.jme3.shadow;
 
+import com.jme3.renderer.framegraph.FrameGraph;
+import com.jme3.renderer.framegraph.ResourceHandle;
 import com.jme3.asset.AssetManager;
 import com.jme3.export.*;
 import com.jme3.material.Material;
@@ -125,13 +127,13 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
      * true to skip the post pass when there are no shadow casters
      */
     protected boolean skipPostPass;
-    
+
     /**
      * used for serialization
      */
-    protected AbstractShadowRenderer(){        
-    }    
-    
+    protected AbstractShadowRenderer(){
+    }
+
     /**
      * Create an abstract shadow renderer. Subclasses invoke this constructor.
      *
@@ -174,7 +176,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
             //DO NOT COMMENT THIS (it prevent the OSX incomplete read buffer crash)
             shadowFB[i].setColorTexture(dummyTex);
-            shadowMapStringCache[i] = "ShadowMap" + i; 
+            shadowMapStringCache[i] = "ShadowMap" + i;
             lightViewStringCache[i] = "LightViewProjectionMatrix" + i;
 
             postshadowMat.setTexture(shadowMapStringCache[i], shadowMaps[i]);
@@ -339,7 +341,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             initFrustumCam();
         }
     }
-    
+
     /**
      * delegates the initialization of the frustum cam to child renderers
      */
@@ -358,7 +360,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
     /**
      * Invoked once per frame to update the shadow cams according to the light
      * view.
-     * 
+     *
      * @param viewCam the scene cam
      */
     protected abstract void updateShadowCams(Camera viewCam);
@@ -391,9 +393,38 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
     protected void doDisplayFrustumDebug(int shadowMapIndex) {
     }
 
+    private FrameGraph shadowGraph;
+
+    /**
+     * Returns the shared viewport graph for diagnostics. Each cascade/cube face is a
+     * pass writing an imported renderer-owned shadow framebuffer. No allocation
+     * ownership is transferred; custom renderShadowMap overrides remain active.
+     * <pre>{@code
+     * // 第一步：照常添加阴影渲染器（ShadowFilter 内部也走同一套阴影生成）。
+     * viewPort.addProcessor(shadowRenderer);
+     * // 第二步：渲染后查看各级联/各面的 Pass；不要手动执行这个图。
+     * System.out.println(shadowRenderer.getFrameGraph().getExecutionOrder());
+     * }</pre>
+     * @return shared viewport graph, or null before registration
+     */
+    public FrameGraph getFrameGraph() {
+        return shadowGraph;
+    }
+
     @SuppressWarnings("fallthrough")
     @Override
     public void postQueue(RenderQueue rq) {
+        // Standalone compatibility call; normal engine rendering uses appendPostQueuePasses.
+        try (FrameGraph graph = new FrameGraph()) {
+            appendPostQueuePasses(graph, rq);
+            graph.execute(renderManager, viewPort, rq);
+        }
+        shadowGraph = null;
+    }
+
+    @Override
+    public void appendPostQueuePasses(FrameGraph graph, RenderQueue rq) {
+        shadowGraph = graph;
         lightReceivers.clear();
         skipPostPass = false;
         if ( !checkCulling(viewPort.getCamera()) ) {
@@ -402,35 +433,45 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         }
 
         updateShadowCams(viewPort.getCamera());
-        
+
         Renderer r = renderManager.getRenderer();
-        renderManager.setForcedMaterial(preshadowMat);
-        renderManager.setForcedTechnique("PreShadow");
+        graph.addPass("Prepare", context -> {
+            renderManager.setForcedMaterial(preshadowMat);
+            renderManager.setForcedTechnique("PreShadow");
+        }).sideEffect();
 
+        FrameGraph.PassBuilder previous = null;
         for (int shadowMapIndex = 0; shadowMapIndex < nbShadowMaps; shadowMapIndex++) {
-
+            final int index = shadowMapIndex;
+            ResourceHandle<FrameBuffer> target = graph.importResource(
+                    "ShadowMap" + index, FrameBuffer.class, () -> shadowFB[index]);
+            FrameGraph.PassBuilder pass = graph.addPass("ShadowMap" + index, context -> {
+                context.get(target);
                 if (debugfrustums) {
-                    doDisplayFrustumDebug(shadowMapIndex);
+                    doDisplayFrustumDebug(index);
                 }
-                renderShadowMap(shadowMapIndex);
-
+                renderShadowMap(index);
+            }).write(target);
+            if (previous != null) {
+                pass.after(previous);
             }
-
-        debugfrustums = false;
-
-        //restore setting for future rendering
-        r.setFrameBuffer(viewPort.getOutputFrameBuffer());
-        renderManager.setForcedMaterial(null);
-        renderManager.setForcedTechnique(null);
-        renderManager.setCamera(viewPort.getCamera(), false);
-        
+            previous = pass;
+        }
+        graph.addPass("Restore", context -> {
+            debugfrustums = false;
+            r.setFrameBuffer(viewPort.getOutputFrameBuffer());
+            renderManager.setForcedMaterial(null);
+            renderManager.setForcedTechnique(null);
+            renderManager.setForcedRenderState(null);
+            renderManager.setCamera(viewPort.getCamera(), false);
+        }).sideEffect();
     }
 
     protected void renderShadowMap(int shadowMapIndex) {
         shadowMapOccluders = getOccludersToRender(shadowMapIndex, shadowMapOccluders);
         Camera shadowCam = getShadowCam(shadowMapIndex);
 
-        //saving light view projection matrix for this split            
+        //saving light view projection matrix for this split
         lightViewProjectionsMatrices[shadowMapIndex].set(shadowCam.getViewProjectionMatrix());
         renderManager.setCamera(shadowCam, false);
 
@@ -482,7 +523,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         if (debug) {
             displayShadowMap(renderManager.getRenderer());
         }
-        
+
         getReceivers(lightReceivers);
 
         if (lightReceivers.size() != 0) {
@@ -505,26 +546,26 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             renderManager.setForcedTechnique(null);
             renderManager.setForcedMaterial(null);
             renderManager.setCamera(cam, false);
-            
+
             //clearing the params in case there are some other shadow renderers
             clearMatParams();
         }
     }
-    
+
     /**
      * This method is called once per frame and is responsible for clearing any
      * material parameters that subclasses may need to clear on the post material.
      *
-     * @param material the material that was used for the post shadow pass     
+     * @param material the material that was used for the post shadow pass
      */
-    protected abstract void clearMaterialParameters(Material material);    
-    
+    protected abstract void clearMaterialParameters(Material material);
+
     private void clearMatParams(){
         for (Material mat : matCache) {
-         
-            //clearing only necessary params, the others may be set by other 
-            //renderers 
-            //Note that j start at 1 because other shadow renderers will have 
+
+            //clearing only necessary params, the others may be set by other
+            //renderers
+            //Note that j start at 1 because other shadow renderers will have
             //at least 1 shadow map and will set it on each frame anyway.
             for (int j = 1; j < nbShadowMaps; j++) {
                 mat.clearParam(lightViewStringCache[j]);
@@ -534,8 +575,8 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             }
             mat.clearParam("FadeInfo");
             clearMaterialParameters(mat);
-        }        
-        //No need to clear the postShadowMat params as the instance is locale to each renderer       
+        }
+        //No need to clear the postShadowMat params as the instance is locale to each renderer
     }
 
     /**
@@ -614,7 +655,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         }
         postshadowMat.setBoolean("BackfaceShadows", renderBackFacesShadows);
     }
-    
+
     /**
      * How far the shadows are rendered in the view
      *
@@ -633,7 +674,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
      * @param zFar the zFar values that override the computed one
      */
     public void setShadowZExtend(float zFar) {
-        this.zFarOverride = zFar;        
+        this.zFarOverride = zFar;
         if(zFarOverride == 0){
             fadeInfo = null;
             frustumCam = null;
@@ -646,7 +687,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             }
         }
     }
-    
+
     /**
      * Define the length over which the shadow will fade out when using a
      * shadowZextend This is useful to make dynamic shadows fade into baked
@@ -682,18 +723,19 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         }
         return 0f;
     }
-    
+
     /**
      * @return true if the light source bounding box is in the view frustum
      */
     protected abstract boolean checkCulling(Camera viewCam);
-    
+
     @Override
-    public void preFrame(float tpf) {           
+    public void preFrame(float tpf) {
     }
 
     @Override
     public void cleanup() {
+        shadowGraph = null;
     }
 
     @Override
@@ -827,6 +869,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
     @Override
     public void cloneFields(final Cloner cloner, final Object original) {
+        shadowGraph = null;
         forcedRenderState = cloner.clone(forcedRenderState);
         init(assetManager, nbShadowMaps, (int) shadowMapSize);
     }

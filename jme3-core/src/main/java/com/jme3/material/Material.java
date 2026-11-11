@@ -207,7 +207,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             }
 
             mat.sortingId = -1;
-            
+
             return mat;
         } catch (CloneNotSupportedException ex) {
             throw new AssertionError(ex);
@@ -879,7 +879,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             }
         }
     }
-    
+
     /**
      * Preloads this material for the given render manager.
      * <p>
@@ -931,6 +931,55 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
                 }
             }
         }
+    }
+
+    /**
+     * Dispatches a compute-only material technique using ordinary material parameters,
+     * defines, textures and buffer blocks. No geometry, lights or raster state are
+     * applied. Select a named compute technique first if it is not Default.
+     * Uses Renderer.dispatchCompute; FG users must still declare ResourceAccess.
+     * Render-thread only with a current graphics context; requires OpenGL 4.3.
+     * <pre>{@code
+     * // 第一步：j3md 中声明 ComputeShader GLSL430: Shaders/MyCompute.comp。
+     * // 参数声明 Boolean Increment、BufferObject Values；GLSL 用 m_Increment/m_Values。
+     * Material compute = new Material(assetManager, "Materials/MyCompute.j3md");
+     * // 第二步：按普通材质设置参数，不需要上层取 Shader/绑定 GL buffer。
+     * compute.setBoolean("Increment", true);
+     * compute.setShaderStorageBufferObject("Values", buffer);
+     * // 第三步：在 FG Pass 内提交工作组数；不是线程总数。
+     * compute.dispatchCompute(renderManager, 1, 1, 1);
+     * // Pass 声明 .write(handle, ResourceAccess.STORAGE_BUFFER) 供 FG 自动同步。
+     * }</pre>
+     * @param renderManager current rendering context
+     * @param groupsX workgroup count X
+     * @param groupsY workgroup count Y
+     * @param groupsZ workgroup count Z
+     */
+    public void dispatchCompute(RenderManager renderManager, int groupsX, int groupsY, int groupsZ) {
+        Renderer renderer = renderManager.getRenderer();
+        if (!renderer.getCaps().contains(Caps.OpenGL43)) {
+            throw new UnsupportedOperationException("Compute materials require OpenGL 4.3");
+        }
+        if (groupsX < 1 || groupsY < 1 || groupsZ < 1
+                || groupsX > 65535 || groupsY > 65535 || groupsZ > 65535) {
+            throw new IllegalArgumentException("Compute group counts outside portable limits");
+        }
+        if (technique == null) {
+            selectTechnique(TechniqueDef.DEFAULT_TECHNIQUE_NAME, renderManager);
+        }
+        TechniqueDef definition = technique.getDef();
+        if (definition.getShaderProgramNames().size() != 1
+                || !definition.getShaderProgramNames().containsKey(Shader.ShaderType.Compute)) {
+            throw new IllegalStateException("Select a compute-only technique before dispatch");
+        }
+        Shader shader = technique.makeCurrent(renderManager, null, renderManager.getForcedMatParams(),
+                null, renderer.getCaps());
+        clearUniformsSetByCurrent(shader);
+        renderManager.updateUniformBindings(shader);
+        updateShaderMaterialParameters(renderer, shader, null, renderManager.getForcedMatParams());
+        resetUniformsNotSetByCurrent(shader);
+        renderer.setShader(shader);
+        renderer.dispatchCompute(groupsX, groupsY, groupsZ);
     }
 
     /**
@@ -995,11 +1044,11 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         if (technique == null) {
             selectTechnique(TechniqueDef.DEFAULT_TECHNIQUE_NAME, renderManager);
         }
-        
+
         TechniqueDef techniqueDef = technique.getDef();
         Renderer renderer = renderManager.getRenderer();
         EnumSet<Caps> rendererCaps = renderer.getCaps();
-        
+
         if (techniqueDef.isNoRender()) {
             return;
         }
@@ -1012,19 +1061,19 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
 
         // Select shader to use
         Shader shader = technique.makeCurrent(renderManager, overrides, renderManager.getForcedMatParams(), lights, rendererCaps);
-        
+
         // Begin tracking which uniforms were changed by material.
         clearUniformsSetByCurrent(shader);
-        
+
         // Set uniform bindings
         renderManager.updateUniformBindings(shader);
-        
+
         // Set material parameters
         int unit = updateShaderMaterialParameters(renderer, shader, overrides, renderManager.getForcedMatParams());
 
         // Clear any uniforms not changed by material.
         resetUniformsNotSetByCurrent(shader);
-        
+
         // Delegate rendering to the technique
         technique.render(renderManager, shader, geometry, lights, unit);
     }
@@ -1052,12 +1101,12 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         oc.write(name, "name", null);
         oc.writeStringSavableMap(paramValues, "parameters", null);
     }
-    
+
     @Override
     public String toString() {
-        return "Material[name=" + name + 
-                ", def=" + (def != null ? def.getName() : null) + 
-                ", tech=" + (technique != null && technique.getDef() != null ? technique.getDef().getName() : null) + 
+        return "Material[name=" + name +
+                ", def=" + (def != null ? def.getName() : null) +
+                ", tech=" + (technique != null && technique.getDef() != null ? technique.getDef().getName() : null) +
                 "]";
     }
 

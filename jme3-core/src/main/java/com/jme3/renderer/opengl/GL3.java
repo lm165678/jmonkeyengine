@@ -39,6 +39,11 @@ import java.nio.IntBuffer;
  * @author Kirill Vainer
  */
 public interface GL3 extends GL2 {
+    /** Returns the bound buffer parameter; used to validate readback bounds. */
+    default int glGetBufferParameter(int target, int parameter) {
+        throw new UnsupportedOperationException("Buffer parameter queries are unavailable");
+    }
+
 
     public static final int GL_DEPTH_STENCIL_ATTACHMENT = 0x821A;
     public static final int GL_GEOMETRY_SHADER = 0x8DD9;

@@ -246,8 +246,10 @@ public abstract class Filter implements Savable {
      */
     protected final void init(AssetManager manager, RenderManager renderManager, ViewPort vp, int w, int h) {
         //  cleanup(renderManager.getRenderer());
-        defaultPass = new Pass();
-        defaultPass.init(renderManager.getRenderer(), w, h, getDefaultPassTextureFormat(), getDefaultPassDepthFormat());
+        if (!(this instanceof FrameGraphFilter)) {
+            defaultPass = new Pass();
+            defaultPass.init(renderManager.getRenderer(), w, h, getDefaultPassTextureFormat(), getDefaultPassDepthFormat());
+        }
         initFilter(manager, renderManager, vp, w, h);
     }
 
@@ -308,6 +310,20 @@ public abstract class Filter implements Savable {
      * Override this method if you want to make a pre pass, before the actual rendering of the frame
      * @param queue
      */
+    /**
+     * Declares this filter's pre-geometry work in the shared viewport graph.
+     * Existing subclasses retain postQueue behavior through the default adapter.
+     * @param graph viewport graph
+     * @param queue scene queue
+     */
+    public void appendPostQueuePasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        graph.addPass("PostQueue", context -> {
+            if (isEnabled()) {
+                postQueue(queue);
+            }
+        }).sideEffect();
+    }
+
     protected void postQueue(RenderQueue queue) {
     }
 

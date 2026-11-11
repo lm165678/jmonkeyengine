@@ -110,16 +110,25 @@ public final class ViewportPipelines {
     }
 
     public void render(ViewPort viewport) {
+        appendPasses(null, viewport);
+    }
+
+    /** Appends the selected native pipeline to the viewport graph. */
+    public void appendPasses(com.jme3.renderer.framegraph.FrameGraph graph, ViewPort viewport) {
         Entry entry = entries.get(viewport);
         if (entry != null && entry.replacement) {
-            render(entry, viewport);
+            render(entry, viewport, graph);
             return;
         }
         // Called after ordinary postQueue passes, regardless of processor order.
         for (SceneProcessor processor : viewport.getProcessors()) {
             if (processor instanceof TiledDeferredProcessor) {
                 remove(viewport);
-                processor.postQueue(viewport.getQueue());
+                if (graph == null) {
+                    processor.postQueue(viewport.getQueue());
+                } else {
+                    ((TiledDeferredProcessor) processor).appendPasses(graph, viewport.getQueue());
+                }
                 return;
             }
         }
@@ -142,10 +151,10 @@ public final class ViewportPipelines {
         TiledDeferredProcessor adapter = (TiledDeferredProcessor) entry.pipeline;
         adapter.setMode(TiledDeferredProcessor.Mode.valueOf(path.name()));
         adapter.setTileSize(manager.getDeferredTileSize());
-        render(entry, viewport);
+        render(entry, viewport, graph);
     }
 
-    private void render(Entry entry, ViewPort viewport) {
+    private void render(Entry entry, ViewPort viewport, com.jme3.renderer.framegraph.FrameGraph graph) {
         int width = viewport.getCamera().getWidth(), height = viewport.getCamera().getHeight();
         if (!entry.initialized) {
             if (entry.pipeline.isInitialized()) {
@@ -169,7 +178,11 @@ public final class ViewportPipelines {
         } else if (entry.width != width || entry.height != height) {
             reshape(viewport, width, height);
         }
-        entry.pipeline.render(viewport.getQueue());
+        if (graph == null) {
+            entry.pipeline.render(viewport.getQueue());
+        } else {
+            entry.pipeline.appendPasses(graph, viewport.getQueue());
+        }
     }
 
     public void reshape(ViewPort viewport, int width, int height) {

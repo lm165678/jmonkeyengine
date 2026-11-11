@@ -57,6 +57,27 @@ public class J3MLoaderTest {
     }
 
     @Test
+    public void computeOnlyTechniqueCanBeDeclaredInMaterialDef() throws IOException {
+        String source = "MaterialDef Compute {\nMaterialParameters {\n}\nTechnique {\n"
+                + "ComputeShader GLSL430: Test.comp\n}\n}";
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);
+        assertEquals("Test.comp", def.getTechniqueDefs("Default").get(0)
+                .getShaderProgramNames().get(com.jme3.shader.Shader.ShaderType.Compute));
+    }
+
+    @Test(expected = IOException.class)
+    public void computeAndGraphicsCannotShareOneTechnique() throws IOException {
+        String source = "MaterialDef Mixed {\nMaterialParameters {\n}\nTechnique {\n"
+                + "ComputeShader GLSL430: Test.comp\nVertexShader GLSL430: Test.vert\n"
+                + "FragmentShader GLSL430: Test.frag\n}\n}";
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        j3MLoader.load(assetInfo);
+    }
+
+    @Test
     public void noDefaultTechnique_shouldBeSupported() throws IOException {
         when(assetInfo.openStream()).thenReturn(J3MLoader.class.getResourceAsStream("/no-default-technique.j3md"));
         MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);

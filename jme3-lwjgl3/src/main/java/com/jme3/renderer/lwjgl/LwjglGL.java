@@ -48,6 +48,28 @@ import java.nio.ShortBuffer;
 public class LwjglGL extends LwjglRender implements GL, GL2, GL3, GL4 {
 
     @Override
+    public void glPushDebugGroup(String name) {
+        if (org.lwjgl.opengl.GL.getCapabilities().OpenGL43 || org.lwjgl.opengl.GL.getCapabilities().GL_KHR_debug) {
+            byte[] bytes = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            // OpenGL guarantees at least 1024 bytes; use a conservative bounded label.
+            int length = Math.min(bytes.length, 1000);
+            while (length < bytes.length && (bytes[length] & 0xc0) == 0x80) {
+                length--;
+            }
+            ByteBuffer label = org.lwjgl.BufferUtils.createByteBuffer(length);
+            label.put(bytes, 0, length).flip();
+            KHRDebug.glPushDebugGroup(KHRDebug.GL_DEBUG_SOURCE_APPLICATION, 0, label);
+        }
+    }
+
+    @Override
+    public void glPopDebugGroup() {
+        if (org.lwjgl.opengl.GL.getCapabilities().OpenGL43 || org.lwjgl.opengl.GL.getCapabilities().GL_KHR_debug) {
+            KHRDebug.glPopDebugGroup();
+        }
+    }
+
+    @Override
     public void resetStats() {
     }
 
@@ -306,6 +328,11 @@ public class LwjglGL extends LwjglRender implements GL, GL2, GL3, GL4 {
     public void glGetBoolean(final int pname, final ByteBuffer params) {
         checkLimit(params);
         GL11.glGetBooleanv(pname, params);
+    }
+
+    @Override
+    public int glGetBufferParameter(int target, int parameter) {
+        return GL15.glGetBufferParameteri(target, parameter);
     }
 
     @Override

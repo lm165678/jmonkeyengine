@@ -98,4 +98,34 @@ public interface SceneProcessor {
      */
     public void setProfiler(AppProfiler profiler);
 
+    /**
+     * Declares postQueue work in the viewport graph. Override to expose native
+     * passes; the default preserves existing processors as one compatibility pass.
+     * Do not execute a separate graph here.
+     * @param graph current viewport graph
+     * @param queue current render queue
+     */
+    default void appendPostQueuePasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        graph.addPass("PostQueue", context -> postQueue(queue)).sideEffect();
+    }
+
+    /**
+     * Declares postFrame work without changing existing processor semantics.
+     * <pre>{@code
+     * // 第一步：自定义处理器可覆盖此方法，将多个绘制操作公开给主图。
+     * public void appendPostFramePasses(FrameGraph graph, ViewPort viewport) {
+     *     // 第二步：这里只声明 Pass；实际绘制放在回调里。
+     *     graph.addPass("MyEffect", context -> {
+     *         postFrame(viewport.getOutputFrameBuffer());
+     *     }).sideEffect();
+     *     // 第三步：不要调用 graph.execute/close，交由 RenderManager 调度。
+     * }
+     * // 不覆盖时，原有 postFrame 会自动成为兼容 Pass，不需要改老代码。
+     * }</pre>
+     * @param graph current viewport graph
+     * @param viewport owning viewport (resolve its output at execution time)
+     */
+    default void appendPostFramePasses(com.jme3.renderer.framegraph.FrameGraph graph, ViewPort viewport) {
+        graph.addPass("PostFrame", context -> postFrame(viewport.getOutputFrameBuffer())).sideEffect();
+    }
 }

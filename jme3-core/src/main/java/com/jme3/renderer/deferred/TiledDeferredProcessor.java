@@ -73,6 +73,11 @@ public final class TiledDeferredProcessor implements com.jme3.post.SceneProcesso
         pipeline = new DeferredPipeline(assets, models);
         setMode(Mode.Forward);
     }
+    @Override
+    public void appendPasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        pipeline.appendPasses(graph, queue);
+    }
+
     public DeferredPipeline getPipeline() {
         return pipeline;
     }

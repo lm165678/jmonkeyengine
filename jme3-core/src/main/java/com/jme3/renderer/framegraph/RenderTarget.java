@@ -48,6 +48,18 @@ public final class RenderTarget {
         this.colors = colors;
         this.depth = depth;
     }
+    /**
+     * Wraps externally owned attachments for importResource. This does not allocate
+     * or transfer ownership. Never pass the result to ResourceDefinition.destroy.
+     * @param buffer external framebuffer
+     * @param color sampled color attachment
+     * @param depth optional original depth texture
+     * @return borrowed attachment bundle
+     */
+    public static RenderTarget borrowed(FrameBuffer buffer, Texture2D color, Texture2D depth) {
+        return new RenderTarget(java.util.Objects.requireNonNull(buffer),
+            new Texture2D[] {java.util.Objects.requireNonNull(color)}, depth);
+    }
     /** @return framebuffer to bind with Renderer.setFrameBuffer */
     public FrameBuffer getFrameBuffer() {
         return buffer;
