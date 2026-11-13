@@ -1,5 +1,6 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
 #import "Common/ShaderLib/DeferredSurface.glsllib"
+#import "Common/ShaderLib/SurfaceCapture.glsllib"
 #import "Common/ShaderLib/Parallax.glsllib"
 #import "Common/ShaderLib/Optics.glsllib"
 #ifndef VERTEX_LIGHTING
@@ -171,6 +172,16 @@ void main(){
       vec4 specularColor = texture2D(m_SpecularMap, newTexCoord);
     #else
       vec4 specularColor = vec4(1.0);
+    #endif
+
+    #ifdef SURFACE_CAPTURE
+        #ifdef NORMALMAP
+            vec3 captureNormal = normalize(transpose(mat3(g_ViewMatrix)) * tbnMat * normal);
+        #else
+            vec3 captureNormal = normalize(transpose(mat3(g_ViewMatrix)) * normal);
+        #endif
+        writeSurfaceAttributes(DiffuseSum.rgb * diffuseColor.rgb, captureNormal, vec3(0.0));
+        return;
     #endif
 
     #ifdef LIGHTMAP

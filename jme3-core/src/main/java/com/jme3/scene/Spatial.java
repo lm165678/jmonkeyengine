@@ -170,6 +170,36 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * updated to reflect the correct state.
      */
     protected transient int refreshFlags = 0;
+    private transient com.jme3.util.SafeArrayList<SceneChangeListener> sceneChangeListeners;
+
+    /** @param listener runtime subtree observer; register/remove on the scene thread */
+    public void addSceneChangeListener(SceneChangeListener listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        if (sceneChangeListeners == null) {
+            sceneChangeListeners = new com.jme3.util.SafeArrayList<>(SceneChangeListener.class);
+        }
+        if (!sceneChangeListeners.contains(listener)) {
+            sceneChangeListeners.add(listener);
+        }
+    }
+
+    /** @param listener observer to unregister; safe if absent */
+    public void removeSceneChangeListener(SceneChangeListener listener) {
+        if (sceneChangeListeners != null) {
+            sceneChangeListeners.remove(listener);
+        }
+    }
+
+    /** Notify this spatial and its current ancestors; callbacks must only enqueue work. */
+    protected final void notifySceneChanged(SceneChangeListener.Change change) {
+        for (Spatial cursor = this; cursor != null; cursor = cursor.parent) {
+            if (cursor.sceneChangeListeners != null) {
+                for (SceneChangeListener listener : cursor.sceneChangeListeners.getArray()) {
+                    listener.sceneChanged(this, change);
+                }
+            }
+        }
+    }
 
     /**
      * Set to true if a subclass requires updateLogicalState() even
@@ -276,6 +306,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * a refresh is required.
      */
     protected void setTransformRefresh() {
+        notifySceneChanged(SceneChangeListener.Change.TRANSFORM);
         refreshFlags |= RF_TRANSFORM;
         setBoundRefresh();
     }
@@ -314,6 +345,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * a refresh is required.
      */
     protected void setBoundRefresh() {
+        notifySceneChanged(SceneChangeListener.Change.BOUNDS);
         refreshFlags |= RF_BOUND;
 
         Spatial p = parent;
@@ -1429,6 +1461,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     public Spatial jmeClone() {
         try {
             Spatial clone = (Spatial) super.clone();
+            clone.sceneChangeListeners = null;
             return clone;
         } catch (CloneNotSupportedException ex) {
             throw new AssertionError();
@@ -1490,6 +1523,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
                 userData.put(key, new UserData(UserData.getObjectType(data), data));
             }
         }
+        notifySceneChanged(SceneChangeListener.Change.USER_DATA);
     }
 
     @SuppressWarnings("unchecked")

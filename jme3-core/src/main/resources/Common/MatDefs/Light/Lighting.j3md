@@ -395,4 +395,42 @@ MaterialDef Phong Lighting {
             FOG_EXPSQ : ExpSqFog
         }
     }
+    // Static surface attributes only; no scene lighting or fog is captured.
+    Technique SurfaceCapture {
+        LightModel DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/SPLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/SPLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            NormalMatrix
+            WorldViewMatrix
+            ViewMatrix
+            CameraPosition
+            WorldMatrix
+            ViewProjectionMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            SURFACE_CAPTURE
+            VERTEX_COLOR : UseVertexColor
+            MATERIAL_COLORS : UseMaterialColors
+            DIFFUSEMAP : DiffuseMap
+            NORMALMAP : NormalMap
+            SPECULARMAP : SpecularMap
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            ALPHAMAP : AlphaMap
+            COLORRAMP : ColorRamp
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            SPHERE_MAP : EnvMapAsSphereMap
+
+            // fog - jayfella
+        }
+    }
 }

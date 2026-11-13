@@ -2647,6 +2647,7 @@ public final class GLRenderer implements Renderer {
      * @param areaW Width of the area to copy
      * @param areaH Height of the area to copy
      */
+    @Override
     public void modifyTexture(Texture2D dest, Image src, int destX, int destY, int srcX, int srcY, int areaW, int areaH) {
         setTexture(0, dest);
         if(caps.contains(Caps.OpenGLES20) && src.getFormat()!=dest.getImage().getFormat() ) {
@@ -2656,6 +2657,29 @@ public final class GLRenderer implements Renderer {
         texUtil.uploadSubTexture(target, src, 0, destX, destY, srcX, srcY, areaW, areaH, linearizeSrgbImages);
     }
   
+    @Override
+    public void updateTexture3DRegion(com.jme3.texture.Texture3D texture,
+            int x, int y, int z, int width, int height, int depth, ByteBuffer pixels) {
+        if (gl2 == null) {
+            throw new UnsupportedOperationException("3D region uploads unavailable");
+        }
+        Image image = texture.getImage();
+        if (image.getFormat() != Image.Format.R32F || image.hasMipmaps()
+                || texture.getMinFilter().usesMipMapLevels()) {
+            throw new UnsupportedOperationException("Requires non-mipmapped R32F texture");
+        }
+        if (x < 0 || y < 0 || z < 0 || width <= 0 || height <= 0 || depth <= 0
+                || (long) x + width > image.getWidth() || (long) y + height > image.getHeight()
+                || (long) z + depth > image.getDepth() || !pixels.isDirect()
+                || pixels.remaining() != (long) width * height * depth * 4) {
+            throw new IllegalArgumentException("Invalid volume region or packed buffer");
+        }
+        setTexture(0, texture);
+        gl.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 4);
+        gl2.glTexSubImage3D(GL2.GL_TEXTURE_3D, 0, x, y, z, width, height, depth,
+                GL.GL_RED, GL.GL_FLOAT, pixels);
+    }
+
     @Override
     public void deleteImage(Image image) {
         int texId = image.getId();

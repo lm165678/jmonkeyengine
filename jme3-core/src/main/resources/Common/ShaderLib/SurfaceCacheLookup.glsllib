@@ -1,0 +1,18 @@
+// Candidate card lookup for a KNOWN geometry. Never chooses a material from SDF alone.
+// position is geometry-local; localToClip is the capture camera matrix.
+// depthTolerance uses normalized card depth units and must be chosen conservatively.
+// Nearest-filtered attributes avoid mixing unrelated surfaces across card edges.
+bool projectSurfaceCard(vec3 position, mat4 localToClip, sampler2D cardDepth,
+                        float depthTolerance, out vec2 uv) {
+    vec4 clip = localToClip * vec4(position, 1.0);
+    if (abs(clip.w) < 1e-8) {
+        return false;
+    }
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+    uv = projected.xy;
+    if (any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) {
+        return false;
+    }
+    float stored = texture(cardDepth, uv).r;
+    return stored < 1.0 && abs(projected.z - stored) <= max(depthTolerance, 0.0);
+}

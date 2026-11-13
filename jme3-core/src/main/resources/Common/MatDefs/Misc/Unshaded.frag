@@ -1,5 +1,6 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
 #import "Common/ShaderLib/DeferredSurface.glsllib"
+#import "Common/ShaderLib/SurfaceCapture.glsllib"
 
 #if defined(HAS_GLOWMAP) || defined(HAS_COLORMAP) || (defined(HAS_LIGHTMAP) && !defined(SEPARATE_TEXCOORD))
     #define NEED_TEXCOORD1
@@ -17,12 +18,15 @@ varying vec2 texCoord1;
 varying vec2 texCoord2;
 
 varying vec4 vertColor;
+#ifdef SURFACE_CAPTURE
+varying vec3 capturePosition;
+#endif
 
 void main(){
     vec4 color = vec4(1.0);
 
     #ifdef HAS_COLORMAP
-        color *= texture2D(m_ColorMap, texCoord1);     
+        color *= texture2D(m_ColorMap, texCoord1);
     #endif
 
     #ifdef HAS_VERTEXCOLOR
@@ -33,7 +37,7 @@ void main(){
         color *= m_Color;
     #endif
 
-    #ifdef HAS_LIGHTMAP
+    #if defined(HAS_LIGHTMAP) && !defined(SURFACE_CAPTURE)
         #ifdef SEPARATE_TEXCOORD
             color.rgb *= texture2D(m_LightMap, texCoord2).rgb;
         #else
@@ -47,6 +51,12 @@ void main(){
         }
     #endif
 
+    #ifdef SURFACE_CAPTURE
+        vec3 captureNormal = cross(dFdx(capturePosition), dFdy(capturePosition));
+        // Unshaded is explicitly treated as emissive, never as diffuse reflectance.
+        writeSurfaceAttributes(vec3(0.0), captureNormal, color.rgb);
+        return;
+    #endif
     gl_FragColor = color;
     #ifdef DEFERRED_GBUFFER
     writeDeferredSurface(color.rgb,vec3(0.0,0.0,1.0),1.0,vec3(0.0),

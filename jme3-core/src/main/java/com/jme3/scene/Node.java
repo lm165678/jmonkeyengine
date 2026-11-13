@@ -354,6 +354,7 @@ public class Node extends Spatial {
             }
             child.setParent(this);
             children.add(index, child);
+            child.notifySceneChanged(SceneChangeListener.Change.ATTACHED);
             // XXX: Not entirely correct? Forces bound update up the
             // tree stemming from the attached child. Also forces
             // transform update down the tree-
@@ -428,6 +429,7 @@ public class Node extends Spatial {
     public Spatial detachChildAt(int index) {
         Spatial child = children.remove(index);
         if (child != null) {
+            child.notifySceneChanged(SceneChangeListener.Change.DETACHING);
             child.setParent(null);
             logger.log(Level.FINE, "{0}: Child removed.", this.toString());
 

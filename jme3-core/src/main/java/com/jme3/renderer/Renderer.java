@@ -304,6 +304,57 @@ public interface Renderer {
     public void modifyTexture(Texture tex, Image pixels, int x, int y);
 
     /**
+     * Upload a rectangular region of an uncompressed, non-mipmapped 2D image.
+     * Does not update the destination CPU image. Call on the render thread.
+     * Implementations without region uploads may throw UnsupportedOperationException.
+     * <pre>{@code
+     * // 第一步：更新目标纹理的 CPU 像素，但不要标记整张 Image.setUpdateNeeded()。
+     * // 第二步：在绘制之前，仅上传变化矩形；首次分配仍由 setTexture 完成。
+     * renderer.modifyTexture(atlas, atlas.getImage(), x, y, x, y, width, height);
+     * // 第三步：不支持此接口的后端可标记整图更新，并用 setTexture 走兼容路径。
+     * }</pre>
+     * @param dest destination texture
+     * @param src source CPU pixels
+     * @param destX destination X
+     * @param destY destination Y
+     * @param srcX source X
+     * @param srcY source Y
+     * @param areaW width
+     * @param areaH height
+     */
+    default void modifyTexture(com.jme3.texture.Texture2D dest, Image src,
+            int destX, int destY, int srcX, int srcY, int areaW, int areaH) {
+        throw new UnsupportedOperationException("Rectangular texture uploads unavailable");
+    }
+
+    /**
+     * Uploads packed, native-order R32F samples into a non-mipmapped 3D texture.
+     * Call on the render thread. CPU image contents are owned by the caller and
+     * must also be updated for context restoration. Unsupported backends throw
+     * UnsupportedOperationException; callers can mark the CPU image dirty instead.
+     * <pre>{@code
+     * // 第一步：更新 volume.getImage() 的 CPU 副本，保留上下文恢复所需数据。
+     * // 第二步：把变化块按 x 连续、再 y、再 z 排列到 direct/native-order ByteBuffer。
+     * block.flip();
+     * // 第三步：绘制前上传；首次分配由 renderer 完成，不要把整张 Image 标记 dirty。
+     * renderer.updateTexture3DRegion(volume, x, y, z, width, height, depth, block);
+     * // 不支持的后端：捕获 UnsupportedOperationException，标记整图 setUpdateNeeded()。
+     * }</pre>
+     * @param texture destination R32F volume
+     * @param x first destination column
+     * @param y first destination row
+     * @param z first destination slice
+     * @param width block width
+     * @param height block height
+     * @param depth block depth
+     * @param pixels packed direct buffer, exactly width*height*depth floats remaining
+     */
+    default void updateTexture3DRegion(com.jme3.texture.Texture3D texture,
+            int x, int y, int z, int width, int height, int depth, java.nio.ByteBuffer pixels) {
+        throw new UnsupportedOperationException("3D region uploads unavailable");
+    }
+
+    /**
      * Deletes a texture from the GPU.
      */
     public void deleteImage(Image image);

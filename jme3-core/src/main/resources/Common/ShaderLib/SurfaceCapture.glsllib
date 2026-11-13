@@ -1,0 +1,11 @@
+// SurfaceCapture MRT contract is separate from deferred shading model layouts.
+// Geometry-local capture: identity world transform makes normal geometry-local.
+#ifdef SURFACE_CAPTURE
+void writeSurfaceAttributes(vec3 diffuseReflectance, vec3 normal, vec3 emission) {
+    outGBuffer0 = vec4(diffuseReflectance, 1.0);
+    outGBuffer1 = vec4(normalize(normal), 1.0);
+    outGBuffer2 = vec4(emission, 1.0);
+    outGBuffer3 = vec4(0.0);
+    outGBuffer4 = vec4(0.0);
+}
+#endif

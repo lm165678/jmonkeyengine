@@ -152,7 +152,11 @@ public class Uniform extends ShaderVariable {
             }
 
             multiData.clear();
-
+            // Matrix equality must describe the uploaded data, which is now zero.
+            // Otherwise A(matrix) -> B(no matrix) -> A(same matrix) keeps zeros.
+            if (varType == VarType.Matrix3 || varType == VarType.Matrix4) {
+                value = null;
+            }
             return;
         }
 

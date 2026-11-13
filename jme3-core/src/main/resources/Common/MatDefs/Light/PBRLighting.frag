@@ -1,5 +1,6 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
 #import "Common/ShaderLib/DeferredSurface.glsllib"
+#import "Common/ShaderLib/SurfaceCapture.glsllib"
 #import "Common/ShaderLib/PBR.glsllib"
 #import "Common/ShaderLib/Parallax.glsllib"
 #import "Common/ShaderLib/Lighting.glsllib"
@@ -204,6 +205,24 @@ void main(){
         vec4 specularColor = (nonMetalSpec - nonMetalSpec * Metallic) + albedo * Metallic;
         vec4 diffuseColor = albedo - albedo * Metallic;
         vec3 fZero = vec3(specular);
+    #endif
+
+    #ifdef SURFACE_CAPTURE
+        vec3 captureEmission = vec3(0.0);
+        #if defined(EMISSIVE) || defined(EMISSIVEMAP)
+            #ifdef EMISSIVEMAP
+                vec4 captureEmissive = texture2D(m_EmissiveMap, newTexCoord);
+            #else
+                vec4 captureEmissive = m_Emissive;
+            #endif
+            captureEmission = captureEmissive.rgb * pow(captureEmissive.a, m_EmissivePower) * m_EmissiveIntensity;
+        #endif
+        vec3 captureDiffuse = diffuseColor.rgb;
+        #ifdef SPECGLOSSPIPELINE
+            captureDiffuse *= 1.0 - clamp(max(fZero.r, max(fZero.g, fZero.b)), 0.0, 1.0);
+        #endif
+        writeSurfaceAttributes(captureDiffuse, normal, captureEmission);
+        return;
     #endif
 
     gl_FragColor.rgb = vec3(0.0);

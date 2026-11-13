@@ -1,0 +1,76 @@
+// Shared atlas lookup. Rect is (offsetU, offsetV, scaleU, scaleV), excluding gutter.
+// Caller must provide a CURRENT resident region; missing cards must not be sampled.
+bool projectSurfaceAtlasCard(vec3 worldPosition, mat4 worldToCard,
+        sampler2D depthAtlas, vec4 rect, float tolerance, out vec2 atlasUv) {
+    vec4 clip = worldToCard * vec4(worldPosition, 1.0);
+    if (abs(clip.w) < 1e-8) {
+        return false;
+    }
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+    if (any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) {
+        return false;
+    }
+    atlasUv = rect.xy + projected.xy * rect.zw;
+    float depth = texture2D(depthAtlas, atlasUv).r;
+    return depth < 1.0 && abs(depth - projected.z) <= tolerance;
+}
+
+#if __VERSION__ >= 150
+// Geometry identity comes from a scene hit, not from the distance value alone.
+// Status is separate from color: missing data must never become a black valid hit.
+#define SURFACE_QUERY_VALID 0
+#define SURFACE_QUERY_NOT_RESIDENT 1
+#define SURFACE_QUERY_UNCOVERED 2
+
+struct QueriedSurface {
+    vec3 diffuse;
+    vec3 normal;
+    vec3 emission;
+};
+
+// worldToCard maps world positions to this card's clip space. cardToWorld is
+// its inverse. normalToWorld is the inverse transpose of geometry-local->world.
+// rect excludes gutters; caller supplies only a current generation's resident slot.
+// This samples ONE selected card; the caller tries cards of the HIT geometry only.
+// Tolerance is in world units. No ray tracing or card ownership lookup is implied.
+int querySurfaceAtlasCard(vec3 worldPosition, mat4 worldToCard, mat4 cardToWorld,
+        mat3 normalToWorld, bool resident, vec4 rect, float worldTolerance,
+        sampler2D diffuseAtlas, sampler2D normalAtlas, sampler2D emissionAtlas,
+        sampler2D depthAtlas, out QueriedSurface surface) {
+    surface.diffuse = vec3(0.0);
+    surface.normal = vec3(0.0);
+    surface.emission = vec3(0.0);
+    if (!resident) {
+        return SURFACE_QUERY_NOT_RESIDENT;
+    }
+    vec4 clip = worldToCard * vec4(worldPosition, 1.0);
+    if (abs(clip.w) < 1e-8 || worldTolerance < 0.0) {
+        return SURFACE_QUERY_UNCOVERED;
+    }
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+    if (any(lessThan(projected, vec3(0.0))) || any(greaterThanEqual(projected, vec3(1.0)))) {
+        return SURFACE_QUERY_UNCOVERED;
+    }
+    vec2 uv = rect.xy + projected.xy * rect.zw;
+    // Fetch a single texel, matching the CPU reference; do not blend through holes.
+    ivec2 pixel = ivec2(uv * vec2(textureSize(depthAtlas, 0)));
+    float depth = texelFetch(depthAtlas, pixel, 0).r;
+    vec4 diffuse = texelFetch(diffuseAtlas, pixel, 0);
+    if (depth >= 1.0 || diffuse.a <= 0.0) {
+        return SURFACE_QUERY_UNCOVERED;
+    }
+    vec4 captured = cardToWorld * vec4(projected.xy * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    if (abs(captured.w) < 1e-8 || distance(captured.xyz / captured.w, worldPosition) > worldTolerance) {
+        return SURFACE_QUERY_UNCOVERED;
+    }
+    vec3 normal = normalToWorld * texelFetch(normalAtlas, pixel, 0).xyz;
+    if (dot(normal, normal) < 1e-12) {
+        return SURFACE_QUERY_UNCOVERED;
+    }
+    surface.diffuse = diffuse.rgb;
+    surface.normal = normalize(normal);
+    surface.emission = texelFetch(emissionAtlas, pixel, 0).rgb;
+    return SURFACE_QUERY_VALID;
+}
+
+#endif

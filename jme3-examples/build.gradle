@@ -1,3 +1,141 @@
+task surfaceQuerySmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.sdf.TestSurfaceQuery'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+task bakePerformanceModels(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    main = 'jme3test.sdf.BakePerformanceModels'
+    classpath = sourceSets.main.runtimeClasspath
+}
+['bakedWorldPerformance': false, 'bakedWorldPerformanceSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        main = 'jme3test.sdf.TestBakedWorldPerformance'
+        classpath = sourceSets.main.runtimeClasspath
+        maxHeapSize = '2g'
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Event-maintained camera queries with 10,000 distant baked instances.
+['surfaceSceneIndex': false, 'surfaceSceneIndexSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        main = 'jme3test.sdf.TestSurfaceAttributeAtlas'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--index-stress'
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Bounded runtime residency of mixed-size baked surface cards.
+['surfaceAttributeAtlas': false, 'surfaceAttributeAtlasSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        main = 'jme3test.sdf.TestSurfaceAttributeAtlas'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Camera-centered composition of baked instance SDFs; Space switches visualization.
+['globalDistanceField': false, 'globalDistanceFieldSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        main = 'jme3test.sdf.TestGlobalDistanceField'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Independent surface bake, with optional SDF; all previews use saved j3o pixels.
+['surfaceAttributeBake': [], 'surfaceAttributeBakeSmoke': ['--smoke'],
+ 'surfaceAttributeOnlySmoke': ['--smoke', '--surface-only']].each { taskName, arguments ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        main = 'jme3test.sdf.TestSurfaceAttributeBake'
+        classpath = sourceSets.main.runtimeClasspath
+        args arguments
+    }
+}
+// SDK-ready SDF bake data and runtime surface cache examples.
+['sdfBakeDataSmoke': 'TestSdfBakeData',
+ 'surfaceMaterialMaps': 'TestSurfaceMaterialMaps',
+ 'surfaceMaterialMapsSmoke': 'TestSurfaceMaterialMaps',
+ 'surfaceAttributes': 'TestSurfaceAttributes',
+ 'surfaceAttributesSmoke': 'TestSurfaceAttributes',
+ 'surfaceCacheLifecycle': 'TestSurfaceCacheLifecycle',
+ 'surfaceCacheLifecycleSmoke': 'TestSurfaceCacheLifecycle'].each { taskName, entry ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        main = 'jme3test.sdf.' + entry
+        classpath = sourceSets.main.runtimeClasspath
+        if (taskName.endsWith('Smoke')) {
+            args '--smoke'
+        }
+    }
+}
+// Interactive whole-volume preview, separate from the slice viewer.
+['sdfSurface': false, 'sdfSurfaceSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        description = 'Switches original model and GPU SDF surface; -PsdfBox for signed box.'
+        main = 'jme3test.sdf.TestSdfSurface'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+        if (project.hasProperty('sdfBox')) {
+            args '--box'
+        }
+    }
+}
+task sdfVisualization(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    description = 'Interactive SDF slices and near-surface samples; -PsdfBox for signed box.'
+    main = 'jme3test.sdf.TestSdfVisualization'
+    classpath = sourceSets.main.runtimeClasspath
+    if (project.hasProperty('sdfBox')) {
+        args '--box'
+    }
+}
+
+task sdfVisualizationSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Renders all three SDF slice axes in a real window, then exits.'
+    main = 'jme3test.sdf.TestSdfVisualization'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+    if (project.hasProperty('sdfBox')) {
+        args '--box'
+    }
+}
+task sponzaSdfBake(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Bakes the default-resolution Sponza field into a new output directory.'
+    main = 'jme3test.sdf.TestSponzaSdf'
+    classpath = sourceSets.main.runtimeClasspath
+    systemProperty 'java.awt.headless', 'true'
+    if (project.hasProperty('sdfSigned')) {
+        args '--signed'
+    }
+}
+
+task sponzaSdfSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Bakes Sponza distance data, saves a new j3o and verifies its round trip.'
+    main = 'jme3test.sdf.TestSponzaSdf'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+    systemProperty 'java.awt.headless', 'true'
+}
+
 task frameGraphVersionsSmoke(type: JavaExec, dependsOn: 'classes') {
     group = 'verification'
     description = 'Checks FG resource versions, canonical imports and compute-to-readback barriers.'
