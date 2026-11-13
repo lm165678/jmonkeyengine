@@ -1,0 +1,35 @@
+layout(local_size_x = 64) in;
+layout(std430) readonly buffer m_Commands {
+    uint commands[];
+};
+layout(std430) writeonly buffer m_Compacted {
+    uint compacted[];
+};
+layout(std430) buffer m_DrawCount {
+    uint drawCount;
+};
+uniform int m_Capacity;
+uniform bool m_Reset;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (m_Reset) {
+        if (index == 0u) {
+            drawCount = 0u;
+        }
+        return;
+    }
+    if (index >= uint(m_Capacity)) {
+        return;
+    }
+    uint source = index * 5u;
+    if (commands[source] == 0u || commands[source + 1u] == 0u) {
+        return;
+    }
+    // Each command preserves its own baseVertex/baseInstance. Order is irrelevant
+    // for eligible opaque geometry. Original commands remain intact for statistics.
+    uint target = atomicAdd(drawCount, 1u) * 5u;
+    for (uint word = 0u; word < 5u; word++) {
+        compacted[target + word] = commands[source + word];
+    }
+}

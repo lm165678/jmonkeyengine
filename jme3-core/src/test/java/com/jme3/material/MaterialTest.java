@@ -66,6 +66,26 @@ public class MaterialTest {
     });
 
     @Test
+    public void computeDispatchRequiresBackendCapability() {
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        assertThrows(UnsupportedOperationException.class, () -> material.dispatchCompute(renderManager, 1, 1, 1));
+    }
+
+    @Test
+    public void graphicsTechniqueCannotBeDispatchedAsCompute() {
+        myCaps.addAll(Arrays.asList(Caps.OpenGL43, Caps.GLSL100));
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        assertThrows(IllegalStateException.class, () -> material.dispatchCompute(renderManager, 1, 1, 1));
+    }
+
+    @Test
+    public void computeDispatchRejectsEmptyWorkgroups() {
+        myCaps.add(Caps.OpenGL43);
+        material("Common/MatDefs/Misc/Unshaded.j3md");
+        assertThrows(IllegalArgumentException.class, () -> material.dispatchCompute(renderManager, 0, 1, 1));
+    }
+
+    @Test
     public void testSelectNonExistentTechnique() {
         material("Common/MatDefs/Gui/Gui.j3md");
         assertThrows(IllegalArgumentException.class,

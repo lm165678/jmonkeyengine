@@ -1,0 +1,26 @@
+MaterialDef Surface Atlas Preview {
+    MaterialParameters {
+        Texture2D AttributeAtlas
+        Texture2D DepthAtlas
+        Vector4 AtlasRect
+        Matrix4 WorldToCard
+        Matrix4 CardToWorld
+        Float CardResolution
+        Int Mode
+        Boolean Missing
+    }
+    Technique {
+        VertexShader GLSL330: Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330: Materials/Sdf/AtlasPreview.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+        }
+        Defines {
+            HAS_COLORMAP
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+        }
+    }
+}

@@ -1,0 +1,6 @@
+// Unshaded layout: gbuffer3 contains final RGB and opacity. No normal, BRDF
+// parameters or light list are needed. VertexLighting also stores its already
+// evaluated vertex-lighting result in this layout to preserve interpolation.
+vec4 shadeUnshadedSurface() {
+    return getGBuffer3();
+}

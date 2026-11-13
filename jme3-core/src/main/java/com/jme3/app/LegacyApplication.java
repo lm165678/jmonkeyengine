@@ -330,6 +330,7 @@ public class LegacyApplication implements Application, SystemListener {
         cam.lookAt(new Vector3f(0f, 0f, 0f), Vector3f.UNIT_Y);
 
         renderManager = new RenderManager(renderer);
+        renderManager.configureGpuScene(assetManager, settings);
         //Remy - 09/14/2010 set the timer in the renderManager
         renderManager.setTimer(timer);
 
@@ -866,6 +867,9 @@ public class LegacyApplication implements Application, SystemListener {
     @Override
     public void destroy() {
         stateManager.cleanup();
+        if (renderManager != null) {
+            renderManager.cleanupRenderPaths();
+        }
 
         destroyInput();
         if (audioRenderer != null) {

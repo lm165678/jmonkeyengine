@@ -1,0 +1,24 @@
+MaterialDef Surface Card Preview {
+    MaterialParameters {
+        Texture2D Attribute
+        Texture2D Depth
+        Matrix4 LocalToClip
+        Matrix4 ClipToLocal
+        Vector3 TestPosition
+        Int Mode
+    }
+    Technique {
+        VertexShader GLSL330: Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330: Materials/Sdf/CardPreview.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+        }
+        Defines {
+            HAS_COLORMAP
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+        }
+    }
+}

@@ -45,6 +45,9 @@ import com.jme3.renderer.Caps;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.Renderer;
 import com.jme3.renderer.ViewPort;
+import com.jme3.renderer.framegraph.FrameGraph;
+import com.jme3.renderer.framegraph.ResourceHandle;
+import com.jme3.renderer.framegraph.RenderTarget;
 import com.jme3.renderer.queue.RenderQueue;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.shape.FullscreenTriangle;
@@ -71,13 +74,40 @@ import java.util.List;
  * filter sequentially, optionally with anti-aliasing (multisampling) and depth texture
  * support.
  *
- * @author Nehon
+ * <p>For graph-native multi-pass effects, add a {@link FrameGraphFilter} to this
+ * same list. Its build callback declares passes in the shared viewport graph;
+ * legacy filters retain their existing lifecycle. Graph-native temporary targets
+ * are pooled by the graph, while legacy Filter.Pass targets remain filter-owned.
+ * See FrameGraphFilter and TestFrameGraphFilters for step-by-step usage.</p>
+ * @author Rémy Bouquet aka Nehon
  */
 public class FilterPostProcessor implements SceneProcessor, Savable {
 
+    private FrameGraph filterGraph;
+    private Material graphCopyMaterial;
+
     /**
-     * The simple name of this class, used for profiling.
+     * Returns the shared viewport graph after this processor has registered passes.
+     * Filter order is preserved, including custom callback side effects. Targets
+     * from legacy Filter owners are imported; native transient targets are graph-owned.
+     * <pre>{@code
+     * // 第一步：按原有接口添加 Filter，不需要手动建图。
+     * fpp.addFilter(new BloomFilter());
+     * viewPort.addProcessor(fpp);
+     * // 第二步：渲染后查看每个 Filter 的图节点；开启/关闭将在下一帧生效。
+     * System.out.println(fpp.getFrameGraph().getExecutedPasses());
+     * }</pre>
+     * @return shared viewport graph, or null before registration; do not mutate it
      */
+    public FrameGraph getFrameGraph() {
+        return filterGraph;
+    }
+
+    private static final class FilterChainState {
+        Texture2D texture;
+        FrameBuffer buffer;
+    }
+
     public static final String FPP = FilterPostProcessor.class.getSimpleName();
 
     private RenderManager renderManager;
@@ -328,6 +358,22 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         }
     }
 
+    @Override
+    public void appendPostQueuePasses(FrameGraph graph, RenderQueue queue) {
+        filterGraph = graph;
+        int index = 0;
+        for (Filter filter : filters.getArray()) {
+            graph.addExpansionPass("Filter[" + index++ + "]:" + filter.getName(), current -> {
+                if (filter.isEnabled()) {
+                    if (prof != null) {
+                        prof.spStep(SpStep.ProcPostQueue, FPP, filter.getName());
+                    }
+                    filter.appendPostQueuePasses(current, queue);
+                }
+            });
+        }
+    }
+
     /**
      * Renders the chain of filters. This method is the core of the post-processing.
      * It iterates through each enabled filter, handling pre-filter passes,
@@ -337,96 +383,270 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      * @param r The `Renderer` instance.
      * @param sceneFb The framebuffer containing the rendered scene (either MS or single-sample).
      */
-    private void renderFilterChain(Renderer r, FrameBuffer sceneFb) {
-        Texture2D tex = filterTexture;
-        FrameBuffer buff = sceneFb;
-        boolean msDepth = depthTexture != null && depthTexture.getImage().getMultiSamples() > 1;
+    private void appendFilterChain(FrameGraph graph, Renderer r, FrameBuffer sceneFb) {
+        for (Filter filter : filters.getArray()) {
+            if (filter.isEnabled() && filter instanceof FrameGraphFilter) {
+                appendMixedFilterChain(graph, r, sceneFb);
+                return;
+            }
+        }
+        FilterChainState chain = new FilterChainState();
+        chain.texture = filterTexture;
+        chain.buffer = sceneFb;
+        ResourceHandle<FrameBuffer> scene = graph.importResource(
+                "Scene", FrameBuffer.class, () -> sceneFb);
+        FrameGraph.PassBuilder previous = null;
+        for (int i = 0; i < filters.size(); i++) {
+            final int index = i;
+            Filter filter = filters.get(i);
+            if (!filter.isEnabled()) {
+                continue;
+            }
+            if (filter.getPostRenderPasses() != null) {
+                int passIndex = 0;
+                for (Filter.Pass filterPass : filter.getPostRenderPasses()) {
+                    String passName = filterPass.name == null ? "Pass" : filterPass.name;
+                    String name = "Filter[" + i + "]:" + filter.getName() + "/" + passIndex++ + ":" + passName;
+                    ResourceHandle<FrameBuffer> passTarget = graph.importResource(
+                            name, FrameBuffer.class, filterPass::getRenderFrameBuffer);
+                    FrameGraph.PassBuilder subpass = graph.addPass(name, context -> runGraphPass(() -> {
+                        context.get(scene);
+                        context.get(passTarget);
+                        renderFilterPass(r, chain, filter, filterPass);
+                    })).read(scene).write(passTarget).sideEffect();
+                    if (previous != null) {
+                        subpass.after(previous);
+                    }
+                    previous = subpass;
+                }
+            }
+            // Borrow actual Filter-owned targets; preserve callback order even for custom filters.
+            ResourceHandle<FrameBuffer> output = graph.importResource(
+                    "FilterOutput" + i, FrameBuffer.class,
+                    () -> index == lastFilterIndex ? outputBuffer : filter.getRenderFrameBuffer());
+            FrameGraph.PassBuilder pass = graph.addPass(
+                    "Filter[" + i + "]:" + filter.getName(), context -> runGraphPass(() -> {
+                        context.get(scene);
+                        context.get(output);
+                        renderFilter(r, sceneFb, chain, filter, index);
+                    })).read(scene).write(output).sideEffect();
+            if (previous != null) {
+                pass.after(previous);
+            }
+            previous = pass;
+        }
+    }
 
+    private void appendMixedFilterChain(FrameGraph graph, Renderer renderer, FrameBuffer sceneFb) {
+        ResourceHandle<RenderTarget> color = graph.importResource("SceneColor", RenderTarget.class,
+            () -> RenderTarget.borrowed(sceneFb, filterTexture, depthTexture));
+        ResourceHandle<Texture2D> depth = graph.importResource("OriginalSceneDepth", Texture2D.class,
+            () -> depthTexture);
+        boolean graphOutput = false;
+        FilterChainState chain = new FilterChainState();
         for (int i = 0; i < filters.size(); i++) {
             Filter filter = filters.get(i);
-            if (prof != null) {
-                prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName());
+            if (!filter.isEnabled()) {
+                continue;
+            }
+            String prefix = "Filter[" + i + "]:" + filter.getName();
+            ResourceHandle<RenderTarget> input = color;
+            if (filter instanceof FrameGraphFilter) {
+                FilterGraphContext builder = new FilterGraphContext(graph, this, prefix, width, height, depth);
+                color = java.util.Objects.requireNonNull(
+                    ((FrameGraphFilter) filter).build(builder, input), "Graph filter returned null");
+                graphOutput = true;
+                continue;
             }
 
-            if (filter.isEnabled()) {
-                // Handle additional passes a filter might have (e.g., blur passes)
-                if (filter.getPostRenderPasses() != null) {
-                    for (Filter.Pass pass : filter.getPostRenderPasses()) {
-                        if (prof != null) {
-                            prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), pass.toString());
-                        }
-                        pass.beforeRender();
+            // Legacy adapters declare native input reads so its pooled allocation
+            // cannot be reused before the legacy filter has finished sampling it.
+            if (filter.getPostRenderPasses() != null) {
+                int passIndex = 0;
+                for (Filter.Pass filterPass : filter.getPostRenderPasses()) {
+                    String passName = filterPass.name == null ? "Pass" : filterPass.name;
+                    String name = prefix + "/" + passIndex++ + ":" + passName;
+                    ResourceHandle<FrameBuffer> target = graph.importResource(name, FrameBuffer.class,
+                        filterPass::getRenderFrameBuffer);
+                    graph.addPass(name, context -> runGraphPass(() -> {
+                        RenderTarget source = context.get(input);
+                        chain.texture = source.getColorTexture(0);
+                        chain.buffer = source.getFrameBuffer();
+                        context.get(target);
+                        renderFilterPass(renderer, chain, filter, filterPass);
+                    })).read(input).read(depth).write(target);
+                }
+            }
+            final int index = i;
+            if (i != lastFilterIndex) {
+                ResourceHandle<RenderTarget> output = graph.importResource(prefix + "/Color",
+                    RenderTarget.class, () -> RenderTarget.borrowed(
+                        filter.getRenderFrameBuffer(), filter.getRenderedTexture(), null));
+                graph.addPass(prefix, context -> runGraphPass(() -> {
+                    RenderTarget source = context.get(input);
+                    chain.texture = source.getColorTexture(0);
+                    chain.buffer = source.getFrameBuffer();
+                    context.get(output);
+                    renderFilter(renderer, sceneFb, chain, filter, index);
+                })).read(input).read(depth).write(output);
+                color = output;
+            } else {
+                ResourceHandle<FrameBuffer> output = graph.importResource(prefix + "/Output",
+                    FrameBuffer.class, () -> outputBuffer);
+                graph.addPass(prefix, context -> runGraphPass(() -> {
+                    RenderTarget source = context.get(input);
+                    chain.texture = source.getColorTexture(0);
+                    chain.buffer = source.getFrameBuffer();
+                    context.get(output);
+                    renderFilter(renderer, sceneFb, chain, filter, index);
+                })).read(input).read(depth).write(output);
+            }
+            graphOutput = false;
+        }
+        if (graphOutput) {
+            if (graphCopyMaterial == null) {
+                graphCopyMaterial = new Material(assetManager, "Common/MatDefs/Post/FrameGraphCopy.j3md");
+            }
+            ResourceHandle<RenderTarget> result = color;
+            ResourceHandle<FrameBuffer> output = graph.importResource("GraphFilterOutput",
+                FrameBuffer.class, () -> outputBuffer);
+            graph.addPass("GraphFilters/Present", context -> runGraphPass(() -> {
+                drawGraphMaterial(graphCopyMaterial, context.get(result).getColorTexture(0),
+                    context.get(depth), context.get(output));
+            })).read(result).read(depth).write(output);
+        }
+    }
 
-                        // Set scene texture if required by the pass
-                        if (pass.requiresSceneAsTexture()) {
-                            pass.getPassMaterial().setTexture("Texture", tex);
-                            if (tex.getImage().getMultiSamples() > 1) {
-                                pass.getPassMaterial().setInt("NumSamples", tex.getImage().getMultiSamples());
-                            } else {
-                                pass.getPassMaterial().clearParam("NumSamples");
+    void drawGraphMaterial(Material material, Texture2D input, Texture2D depth, FrameBuffer output) {
+        if (material.getMaterialDef().getMaterialParam("Texture") == null) {
+            throw new IllegalArgumentException("Graph material must declare Texture");
+        }
+        material.setTexture("Texture", input);
+        setGraphSamples(material, "NumSamples", input);
+        if (material.getMaterialDef().getMaterialParam("DepthTexture") != null) {
+            if (depth == null) {
+                throw new IllegalStateException("Override isRequiresDepthTexture() to request scene depth");
+            }
+            material.setTexture("DepthTexture", depth);
+            setGraphSamples(material, "NumSamplesDepth", depth);
+        }
+        // A half-resolution pass must not change the allocation basis for the next pass.
+        Camera camera = viewPort.getCamera();
+        int oldWidth = camera.getWidth();
+        int oldHeight = camera.getHeight();
+        float oldLeft = camera.getViewPortLeft();
+        float oldRight = camera.getViewPortRight();
+        float oldBottom = camera.getViewPortBottom();
+        float oldTop = camera.getViewPortTop();
+        try {
+            renderProcessing(renderer, output, material);
+        } finally {
+            if (output != outputBuffer) {
+                camera.resize(oldWidth, oldHeight, false);
+                camera.setViewPort(oldLeft, oldRight, oldBottom, oldTop);
+                renderManager.setCamera(camera, false);
+            }
+        }
+    }
 
-                            }
-                        }
+    private void setGraphSamples(Material material, String parameter, Texture2D texture) {
+        int samples = texture.getImage().getMultiSamples();
+        if (material.getMaterialDef().getMaterialParam(parameter) != null) {
+            if (samples > 1) {
+                material.setInt(parameter, samples);
+            } else {
+                material.clearParam(parameter);
+            }
+        } else if (samples > 1) {
+            throw new IllegalArgumentException("Multisampled input requires " + parameter);
+        }
+    }
 
-                        // Set depth texture if required by the pass
-                        if (pass.requiresDepthAsTexture()) {
-                            pass.getPassMaterial().setTexture("DepthTexture", depthTexture);
-                            if (msDepth) {
-                                pass.getPassMaterial().setInt("NumSamplesDepth", depthTexture.getImage().getMultiSamples());
-                            } else {
-                                pass.getPassMaterial().clearParam("NumSamplesDepth");
-                            }
-                        }
-                        renderProcessing(r, pass.getRenderFrameBuffer(), pass.getPassMaterial());
-                    }
-                }
-                if (prof != null) {
-                    prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "postFrame");
-                }
-                filter.postFrame(renderManager, viewPort, buff, sceneFb);
+    private void renderFilterPass(Renderer r, FilterChainState chain, Filter filter, Filter.Pass pass) {
+        if (!filter.isEnabled()) {
+            return;
+        }
+        boolean msDepth = depthTexture != null && depthTexture.getImage().getMultiSamples() > 1;
+        if (prof != null) {
+            prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), pass.toString());
+        }
+        pass.beforeRender();
 
-                Material mat = filter.getMaterial();
-                if (msDepth && filter.isRequiresDepthTexture()) {
-                    mat.setInt("NumSamplesDepth", depthTexture.getImage().getMultiSamples());
-                }
-                
-                if (filter.isRequiresSceneTexture()) {
-                    mat.setTexture("Texture", tex);
-                    if (tex.getImage().getMultiSamples() > 1) {
-                        mat.setInt("NumSamples", tex.getImage().getMultiSamples());
-                    } else {
-                        mat.clearParam("NumSamples");
-                    }
-                }
+        // Set scene texture if required by the pass.
+        if (pass.requiresSceneAsTexture()) {
+            pass.getPassMaterial().setTexture("Texture", chain.texture);
+            if (chain.texture.getImage().getMultiSamples() > 1) {
+                pass.getPassMaterial().setInt("NumSamples", chain.texture.getImage().getMultiSamples());
+            } else {
+                pass.getPassMaterial().clearParam("NumSamples");
+            }
+        }
 
-                // Apply bilinear filtering if requested by the filter
-                boolean wantsBilinear = filter.isRequiresBilinear();
-                if (wantsBilinear) {
-                    tex.setMagFilter(Texture.MagFilter.Bilinear);
-                    tex.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
-                }
+        // Set depth texture if required by the pass.
+        if (pass.requiresDepthAsTexture()) {
+            pass.getPassMaterial().setTexture("DepthTexture", depthTexture);
+            if (msDepth) {
+                pass.getPassMaterial().setInt("NumSamplesDepth", depthTexture.getImage().getMultiSamples());
+            } else {
+                pass.getPassMaterial().clearParam("NumSamplesDepth");
+            }
+        }
+        renderProcessing(r, pass.getRenderFrameBuffer(), pass.getPassMaterial());
+    }
 
-                // Determine target framebuffer and source texture for the next pass
-                buff = outputBuffer;
-                if (i != lastFilterIndex) {
-                    buff = filter.getRenderFrameBuffer();
-                    tex = filter.getRenderedTexture();
+    private void renderFilter(Renderer r, FrameBuffer sceneFb,
+            FilterChainState chain, Filter filter, int i) {
+        boolean msDepth = depthTexture != null && depthTexture.getImage().getMultiSamples() > 1;
+        if (prof != null) {
+            prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName());
+        }
+        if (filter.isEnabled()) {
+            if (prof != null) {
+                prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "postFrame");
+            }
+            filter.postFrame(renderManager, viewPort, chain.buffer, sceneFb);
+
+            Material mat = filter.getMaterial();
+            if (msDepth && filter.isRequiresDepthTexture()) {
+                mat.setInt("NumSamplesDepth", depthTexture.getImage().getMultiSamples());
+            }
+            if (filter.isRequiresSceneTexture()) {
+                mat.setTexture("Texture", chain.texture);
+                if (chain.texture.getImage().getMultiSamples() > 1) {
+                    mat.setInt("NumSamples", chain.texture.getImage().getMultiSamples());
+                } else {
+                    mat.clearParam("NumSamples");
                 }
-                if (prof != null) {
-                    prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "render");
-                }
-                // Render the main filter pass
-                renderProcessing(r, buff, mat);
+            }
+
+            Texture sampledTexture = chain.texture;
+            Texture.MagFilter previousMag = sampledTexture.getMagFilter();
+            Texture.MinFilter previousMin = sampledTexture.getMinFilter();
+            boolean wantsBilinear = filter.isRequiresBilinear();
+            if (wantsBilinear) {
+                chain.texture.setMagFilter(Texture.MagFilter.Bilinear);
+                chain.texture.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+            }
+
+            chain.buffer = outputBuffer;
+            if (i != lastFilterIndex) {
+                chain.buffer = filter.getRenderFrameBuffer();
+                chain.texture = filter.getRenderedTexture();
+            }
+            if (prof != null) {
+                prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "render");
+            }
+            try {
+                renderProcessing(r, chain.buffer, mat);
                 if (prof != null) {
                     prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "postFilter");
                 }
-                // Call filter's postFilter for final adjustments
-                filter.postFilter(r, buff);
-
-                // Revert texture filtering if it was changed
+                filter.postFilter(r, chain.buffer);
+            } finally {
+                // Restore the sampled input, which may belong to the graph's reusable pool.
                 if (wantsBilinear) {
-                    tex.setMagFilter(Texture.MagFilter.Nearest);
-                    tex.setMinFilter(Texture.MinFilter.NearestNoMipMaps);
+                    sampledTexture.setMagFilter(previousMag);
+                    sampledTexture.setMinFilter(previousMin);
                 }
             }
         }
@@ -434,26 +654,31 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     @Override
     public void postFrame(FrameBuffer out) {
-        try {
-            FrameBuffer sceneBuffer = renderFrameBuffer;
-            if (renderFrameBufferMS != null && !renderer.getCaps().contains(Caps.OpenGL32)) {
-                renderer.copyFrameBuffer(renderFrameBufferMS, renderFrameBuffer, true, true);
-            } else if (renderFrameBufferMS != null) {
-                sceneBuffer = renderFrameBufferMS;
-            }
-
-            // Execute the filter chain
-            renderFilterChain(renderer, sceneBuffer);
+        // Direct legacy invocation only; RenderManager appends to its own graph.
+        try (FrameGraph graph = new FrameGraph()) {
+            graph.addExpansionPass("Post", current -> appendPostFramePasses(current, viewPort));
+            graph.execute(renderManager, viewPort, viewPort.getQueue());
         } finally {
-            // Later processors and the translucent bucket render to the original
-            // physical target with the untouched logical scene camera.
-            renderer.setFrameBuffer(outputBuffer);
-            restoreSceneCamera();
-            if (viewPort != null) {
-                renderManager.setCamera(viewPort.getCamera(), false,
-                        originalWidth, originalHeight);
-            }
+            restoreOutput();
+            filterGraph = null;
         }
+    }
+
+    @Override
+    public void appendPostFramePasses(FrameGraph graph, ViewPort viewport) {
+        filterGraph = graph;
+        FrameBuffer sceneBuffer = renderFrameBuffer;
+        if (renderFrameBufferMS != null && !renderer.getCaps().contains(Caps.OpenGL32)) {
+            graph.addPass("ResolveMSAA", context -> runGraphPass(() -> {
+                renderer.copyFrameBuffer(renderFrameBufferMS, renderFrameBuffer, true, true);
+            })).sideEffect();
+        } else if (renderFrameBufferMS != null) {
+            sceneBuffer = renderFrameBufferMS;
+        }
+        appendFilterChain(graph, renderer, sceneBuffer);
+        graph.addPass("RestoreOutput", context -> runGraphPass(() -> {
+            restoreOutput();
+        })).sideEffect();
     }
 
     @Override
@@ -532,6 +757,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     @Override
     public void cleanup() {
+        filterGraph = null;
         if (viewPort != null) {
             // Reset FPP render state and restore the original framebuffer.
             restoreSceneCamera();
@@ -668,6 +894,23 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         processingCamera.resize(Math.max(logicalWidth, 1), Math.max(logicalHeight, 1), false);
         processingCamera.setViewPort(viewportLeft, viewportRight, viewportBottom, viewportTop);
         return processingCamera;
+    }
+
+    private void runGraphPass(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException | Error failure) {
+            restoreOutput();
+            throw failure;
+        }
+    }
+
+    private void restoreOutput() {
+        renderer.setFrameBuffer(outputBuffer);
+        restoreSceneCamera();
+        if (viewPort != null) {
+            renderManager.setCamera(viewPort.getCamera(), false, originalWidth, originalHeight);
+        }
     }
 
     private void restoreSceneCamera() {

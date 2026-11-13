@@ -115,6 +115,24 @@ public class ViewPort {
      */
     protected boolean clearStencil = false;
     private boolean enabled = true;
+    private RenderPath renderPath = RenderPath.Inherit;
+
+    /**
+     * Overrides the manager's rendering path for this viewport. Render-thread only.
+     * <pre>{@code
+     * viewPort.setRenderPath(RenderPath.TiledDeferredGPU);
+     * // Later, follow RenderManager.setRenderPath again:
+     * viewPort.setRenderPath(RenderPath.Inherit);
+     * }</pre>
+     * Inherit is the default. An explicitly installed pipeline or attached
+     * TiledDeferredProcessor takes precedence over this setting. For example,
+     * remove a direct pipeline with {@code renderManager.setPipeline(viewPort, null)}
+     * before relying on this override.
+     * @param path non-null viewport path or Inherit
+     */
+    public void setRenderPath(RenderPath path) { renderPath=java.util.Objects.requireNonNull(path); }
+    public RenderPath getRenderPath() { return renderPath; }
+
 
     /**
      * Creates a new viewport. User code should generally use these methods instead:<br>

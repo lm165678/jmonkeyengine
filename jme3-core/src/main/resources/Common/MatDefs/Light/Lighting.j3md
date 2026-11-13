@@ -1,7 +1,11 @@
 MaterialDef Phong Lighting {
+    ShadingId 1
 
     MaterialParameters {
         Int BoundDrawBuffer
+        Texture2D DeferredLightData -LINEAR
+        Int DeferredLightCount
+        Int DeferredShadingId
 
         // Compute vertex lighting in the shader
         // For better performance
@@ -138,7 +142,7 @@ MaterialDef Phong Lighting {
     }
 
     Technique {
-        LightMode SinglePass
+        LightModel SinglePass
 
         VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/SPLighting.vert
         FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/SPLighting.frag
@@ -189,7 +193,7 @@ MaterialDef Phong Lighting {
 
     Technique {
 
-        LightMode MultiPass
+        LightModel MultiPass
 
         VertexShader   GLSL310 GLSL300 GLSL150 GLSL100 :   Common/MatDefs/Light/Lighting.vert
         FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Lighting.frag
@@ -353,4 +357,97 @@ MaterialDef Phong Lighting {
         }
     }
 
+
+    // Deferred path: this technique renders mesh geometry into the GBuffer.
+    // VS: Common/MatDefs/Light/SPLighting.vert
+    // FS: Common/MatDefs/Light/SPLighting.frag, compiled with DEFERRED_GBUFFER below.
+    // DeferredPipeline then uses Tiled/Fullscreen.vert + Tiled/Lighting.frag.
+    // The shared lighting FS reads shadingId 1 and evaluates Blinn-Phong direct lighting; VertexLighting is baked in the surface pass.
+    // Built-in direct-light branches are in that shared FS; this material does not
+    // declare a separate DeferredLightingShader. Custom models use that declaration
+    // to contribute a deferredLighting(...) function to the shared lighting FS.
+    Technique GBuffer {
+        LightModel DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/SPLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/SPLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            NormalMatrix
+            WorldViewMatrix
+            ViewMatrix
+            CameraPosition
+            WorldMatrix
+            ViewProjectionMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            VERTEX_COLOR : UseVertexColor
+            VERTEX_LIGHTING : VertexLighting
+            MATERIAL_COLORS : UseMaterialColors
+            DIFFUSEMAP : DiffuseMap
+            NORMALMAP : NormalMap
+            SPECULARMAP : SpecularMap
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            ALPHAMAP : AlphaMap
+            COLORRAMP : ColorRamp
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            USE_REFLECTION : EnvMap
+            SPHERE_MAP : EnvMapAsSphereMap
+            NUM_BONES : NumberOfBones
+            INSTANCING : UseInstancing
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+
+            // fog - jayfella
+            USE_FOG : UseFog
+            FOG_LINEAR : LinearFog
+            FOG_EXP : ExpFog
+            FOG_EXPSQ : ExpSqFog
+        }
+    }
+    // Static surface attributes only; no scene lighting or fog is captured.
+    Technique SurfaceCapture {
+        LightModel DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/SPLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/SPLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            NormalMatrix
+            WorldViewMatrix
+            ViewMatrix
+            CameraPosition
+            WorldMatrix
+            ViewProjectionMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            SURFACE_CAPTURE
+            VERTEX_COLOR : UseVertexColor
+            MATERIAL_COLORS : UseMaterialColors
+            DIFFUSEMAP : DiffuseMap
+            NORMALMAP : NormalMap
+            SPECULARMAP : SpecularMap
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            ALPHAMAP : AlphaMap
+            COLORRAMP : ColorRamp
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            SPHERE_MAP : EnvMapAsSphereMap
+
+            // fog - jayfella
+        }
+    }
 }

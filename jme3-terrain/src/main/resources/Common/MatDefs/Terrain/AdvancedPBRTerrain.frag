@@ -1,5 +1,6 @@
 #extension GL_EXT_texture_array : enable
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 
 #define ENABLE_PBRLightingUtils_getWorldPosition 1
 #define ENABLE_PBRLightingUtils_getLocalPosition 1
@@ -11,6 +12,7 @@
 #define ENABLE_PBRTerrainUtils_readPBRTerrainLayers 1
 
 #import "Common/ShaderLib/module/pbrlighting/PBRLightingUtils.glsllib"
+#import "Common/ShaderLib/Deferred/PbrIndirect.glsllib"
 #import "Common/MatDefs/Terrain/Modular/PBRTerrainUtils.glsllib"
 #ifdef AFFLICTIONTEXTURE
     #import "Common/MatDefs/Terrain/Modular/AfflictionLib.glsllib"
@@ -132,6 +134,7 @@ void main(){
    //Calculate necessary variables in pbr surface prior to applying lighting. Ensure all texture/param reading and blending occurrs prior to this being called!
     PBRLightingUtils_calculatePreLightingValues(surface);
     
+    #ifndef DEFERRED_GBUFFER
     // Calculate direct lights
     for(int i = 0;i < NB_LIGHTS; i+=3){
         #if (defined(GL_ES) && __VERSION__ >= 300) || (!defined(GL_ES) && __VERSION__ >= 150)
@@ -147,6 +150,10 @@ void main(){
           surface
         );
     }    
+
+    #endif
+
+    prepareDeferredPbrIndirect(surface);
 
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);
@@ -167,4 +174,41 @@ void main(){
     #ifdef DEBUG_VALUES_MODE
         gl_FragColor = PBRLightingUtils_getColorOutputForDebugMode(m_DebugValuesMode, vec4(gl_FragColor.rgba), surface);
     #endif      
+    #ifdef DEFERRED_GBUFFER
+        // Upstream specular AA depends only on normal derivatives. Filter here,
+        // before storing the normal, so deferred lighting keeps geometry derivatives.
+        float deferredRoughness = surface.roughness;
+        #ifdef SPECULAR_AA
+            float sigma = 1.0;
+            float kappa = 0.18;
+            #ifdef SPECULAR_AA_SCREEN_SPACE_VARIANCE
+                sigma = m_SpecularAASigma;
+            #endif
+            #ifdef SPECULAR_AA_THRESHOLD
+                kappa = m_SpecularAAKappa;
+            #endif
+            deferredRoughness = sqrt(Specular_Anti_Aliasing(surface.normal, vec3(0.0),
+                    surface.roughness * surface.roughness, sigma, kappa));
+        #endif
+        float transmission = 1.0;
+        #ifdef USE_FOG
+            #ifdef FOG_LINEAR
+                transmission *= clamp((m_LinearFog.y - fogDistance) / (m_LinearFog.y - m_LinearFog.x), 0.0, 1.0);
+            #endif
+            #ifdef FOG_EXP
+                transmission *= clamp(exp(-fogDistance * m_ExpFog), 0.0, 1.0);
+            #endif
+            #ifdef FOG_EXPSQ
+                transmission *= clamp(exp(-pow(fogDistance * m_ExpSqFog, 2.0)), 0.0, 1.0);
+            #endif
+        #endif
+        int model = m_DeferredShadingId;
+        #ifdef DEBUG_VALUES_MODE
+            model = 3;
+        #endif
+        // Terrain PBR decoder: record4 holds fog transmission, sun exposure, and flag 1.
+        writeDeferredSurface(surface.diffuseColor, surface.normal, deferredRoughness,
+                surface.fZero, gl_FragColor.rgb, surface.alpha,
+                vec3(transmission, surface.exposure, 0.0), 1.0, model);
+    #endif
 }

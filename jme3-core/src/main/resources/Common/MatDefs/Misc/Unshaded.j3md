@@ -1,7 +1,9 @@
 MaterialDef Unshaded {
+    ShadingId 3
 
     MaterialParameters {
         Int BoundDrawBuffer
+        Int DeferredShadingId
         Texture2D ColorMap
         Texture2D LightMap
         Color Color (Color)
@@ -43,7 +45,7 @@ MaterialDef Unshaded {
         //pointLights
         Texture2D ShadowMap4
         Texture2D ShadowMap5
-        
+
         Float ShadowIntensity
         Vector4 Splits
         Vector2 FadeInfo
@@ -63,7 +65,7 @@ MaterialDef Unshaded {
         Float ShadowMapSize
 
         Boolean BackfaceShadows: true
-        
+
         // 1.0 indicates 100% desaturation
         Float DesaturationValue
     }
@@ -90,7 +92,7 @@ MaterialDef Unshaded {
             NUM_BONES : NumberOfBones
             DISCARD_ALPHA : AlphaDiscardThreshold
             NUM_MORPH_TARGETS: NumberOfMorphTargets
-            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers            
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
             DESATURATION : DesaturationValue
             HSV_OFFSET : HSVOffset
         }
@@ -168,7 +170,7 @@ MaterialDef Unshaded {
             HARDWARE_SHADOWS : HardwareShadows
             FILTER_MODE : FilterMode
             PCFEDGE : PCFEdge
-            DISCARD_ALPHA : AlphaDiscardThreshold           
+            DISCARD_ALPHA : AlphaDiscardThreshold
             COLOR_MAP : ColorMap
             SHADOWMAP_SIZE : ShadowMapSize
             FADE : FadeInfo
@@ -183,7 +185,7 @@ MaterialDef Unshaded {
 
         ForcedRenderState {
             Blend Modulate
-            DepthWrite Off                 
+            DepthWrite Off
             PolyOffset -0.1 0
         }
     }
@@ -209,6 +211,56 @@ MaterialDef Unshaded {
             HAS_POINTSIZE : PointSize
             NUM_MORPH_TARGETS: NumberOfMorphTargets
             NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+        }
+    }
+
+    Technique GBuffer {
+        VertexShader GLSL330:   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330: Common/MatDefs/Misc/Unshaded.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            INSTANCING : UseInstancing
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            HAS_COLORMAP : ColorMap
+            HAS_LIGHTMAP : LightMap
+            HAS_VERTEXCOLOR : VertexColor
+            HAS_POINTSIZE : PointSize
+            HAS_COLOR : Color
+            NUM_BONES : NumberOfBones
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+        }
+    }
+    // Static surface attributes only; no scene lighting or fog is captured.
+    Technique SurfaceCapture {
+        VertexShader GLSL330:   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330: Common/MatDefs/Misc/Unshaded.frag
+
+        WorldParameters {
+            WorldMatrix
+            WorldViewProjectionMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            SURFACE_CAPTURE
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            HAS_COLORMAP : ColorMap
+            HAS_LIGHTMAP : LightMap
+            HAS_VERTEXCOLOR : VertexColor
+            HAS_POINTSIZE : PointSize
+            HAS_COLOR : Color
+            DISCARD_ALPHA : AlphaDiscardThreshold
         }
     }
 }

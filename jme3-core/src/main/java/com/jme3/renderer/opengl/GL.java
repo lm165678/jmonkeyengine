@@ -44,6 +44,21 @@ import java.nio.ShortBuffer;
  * @author Kirill Vainer
  */
 public interface GL {
+    /**
+     * Begins a named GPU capture group. Unsupported backends safely do nothing.
+     * FrameGraph calls this automatically for each pass; pair manual calls in
+     * try/finally with popDebugGroup, on the render thread.
+     * @param name capture label
+     */
+    default void glPushDebugGroup(String name) {
+    }
+
+    /** Ends the current capture group; no-op on unsupported backends. */
+    default void glPopCaptureGroup() {
+    }
+
+
+    public static final int GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS = 0x8B4D;
 
     public static final int GL_ALIASED_LINE_WIDTH_RANGE = 0x846E;
     public static final int GL_ALPHA = 0x1906;

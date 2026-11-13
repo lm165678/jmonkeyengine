@@ -1,0 +1,27 @@
+// Imported after PBRLightingUtils. Preserve the upstream indoor probe adjustment
+// without baking direct lighting into the GBuffer. Ordinary materials pay no
+// extra light traversal when sunlight exposure is not configured.
+#if defined(DEFERRED_GBUFFER) && (defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE))
+uniform sampler2D m_DeferredLightData;
+uniform int m_DeferredLightCount;
+void prepareDeferredPbrIndirect(inout PBRSurface surface) {
+    for (int index = 0; index < m_DeferredLightCount; index++) {
+        vec4 colorAndType = texelFetch(m_DeferredLightData, ivec2(0, index), 0);
+        if (colorAndType.w < 0.5) {
+            continue;
+        }
+        vec4 positionAndRadius = texelFetch(m_DeferredLightData, ivec2(1, index), 0);
+        vec4 spot = texelFetch(m_DeferredLightData, ivec2(2, index), 0);
+        Light light = PBRLightingUtils_newLight(vec4(colorAndType.rgb, 1.0),
+                positionAndRadius.xyz, colorAndType.w, positionAndRadius.w, spot.w, spot.xyz);
+        PBRLightingUtils_computeLightInWorldSpace(surface.position, surface.normal, surface.viewDir, light);
+        if (light.fallOff != 1.0) {
+            surface.brightestNonGlobalLightStrength = max(surface.brightestNonGlobalLightStrength,
+                    clamp(light.fallOff, 0.0, 1.0));
+        }
+    }
+}
+#else
+void prepareDeferredPbrIndirect(inout PBRSurface surface) {
+}
+#endif

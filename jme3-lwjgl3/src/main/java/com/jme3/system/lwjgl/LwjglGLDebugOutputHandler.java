@@ -69,6 +69,12 @@ class LwjglGLDebugOutputHandler extends GLDebugMessageARBCallback {
 
     @Override
     public void invoke(int source, int type, int id, int severity, int length, long message, long userParam) {
+        // Capture markers are not errors. Keep them in the GL stream for RenderDoc
+        // without printing a stack trace for every push/pop notification.
+        if (type == org.lwjgl.opengl.KHRDebug.GL_DEBUG_TYPE_PUSH_GROUP
+                || type == org.lwjgl.opengl.KHRDebug.GL_DEBUG_TYPE_POP_GROUP) {
+            return;
+        }
         String sourceStr = constMap.get(source);
         String typeStr = constMap.get(type);
         String severityStr = constMap.get(severity);

@@ -31,6 +31,8 @@
  */
 package com.jme3.shadow;
 
+import com.jme3.renderer.framegraph.FrameGraph;
+import com.jme3.renderer.framegraph.ResourceHandle;
 import com.jme3.asset.AssetManager;
 import com.jme3.export.InputCapsule;
 import com.jme3.export.JmeExporter;
@@ -443,8 +445,38 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         return (Node) viewPort.getScenes().get(0);
     }
 
+    private FrameGraph shadowGraph;
+
+    /**
+     * Returns the shared viewport graph for diagnostics. Each cascade/cube face is a
+     * pass writing an imported renderer-owned shadow framebuffer. No allocation
+     * ownership is transferred; custom renderShadowMap overrides remain active.
+     * <pre>{@code
+     * // 第一步：照常添加阴影渲染器（ShadowFilter 内部也走同一套阴影生成）。
+     * viewPort.addProcessor(shadowRenderer);
+     * // 第二步：渲染后查看各级联/各面的 Pass；不要手动执行这个图。
+     * System.out.println(shadowRenderer.getFrameGraph().getExecutionOrder());
+     * }</pre>
+     * @return shared viewport graph, or null before registration
+     */
+    public FrameGraph getFrameGraph() {
+        return shadowGraph;
+    }
+
+    @SuppressWarnings("fallthrough")
     @Override
     public void postQueue(RenderQueue rq) {
+        // Standalone compatibility call; normal engine rendering uses appendPostQueuePasses.
+        try (FrameGraph graph = new FrameGraph()) {
+            appendPostQueuePasses(graph, rq);
+            graph.execute(renderManager, viewPort, rq);
+        }
+        shadowGraph = null;
+    }
+
+    @Override
+    public void appendPostQueuePasses(FrameGraph graph, RenderQueue rq) {
+        shadowGraph = graph;
         lightReceivers.clear();
         skipPostPass = false;
         if (!checkCulling(viewPort.getCamera())) {
@@ -455,26 +487,39 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         updateShadowCams(viewPort.getCamera());
 
         Renderer r = renderManager.getRenderer();
+        graph.addPass("Prepare", context -> {
         renderManager.setForcedMaterial(preshadowMat);
         renderManager.setForcedTechnique("PreShadow");
+        }).sideEffect();
 
+        FrameGraph.PassBuilder previous = null;
         for (int shadowMapIndex = 0; shadowMapIndex < nbShadowMaps; shadowMapIndex++) {
+            final int index = shadowMapIndex;
+            ResourceHandle<FrameBuffer> target = graph.importResource(
+                    "ShadowMap" + index, FrameBuffer.class, () -> shadowFB[index]);
+            FrameGraph.PassBuilder pass = graph.addPass("ShadowMap" + index, context -> {
+                context.get(target);
             if (debugfrustums) {
-                doDisplayFrustumDebug(shadowMapIndex);
+                    doDisplayFrustumDebug(index);
             }
-            renderShadowMap(shadowMapIndex);
+                renderShadowMap(index);
+            }).write(target);
+            if (previous != null) {
+                pass.after(previous);
+            }
+            previous = pass;
         }
-
-        if (debugfrustums) {
-            debugfrustums = false;
-            getSceneForDebug().updateGeometricState();
-        }
-
-        //restore setting for future rendering
+        graph.addPass("Restore", context -> {
+            if (debugfrustums) {
+                debugfrustums = false;
+                getSceneForDebug().updateGeometricState();
+            }
         r.setFrameBuffer(viewPort.getOutputFrameBuffer());
         renderManager.setForcedMaterial(null);
         renderManager.setForcedTechnique(null);
+            renderManager.setForcedRenderState(null);
         renderManager.setCamera(viewPort.getCamera(), false);
+        }).sideEffect();
     }
 
     protected void renderShadowMap(int shadowMapIndex) {
@@ -785,7 +830,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
     @Override
     public void cleanup() {
-        // no-op
+        shadowGraph = null;
     }
 
     @Override
@@ -929,6 +974,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
     @Override
     public void cloneFields(final Cloner cloner, final Object original) {
+        shadowGraph = null;
         forcedRenderState = cloner.clone(forcedRenderState);
         init(assetManager, nbShadowMaps, (int) shadowMapSize);
     }

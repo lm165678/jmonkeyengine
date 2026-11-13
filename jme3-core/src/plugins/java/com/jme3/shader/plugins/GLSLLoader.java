@@ -169,9 +169,7 @@ public class GLSLLoader implements AssetLoader {
         // The input stream provided is for the vertex shader,
         // to retrieve the fragment shader, use the content manager
         this.assetManager = info.getManager();
-        InputStream in = info.openStream();
-        in = Preprocessor.apply(in);
-        Reader reader = new InputStreamReader(in);
+        Reader reader = new InputStreamReader(jme3tools.shader.Preprocessor.apply(info.openStream()), java.nio.charset.StandardCharsets.UTF_8);
         boolean injectDependencies = true;
         if (info.getKey() instanceof ShaderAssetKey) {
             injectDependencies = ((ShaderAssetKey) info.getKey()).isInjectDependencies();

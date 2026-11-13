@@ -52,6 +52,14 @@ public class RenderQueue {
     private GeometryList skyList;
 
     /**
+     * Accesses the opaque queue for an optional render pipeline. Mutations must
+     * occur on the render thread, after scene collection and before queue flush.
+     */
+    public GeometryList getOpaqueQueue() {
+        return opaqueList;
+    }
+
+    /**
      * Creates a new RenderQueue, the default {@link GeometryComparator comparators}
      * are used for all {@link GeometryList geometry lists}.
      */

@@ -407,6 +407,8 @@ public final class AppSettings extends HashMap<String, Object> {
         defaults.put("MinWidth", 0);
         defaults.put("GammaCorrection", true);
         defaults.put("Resizable", true);
+        defaults.put("GpuScene", true);
+        defaults.put("GpuSceneBindless", true);
         defaults.put("SwapBuffers", true);
         defaults.put("UseRetinaFrameBuffer", false);
         defaults.put("WindowYPosition", 0);
@@ -1221,6 +1223,65 @@ public final class AppSettings extends HashMap<String, Object> {
      */
     public void setSettingsDialogImage(String path) {
         putString("SettingsDialogImage", path);
+    }
+
+    /**
+     * Requests automatic GPU Scene for main viewports. Default true. OpenGL 4.3
+     * is required; unsupported hardware/materials/deformed or transparent meshes
+     * retain traditional rendering. Explicit custom pipelines retain ownership.
+     * Does not force Hi-Z, distance thresholds, LOD changes or command compaction.
+     * Configure before start; changing AppSettings alone does not alter a running
+     * RenderManager. Use its render-thread setters for runtime switching.
+     * <pre>{@code
+     * // 第一步：启动前配置；默认请求 GPU Scene 和 Bindless，能力不足自动回退。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setGpuSceneEnabled(true);
+     * settings.setGpuSceneBindlessEnabled(true);
+     * app.setSettings(settings);
+     * // 第二步：旧项目可显式关闭，使用原队列渲染。
+     * settings.setGpuSceneEnabled(false);
+     * // 第三步：运行时在应用线程切换，不需要重启窗口。
+     * app.enqueue(() -> {
+
+     *     app.getRenderManager().setGpuSceneEnabled(false);
+
+     *     return null;
+
+     * });
+     * // 第四步：重新开启后按当前场景注册；显式安装的自定义管线保持原所有权。
+     * app.enqueue(() -> {
+
+     *     app.getRenderManager().setGpuSceneEnabled(true);
+
+     *     return null;
+
+     * });
+     * }</pre>
+     * @param enabled requested automatic GPU Scene mode
+     */
+    public void setGpuSceneEnabled(boolean enabled) {
+        putBoolean("GpuScene", enabled);
+    }
+
+    /** @return requested GPU Scene mode; absent keys default to true */
+    public boolean isGpuSceneEnabled() {
+        return !containsKey("GpuScene") || getBoolean("GpuScene");
+    }
+
+    /**
+     * Requests bindless material sampling inside automatic GPU Scene. Default
+     * true; missing extension, unsuitable textures or exhausted residency budget
+     * fall back to texture units. GPU Scene itself stays usable with this false.
+     * See setGpuSceneEnabled for the complete startup/runtime usage sequence.
+     * @param enabled requested bindless sampling
+     */
+    public void setGpuSceneBindlessEnabled(boolean enabled) {
+        putBoolean("GpuSceneBindless", enabled);
+    }
+
+    /** @return requested bindless mode; absent keys default to true */
+    public boolean isGpuSceneBindlessEnabled() {
+        return !containsKey("GpuSceneBindless") || getBoolean("GpuSceneBindless");
     }
 
     /**

@@ -151,7 +151,7 @@ MaterialDef Example Lighting {
     }
 
     Technique {
-        LightMode SinglePass
+        LightModel SinglePass
 
         ShadowMode InPass
 
@@ -192,7 +192,7 @@ MaterialDef Example Lighting {
 
     Technique {
 
-        LightMode MultiPass
+        LightModel MultiPass
 
         ShadowMode PostPass
 

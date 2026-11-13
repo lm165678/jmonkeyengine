@@ -1,7 +1,12 @@
 // NOTE: Doesn't support OpenGL1
 MaterialDef PBR Terrain {
 
+    ShadingModelId 2
+
     MaterialParameters {
+        Texture2D DeferredLightData
+        Int DeferredLightCount
+        Int DeferredShadingId
         Int BoundDrawBuffer
 
         Texture2D SunLightExposureMap
@@ -109,7 +114,7 @@ MaterialDef PBR Terrain {
         Boolean UseTriPlanarMapping_10
         Boolean UseTriPlanarMapping_11
 
-         // debug the final value of the selected layer as a color output            
+         // debug the final value of the selected layer as a color output
         Int DebugValuesMode
             // Layers:
             //   0 - albedo (unshaded)
@@ -194,7 +199,7 @@ MaterialDef PBR Terrain {
 
         // Prefiltered Env Map for indirect specular lighting
         TextureCubeMap PrefEnvMap -LINEAR
-        
+
         // Irradiance map for indirect diffuse lighting
         TextureCubeMap IrradianceMap -LINEAR
 
@@ -212,7 +217,7 @@ MaterialDef PBR Terrain {
         //pointLights
         Texture2D ShadowMap4
         Texture2D ShadowMap5
-        
+
         Float ShadowIntensity
         Vector4 Splits
         Vector2 FadeInfo
@@ -223,7 +228,7 @@ MaterialDef PBR Terrain {
         Matrix4 LightViewProjectionMatrix3
         //pointLight
         Matrix4 LightViewProjectionMatrix4
-        Matrix4 LightViewProjectionMatrix5   
+        Matrix4 LightViewProjectionMatrix5
         Vector3 LightPos
         Vector3 LightDir
 
@@ -233,7 +238,7 @@ MaterialDef PBR Terrain {
         // For hardware skinning
         Int NumberOfBones
         Matrix4Array BoneMatrices
-                
+
         //For instancing
         Boolean UseInstancing
 
@@ -271,13 +276,13 @@ MaterialDef PBR Terrain {
 
         Defines {
             BOUND_DRAW_BUFFER: BoundDrawBuffer
-                
+
             TILELOCATION : TileLocation
             AFFLICTIONTEXTURE : AfflictionAlphaMap
 
             USE_TRIPLANAR_AFFLICTION_MAPPING : UseTriplanarAfflictionMapping
-            AFFLICTIONALBEDOMAP: SplatAlbedoMap 
-            AFFLICTIONNORMALMAP : SplatNormalMap 
+            AFFLICTIONALBEDOMAP: SplatAlbedoMap
+            AFFLICTIONNORMALMAP : SplatNormalMap
             AFFLICTIONROUGHNESSMETALLICMAP : SplatRoughnessMetallicMap
             AFFLICTIONEMISSIVEMAP : SplatEmissiveMap
 
@@ -361,7 +366,7 @@ MaterialDef PBR Terrain {
             TRI_PLANAR_MAPPING_11 : UseTriPlanarMapping_11
 
             DEBUG_VALUES_MODE : DebugValuesMode
-            
+
         }
     }
 
@@ -412,7 +417,7 @@ MaterialDef PBR Terrain {
             HARDWARE_SHADOWS : HardwareShadows
             FILTER_MODE : FilterMode
             PCFEDGE : PCFEdge
-            DISCARD_ALPHA : AlphaDiscardThreshold           
+            DISCARD_ALPHA : AlphaDiscardThreshold
             SHADOWMAP_SIZE : ShadowMapSize
             FADE : FadeInfo
             PSSM : Splits
@@ -424,9 +429,122 @@ MaterialDef PBR Terrain {
 
         ForcedRenderState {
             Blend Modulate
-            DepthWrite Off   
-            PolyOffset -0.1 0  
+            DepthWrite Off
+            PolyOffset -0.1 0
         }
     }
-    
+
+    Technique GBuffer {
+
+        LightMode DeferredSurface
+
+        VertexShader    GLSL330:   Common/MatDefs/Terrain/PBRTerrain.vert
+        FragmentShader  GLSL330: Common/MatDefs/Terrain/AdvancedPBRTerrain.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            CameraPosition
+            WorldMatrix
+            WorldNormalMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+            Time
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+
+            TILELOCATION : TileLocation
+            AFFLICTIONTEXTURE : AfflictionAlphaMap
+
+            USE_TRIPLANAR_AFFLICTION_MAPPING : UseTriplanarAfflictionMapping
+            AFFLICTIONALBEDOMAP: SplatAlbedoMap
+            AFFLICTIONNORMALMAP : SplatNormalMap
+            AFFLICTIONROUGHNESSMETALLICMAP : SplatRoughnessMetallicMap
+            AFFLICTIONEMISSIVEMAP : SplatEmissiveMap
+
+            USE_SPLAT_NOISE : SplatNoiseVar
+
+            SPECULAR_AA : UseSpecularAA
+            SPECULAR_AA_SCREEN_SPACE_VARIANCE : SpecularAASigma
+            SPECULAR_AA_THRESHOLD : SpecularAAKappa
+
+            EXPOSUREMAP : SunLightExposureMap
+            USE_VERTEX_COLORS_AS_SUN_EXPOSURE : UseVertexColorsAsSunExposure
+            STATIC_SUN_EXPOSURE : StaticSunExposure
+            BRIGHTEN_INDOOR_SHADOWS : BrightenIndoorShadows
+
+            NORMAL_TYPE: NormalType
+
+            USE_FIRST_LAYER_AS_TRANSPARENCY : UseFirstLayerAsTransparency
+
+            DISCARD_ALPHA : AlphaDiscardThreshold
+
+            USE_FOG : UseFog
+            FOG_LINEAR : LinearFog
+            FOG_EXP : ExpFog
+            FOG_EXPSQ : ExpSqFog
+
+            TRI_PLANAR_MAPPING : useTriPlanarMapping
+
+            ALBEDOMAP_0 : AlbedoMap_0
+            ALBEDOMAP_1 : AlbedoMap_1
+            ALBEDOMAP_2 : AlbedoMap_2
+            ALBEDOMAP_3 : AlbedoMap_3
+            ALBEDOMAP_4 : AlbedoMap_4
+            ALBEDOMAP_5 : AlbedoMap_5
+            ALBEDOMAP_6 : AlbedoMap_6
+            ALBEDOMAP_7 : AlbedoMap_7
+            ALBEDOMAP_8 : AlbedoMap_8
+            ALBEDOMAP_9 : AlbedoMap_9
+            ALBEDOMAP_10 : AlbedoMap_10
+            ALBEDOMAP_11 : AlbedoMap_11
+
+            NORMALMAP_0 : NormalMap_0
+            NORMALMAP_1 : NormalMap_1
+            NORMALMAP_2 : NormalMap_2
+            NORMALMAP_3 : NormalMap_3
+            NORMALMAP_4 : NormalMap_4
+            NORMALMAP_5 : NormalMap_5
+            NORMALMAP_6 : NormalMap_6
+            NORMALMAP_7 : NormalMap_7
+            NORMALMAP_8 : NormalMap_8
+            NORMALMAP_9 : NormalMap_9
+            NORMALMAP_10 : NormalMap_10
+            NORMALMAP_11 : NormalMap_11
+
+            ALPHAMAP : AlphaMap
+            ALPHAMAP_1 : AlphaMap_1
+            ALPHAMAP_2 : AlphaMap_2
+            ALBEDOMAP_0_SCALE : AlbedoMap_0_scale
+            ALBEDOMAP_1_SCALE : AlbedoMap_1_scale
+            ALBEDOMAP_2_SCALE : AlbedoMap_2_scale
+            ALBEDOMAP_3_SCALE : AlbedoMap_3_scale
+            ALBEDOMAP_4_SCALE : AlbedoMap_4_scale
+            ALBEDOMAP_5_SCALE : AlbedoMap_5_scale
+            ALBEDOMAP_6_SCALE : AlbedoMap_6_scale
+            ALBEDOMAP_7_SCALE : AlbedoMap_7_scale
+            ALBEDOMAP_8_SCALE : AlbedoMap_8_scale
+            ALBEDOMAP_9_SCALE : AlbedoMap_9_scale
+            ALBEDOMAP_10_SCALE : AlbedoMap_10_scale
+            ALBEDOMAP_11_SCALE : AlbedoMap_11_scale
+
+            TRI_PLANAR_MAPPING_0 : UseTriPlanarMapping_0
+            TRI_PLANAR_MAPPING_1 : UseTriPlanarMapping_1
+            TRI_PLANAR_MAPPING_2 : UseTriPlanarMapping_2
+            TRI_PLANAR_MAPPING_3 : UseTriPlanarMapping_3
+            TRI_PLANAR_MAPPING_4 : UseTriPlanarMapping_4
+            TRI_PLANAR_MAPPING_5 : UseTriPlanarMapping_5
+            TRI_PLANAR_MAPPING_6 : UseTriPlanarMapping_6
+            TRI_PLANAR_MAPPING_7 : UseTriPlanarMapping_7
+            TRI_PLANAR_MAPPING_8 : UseTriPlanarMapping_8
+            TRI_PLANAR_MAPPING_9 : UseTriPlanarMapping_9
+            TRI_PLANAR_MAPPING_10 : UseTriPlanarMapping_10
+            TRI_PLANAR_MAPPING_11 : UseTriPlanarMapping_11
+
+            DEBUG_VALUES_MODE : DebugValuesMode
+
+        }
+    }
 }

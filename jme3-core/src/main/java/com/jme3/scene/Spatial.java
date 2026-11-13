@@ -172,6 +172,36 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * updated to reflect the correct state.
      */
     protected transient int refreshFlags = 0;
+    private transient com.jme3.util.SafeArrayList<SceneChangeListener> sceneChangeListeners;
+
+    /** @param listener runtime subtree observer; register/remove on the scene thread */
+    public void addSceneChangeListener(SceneChangeListener listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        if (sceneChangeListeners == null) {
+            sceneChangeListeners = new com.jme3.util.SafeArrayList<>(SceneChangeListener.class);
+        }
+        if (!sceneChangeListeners.contains(listener)) {
+            sceneChangeListeners.add(listener);
+        }
+    }
+
+    /** @param listener observer to unregister; safe if absent */
+    public void removeSceneChangeListener(SceneChangeListener listener) {
+        if (sceneChangeListeners != null) {
+            sceneChangeListeners.remove(listener);
+        }
+    }
+
+    /** Notify this spatial and its current ancestors; callbacks must only enqueue work. */
+    protected final void notifySceneChanged(SceneChangeListener.Change change) {
+        for (Spatial cursor = this; cursor != null; cursor = cursor.parent) {
+            if (cursor.sceneChangeListeners != null) {
+                for (SceneChangeListener listener : cursor.sceneChangeListeners.getArray()) {
+                    listener.sceneChanged(this, change);
+                }
+            }
+        }
+    }
 
     /**
      * Set to true if a subclass requires updateLogicalState() even
@@ -281,6 +311,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     protected void setTransformRefresh() {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.TRANSFORM);
         refreshFlags |= RF_TRANSFORM;
         setBoundRefresh();
     }
@@ -297,6 +328,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
  
     protected void setLightListRefresh() {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         refreshFlags |= RF_LIGHTLIST;
         // Make sure next updateGeometricState() visits this branch
         // to update lights.
@@ -325,6 +357,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
 
     protected void setMatParamOverrideRefresh() {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         refreshFlags |= RF_MATPARAM_OVERRIDE;
         Spatial p = parent;
         while (p != null) {
@@ -343,6 +376,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     protected void setBoundRefresh() {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.BOUNDS);
         refreshFlags |= RF_BOUND;
 
         Spatial p = parent;
@@ -754,11 +788,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
         // Go to children recursively and update their bound
         if (this instanceof Node) {
             Node node = (Node) this;
-            int len = node.getQuantity();
-            for (int i = 0; i < len; i++) {
-                Spatial child = node.getChild(i);
-                child.checkDoBoundUpdate();
-            }
+            node.updateChildBounds();
         }
 
         // All children's bounds have been updated. Update my own now.
@@ -804,6 +834,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void addControl(Control control) {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         controls.add(control);
         control.setSpatial(this);
@@ -856,6 +887,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void removeControl(Class<? extends Control> controlType) {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         for (int i = 0; i < controls.size(); i++) {
             if (controlType.isAssignableFrom(controls.get(i).getClass())) {
@@ -884,6 +916,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public boolean removeControl(Control control) {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         boolean result = controls.remove(control);
         if (result) {
@@ -1553,6 +1586,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     public Spatial jmeClone() {
         try {
             Spatial clone = (Spatial) super.clone();
+            clone.sceneChangeListeners = null;
             return clone;
         } catch (CloneNotSupportedException ex) {
             throw new AssertionError();
@@ -1614,6 +1648,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
                 userData.put(key, new UserData(UserData.getObjectType(data), data));
             }
         }
+        notifySceneChanged(SceneChangeListener.Change.USER_DATA);
     }
 
     @SuppressWarnings("unchecked")
@@ -1771,6 +1806,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setCullHint(CullHint hint) {
         cullHint = hint;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**
@@ -1784,6 +1820,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setBatchHint(BatchHint hint) {
         batchHint = hint;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**
@@ -1811,6 +1848,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setQueueBucket(RenderQueue.Bucket queueBucket) {
         this.queueBucket = queueBucket;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**

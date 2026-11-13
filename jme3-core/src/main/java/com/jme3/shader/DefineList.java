@@ -42,6 +42,8 @@ import java.util.List;
  */
 public final class DefineList {
 
+    public static final int MAX_DEFINES = Integer.MAX_VALUE;
+
     private final BitSet isSet;
     private final int[] values;
 

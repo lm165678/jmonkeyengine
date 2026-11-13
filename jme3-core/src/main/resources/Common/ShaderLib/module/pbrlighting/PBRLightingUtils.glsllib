@@ -143,7 +143,9 @@
         #if defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY)
             varying vec4 vertColors;
         #endif
-        #if defined(STATIC_SUN_EXPOSURE) || defined(STATIC_SUN_INTENSITY)
+        #ifdef STATIC_SUN_EXPOSURE
+            uniform float m_StaticSunExposure;
+        #elif defined(STATIC_SUN_INTENSITY)
             uniform float m_StaticSunIntensity;
         #endif
         
@@ -156,7 +158,9 @@
                 #endif
                 surface.exposure *= texture2D(m_SunLightExposureMap, newTexCoord).r;
             #endif
-            #if defined(STATIC_SUN_EXPOSURE) || defined(STATIC_SUN_INTENSITY)
+            #ifdef STATIC_SUN_EXPOSURE
+                surface.exposure *= m_StaticSunExposure;
+            #elif defined(STATIC_SUN_INTENSITY)
                 surface.exposure *= m_StaticSunIntensity; //single float value to indicate percentage of sunlight hitting the model (only suitable for small models or models with equal sunlight exposure accross the entire model
             #endif
             #if defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY)

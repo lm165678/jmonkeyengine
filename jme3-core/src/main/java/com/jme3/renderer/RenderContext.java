@@ -51,7 +51,7 @@ public class RenderContext {
     }
 
     /**
-     * Number of texture units that JME supports.
+     * Initial texture-cache capacity. OpenGL resizes the cache to its hardware limit.
      */
     public static final int maxTextureUnits = 16;
 
@@ -265,18 +265,19 @@ public class RenderContext {
     public int numTexturesSet;
 
     /**
-     * Current bound texture IDs for each texture unit.
+     * Weak references for bound textures, sized by the backend to the hardware's
+     * combined texture-unit capacity. The initial 16 slots are only a default.
      *
      * @see Renderer#setTexture(int, com.jme3.texture.Texture)
      */
-    public final WeakReference<Image>[] boundTextures
+    public WeakReference<Image>[] boundTextures
             = newWeakReferenceArray(maxTextureUnits);
 
 
     /**
      * Current uniform-buffer bindings for each indexed binding point.
      *
-     * @see Renderer#setUniformBufferObject(int, com.jme3.shader.BufferObject)
+     * @see Renderer#setUniformBufferObject(int, com.jme3.shader.bufferobject.BufferObject)
      */
     public final WeakReference<BufferObject>[] boundBO = newWeakReferenceArray(maxBufferObjectUnits);
 

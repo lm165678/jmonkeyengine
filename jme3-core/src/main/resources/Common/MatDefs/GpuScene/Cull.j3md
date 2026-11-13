@@ -1,0 +1,39 @@
+MaterialDef GPU Scene Culling {
+    MaterialParameters {
+        ShaderStorageBufferObject Instances
+        ShaderStorageBufferObject Visible
+        ShaderStorageBufferObject Commands
+        ShaderStorageBufferObject DrawMetadata
+        ShaderStorageBufferObject InstanceDraws
+        Matrix4 OcclusionViewProjection
+        Matrix4 ViewProjection
+        Matrix4 View
+        Vector3 CameraPosition
+        Float MaxDistance
+        Float MinPixels
+        Float ProjectionScale
+        Int Count
+        Int DrawCount
+        FloatArray LodThresholds
+        Boolean Reset
+        Boolean Occlusion
+        Int HiZLevels
+        Texture2D HiZ0
+        Texture2D HiZ1
+        Texture2D HiZ2
+        Texture2D HiZ3
+        Texture2D HiZ4
+        Texture2D HiZ5
+        Texture2D HiZ6
+        Texture2D HiZ7
+        Texture2D HiZ8
+        Texture2D HiZ9
+        Texture2D HiZ10
+        Texture2D HiZ11
+        Boolean Orthographic
+        Boolean Frustum
+    }
+    Technique {
+        ComputeShader GLSL430: Common/MatDefs/GpuScene/Cull.comp
+    }
+}

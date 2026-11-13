@@ -58,11 +58,16 @@ public class Statistics {
     /**
      * Number of mesh primitives rendered during the current frame.
      */
-    protected int numTriangles;
+    protected long numTriangles;
     /**
      * Number of mesh vertices rendered during the current frame.
      */
-    protected int numVertices;
+    protected long numVertices;
+    private boolean indirect;
+    private long frame;
+    private long sampledFrame = -1;
+    private long sampledTriangles;
+    private long sampledVertices;
     /**
      * Number of shader switches during the current frame.
      */
@@ -147,8 +152,8 @@ public class Statistics {
      * @param data The data array to write to
      */
     public void getData(int[] data) {
-        data[0] = numVertices;
-        data[1] = numTriangles;
+        data[0] = (int) Math.min(Integer.MAX_VALUE, getVertexCount());
+        data[1] = (int) Math.min(Integer.MAX_VALUE, getTriangleCount());
         data[2] = numUniformsSet;
         data[3] = numObjects;
 
@@ -178,8 +183,89 @@ public class Statistics {
         }
 
         numObjects += 1;
-        numTriangles += mesh.getTriangleCount(lod) * count;
-        numVertices += mesh.getVertexCount() * count;
+        numTriangles += (long) mesh.getTriangleCount(lod) * count;
+        numVertices += (long) mesh.getVertexCount() * count;
+    }
+
+    /**
+     * Records one indirect draw command without inventing a CPU instance count.
+     * Renderer implementation hook; normal applications enable Statistics/StatsView.
+     */
+    public void onIndirectMeshDrawn() {
+        if (enabled) {
+            numObjects++;
+            indirect = true;
+        }
+    }
+
+    /**
+     * Returns submitted triangles, including all rendering passes. For indirect
+     * frames this is the last completed asynchronous whole-frame sample, or -1
+     * while pending. It is not a count of unique scene triangles or visible pixels.
+     * Render thread only; no GPU synchronization is performed by this getter.
+     * <pre>{@code
+     * // 第一步：开启统计，渲染器自动收集间接命令快照，不需要手动回读。
+     * Statistics stats = renderer.getStatistics();
+     * stats.setEnabled(true);
+     * // 第二步：在 HUD 中读取；-1 表示尚无完成的样本，不能显示成 0。
+     * long triangles = stats.getTriangleCount();
+     * int lag = stats.getGeometrySampleAge(); // GPU 样本延迟的帧数。
+     * // 第三步：关闭 GPU Scene 后，自动使用普通 CPU 绘制统计。
+     * // Vertices 沿用历史口径：网格顶点数乘实例数，不等同于 VS 调用次数。
+     * }</pre>
+     * @return triangle count, or -1 if asynchronous data is pending
+     */
+    public long getTriangleCount() {
+        return indirect ? (sampledFrame < 0 ? -1 : sampledTriangles) : numTriangles;
+    }
+
+    /**
+     * Returns nominal mesh vertices multiplied by submitted instances. LODs share
+     * vertex storage, so this is not the unique indexed vertices or shader invocation
+     * count. Availability/lifecycle follow {@link #getTriangleCount()} and its example.
+     * @return nominal vertex count, or -1 while pending
+     */
+    public long getVertexCount() {
+        return indirect ? (sampledFrame < 0 ? -1 : sampledVertices) : numVertices;
+    }
+
+    /** @return true when this frame includes GPU-authored indirect commands */
+    public boolean hasIndirectDraws() {
+        return indirect;
+    }
+
+    /** @return zero for CPU counts, -1 while pending, otherwise asynchronous sample age */
+    public int getGeometrySampleAge() {
+        return indirect ? (sampledFrame < 0 ? -1 : (int) Math.min(Integer.MAX_VALUE, frame - sampledFrame)) : 0;
+    }
+
+    /** Renderer snapshot hook: current frame sequence, incremented by clearFrame. */
+    public long getFrameSequence() {
+        return frame;
+    }
+
+    /** Renderer snapshot hook: CPU-known triangles, excluding indirect draws. */
+    public long getDirectTriangleCount() {
+        return numTriangles;
+    }
+
+    /** Renderer snapshot hook: CPU-known nominal vertices, excluding indirect draws. */
+    public long getDirectVertexCount() {
+        return numVertices;
+    }
+
+    /** Publishes a completed whole-frame renderer sample; stale samples are ignored. */
+    public void publishGeometrySample(long sequence, long triangles, long vertices) {
+        if (sequence >= sampledFrame) {
+            sampledFrame = sequence;
+            sampledTriangles = triangles;
+            sampledVertices = vertices;
+        }
+    }
+
+    /** Renderer context-loss hook. Pending geometry is unknown until sampled again. */
+    public void invalidateGeometrySample() {
+        sampledFrame = -1;
     }
 
     /**
@@ -279,6 +365,8 @@ public class Statistics {
      * Clears all frame-specific statistics such as objects used per frame.
      */
     public void clearFrame() {
+        frame++;
+        indirect = false;
         shadersUsed.clear();
         texturesUsed.clear();
         fbosUsed.clear();

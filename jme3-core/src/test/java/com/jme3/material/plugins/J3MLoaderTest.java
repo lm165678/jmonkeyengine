@@ -57,10 +57,52 @@ public class J3MLoaderTest {
     }
 
     @Test
+    public void computeOnlyTechniqueCanBeDeclaredInMaterialDef() throws IOException {
+        String source = "MaterialDef Compute {\nMaterialParameters {\n}\nTechnique {\n"
+                + "ComputeShader GLSL430: Test.comp\n}\n}";
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);
+        assertEquals("Test.comp", def.getTechniqueDefs("Default").get(0)
+                .getShaderProgramNames().get(com.jme3.shader.Shader.ShaderType.Compute));
+    }
+
+    @Test
+    public void computeAndGraphicsCannotShareOneTechnique() throws IOException {
+        String source = "MaterialDef Mixed {\nMaterialParameters {\n}\nTechnique {\n"
+                + "ComputeShader GLSL430: Test.comp\nVertexShader GLSL430: Test.vert\n"
+                + "FragmentShader GLSL430: Test.frag\n}\n}";
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> j3MLoader.load(assetInfo));
+    }
+
+    @Test
     public void noDefaultTechnique_shouldBeSupported() throws IOException {
         when(assetInfo.openStream()).thenReturn(J3MLoader.class.getResourceAsStream("/no-default-technique.j3md"));
         MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);
         assertEquals(1, def.getTechniqueDefs("Test").size());
+    }
+
+    @Test
+    public void shadingIdIsOptional() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Legacy {\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals(0, ((MaterialDef) j3MLoader.load(assetInfo)).getShadingId());
+    }
+
+    @Test
+    public void shadingIdIsParsed() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Deferred {\n ShadingId 65535\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals(65535, ((MaterialDef) j3MLoader.load(assetInfo)).getShadingId());
+    }
+
+    @Test
+    public void invalidShadingIdIsRejected() throws IOException {
+        when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(
+                "MaterialDef Invalid {\n ShadingId -1\n}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> j3MLoader.load(assetInfo));
     }
 
     @Test
@@ -133,6 +175,20 @@ public class J3MLoaderTest {
         verify(textureCombined).setMagFilter(Texture.MagFilter.Nearest);
         verify(textureCombined).setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
         verify(textureCombined).setWrap(Texture.WrapMode.Repeat);
+    }
+
+    @Test
+    public void materialLightingDeclarationAndBothLightModelSpellings() throws IOException {
+        for (String keyword : new String[]{"LightModel", "LightMode"}) {
+            String source = "MaterialDef Automatic {\n DeferredLightingShader Materials/Auto.frag\n"
+                    + " MaterialParameters {\n }\n Technique {\n " + keyword + " MultiPass\n"
+                    + " VertexShader GLSL100: test.vert\n FragmentShader GLSL100: test.frag\n }\n }";
+            when(assetInfo.openStream()).thenReturn(new java.io.ByteArrayInputStream(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            MaterialDef def = (MaterialDef) j3MLoader.load(assetInfo);
+            assertEquals("Materials/Auto.frag", def.getDeferredLightingShader());
+            assertEquals(0, def.getShadingId());
+            assertEquals(com.jme3.material.TechniqueDef.LightMode.MultiPass, def.getTechniqueDefs("Default").get(0).getLightMode());
+        }
     }
 
     private TextureKey setupMockForTexture(final String paramName, final String path, final boolean flipY, boolean generateMips, final Texture texture) {

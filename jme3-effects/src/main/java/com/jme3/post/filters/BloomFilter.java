@@ -53,7 +53,7 @@ import java.util.ArrayList;
  * Scene mode extracts the bright parts of the scene to make them glow<br>
  * Object mode makes objects glow according to their material's glowMap or their GlowColor<br>
  * See <a href="http://jmonkeyengine.github.io/wiki/jme3/advanced/bloom_and_glow.html">advanced:bloom_and_glow</a> for more details
- * 
+ *
  * @author Rémy Bouquet aka Nehon
  */
 public class BloomFilter extends Filter {
@@ -92,14 +92,14 @@ public class BloomFilter extends Filter {
     private Material vBlurMat;
     private Material hBlurMat;
     private int screenWidth;
-    private int screenHeight;    
+    private int screenHeight;
     private RenderManager renderManager;
     private ViewPort viewPort;
 
     private AssetManager assetManager;
     private int initialWidth;
     private int initialHeight;
-    
+
     /**
      * Creates a Bloom filter
      */
@@ -125,7 +125,7 @@ public class BloomFilter extends Filter {
         this.assetManager = manager;
         this.initialWidth = w;
         this.initialHeight = h;
-                
+
         screenWidth = (int) Math.max(1, (w / downSamplingFactor));
         screenHeight = (int) Math.max(1, (h / downSamplingFactor));
         //    System.out.println(screenWidth + " " + screenHeight);
@@ -137,7 +137,7 @@ public class BloomFilter extends Filter {
         postRenderPasses = new ArrayList<Pass>();
         //configuring extractPass
         extractMat = new Material(manager, "Common/MatDefs/Post/BloomExtract.j3md");
-        extractPass = new Pass() {
+        extractPass = new Pass("Extract") {
 
             @Override
             public boolean requiresSceneAsTexture() {
@@ -160,7 +160,7 @@ public class BloomFilter extends Filter {
 
         //configuring horizontal blur pass
         hBlurMat = new Material(manager, "Common/MatDefs/Blur/HGaussianBlur.j3md");
-        horizontalBlur = new Pass() {
+        horizontalBlur = new Pass("HorizontalBlur") {
 
             @Override
             public void beforeRender() {
@@ -175,7 +175,7 @@ public class BloomFilter extends Filter {
 
         //configuring vertical blur pass
         vBlurMat = new Material(manager, "Common/MatDefs/Blur/VGaussianBlur.j3md");
-        verticalBlur = new Pass() {
+        verticalBlur = new Pass("VerticalBlur") {
 
             @Override
             public void beforeRender() {
@@ -198,21 +198,39 @@ public class BloomFilter extends Filter {
     protected void reInitFilter() {
         initFilter(assetManager, renderManager, viewPort, initialWidth, initialHeight);
     }
-    
+
     @Override
     protected Material getMaterial() {
         material.setFloat("BloomIntensity", bloomIntensity);
         return material;
     }
 
+    /** Registers the pre-render geometry passes in the shared viewport graph. */
+    @Override
+    public void appendPostQueuePasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        if (glowMode != GlowMode.Scene) {
+            graph.addPass("Glow/Prepare", context -> {
+                renderManager.getRenderer().setBackgroundColor(ColorRGBA.BlackNoAlpha);
+                renderManager.getRenderer().setFrameBuffer(preGlowPass.getRenderFrameBuffer());
+                renderManager.getRenderer().clearBuffers(true, true, true);
+                renderManager.setForcedTechnique("Glow");
+            }).sideEffect();
+            renderManager.appendQueuePasses(graph, viewPort, false);
+            graph.addPass("Glow/Restore", context -> {
+                renderManager.setForcedTechnique(null);
+                renderManager.getRenderer().setFrameBuffer(viewPort.getOutputFrameBuffer());
+            }).sideEffect();
+        }
+    }
+
     @Override
     protected void postQueue(RenderQueue queue) {
-        if (glowMode != GlowMode.Scene) {           
-            renderManager.getRenderer().setBackgroundColor(ColorRGBA.BlackNoAlpha);            
+        if (glowMode != GlowMode.Scene) {
+            renderManager.getRenderer().setBackgroundColor(ColorRGBA.BlackNoAlpha);
             renderManager.getRenderer().setFrameBuffer(preGlowPass.getRenderFrameBuffer());
             renderManager.getRenderer().clearBuffers(true, true, true);
             renderManager.setForcedTechnique("Glow");
-            renderManager.renderViewPortQueues(viewPort, false);         
+            renderManager.renderViewPortQueues(viewPort, false);
             renderManager.setForcedTechnique(null);
             renderManager.getRenderer().setFrameBuffer(viewPort.getOutputFrameBuffer());
         }
@@ -220,7 +238,7 @@ public class BloomFilter extends Filter {
 
     @Override
     protected void cleanUpFilter(Renderer r) {
-         if (glowMode != GlowMode.Scene) {   
+         if (glowMode != GlowMode.Scene) {
                preGlowPass.cleanup(r);
          }
     }
@@ -263,7 +281,7 @@ public class BloomFilter extends Filter {
      * returns the exposure cutoff<br>
      * for more details see {@link #setExposureCutOff(float exposureCutOff)}
      * @return the exposure cutoff
-     */    
+     */
     public float getExposureCutOff() {
         return exposureCutOff;
     }

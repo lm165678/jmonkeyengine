@@ -96,6 +96,27 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
     private Technique technique;
     private HashMap<String, Technique> techniques = new HashMap<>();
     private RenderState additionalState = null;
+    private long contentRevision;
+
+    /**
+     * Runtime mutation counter for scene-resource caches; not serialized. Parameter,
+     * texture and transparency setters increment it. Direct mutation of a returned
+     * parameter value requires reassigning it with setParam (or refreshing the
+     * dependent subtree). Render-state changes are tracked separately by consumers.
+     * <pre>{@code
+     * // 第一步：读取版本建立缓存；不要计算整张纹理像素的 hash。
+     * long revision = material.getContentRevision();
+     * // 第二步：通过 setter 更新参数，使 GPU Scene 自动重新分组。
+     * material.setColor("Color", ColorRGBA.Red);
+     * // 第三步：版本变化时更新依赖资源；版本只在当前运行期有效。
+     * boolean changed = revision != material.getContentRevision();
+     * }</pre>
+     * @return monotonically increasing runtime parameter revision
+     */
+    public long getContentRevision() {
+        return contentRevision;
+    }
+
     private final RenderState mergedRenderState = new RenderState();
     private boolean transparent = false;
     private boolean receivesShadows = false;
@@ -249,7 +270,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             }
 
             mat.sortingId = -1;
-            
+
             return mat;
         } catch (CloneNotSupportedException ex) {
             throw new AssertionError(ex);
@@ -337,7 +358,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
 
     /**
      * Works like {@link Object#hashCode() } except it may change together with the material as the material is mutable by definition.
-     * 
+     *
      * @return value for use in hashing
      */
     public int contentHashCode() {
@@ -386,6 +407,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * @param transparent the transparent value marker.
      */
     public void setTransparent(boolean transparent) {
+        contentRevision++;
         this.transparent = transparent;
     }
 
@@ -412,6 +434,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * @param receivesShadows if the material should receive shadows or not.
      */
     public void setReceivesShadows(boolean receivesShadows) {
+        contentRevision++;
         this.receivesShadows = receivesShadows;
     }
 
@@ -481,7 +504,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         }
         return null;
     }
-    
+
     /**
      * Returns a collection of all parameters set on this material.
      *
@@ -528,6 +551,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * @param value the value of the parameter
      */
     public void setParam(String name, VarType type, Object value) {
+        contentRevision++;
         checkSetParam(type, name);
 
         if (type.isTextureType()) {
@@ -566,6 +590,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * @param name the name of the parameter to clear
      */
     public void clearParam(String name) {
+        contentRevision++;
         checkSetParam(null, name);
         MatParam matParam = getParam(name);
         if (matParam == null) {
@@ -591,6 +616,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * @throws IllegalArgumentException is value is null
      */
     public void setTextureParam(String name, VarType type, Texture value) {
+        contentRevision++;
         if (value == null) {
             throw new IllegalArgumentException();
         }
@@ -853,7 +879,43 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         sortingId = -1;
     }
 
-    private void applyOverrides(Renderer renderer, Shader shader, SafeArrayList<MatParamOverride> overrides, BindUnits bindUnits) {
+    private boolean bindlessTextures;
+
+    /**
+     * Requests renderer-managed bindless sampling for this material. Default false;
+     * runtime only, not serialized in j3o. Shader declarations still belong to the
+     * material definition. No manual texture handles or GLSL source loading is needed.
+     * Unsupported hardware/shaders and GPU-only render targets retain unit binding.
+     * The OpenGL cache owns immutable GPU snapshots of CPU-backed textures (up to
+     * 256 snapshots / approximately 256 MiB), so enabling may add GPU memory use.
+     * Source images/sampler state remain mutable; changes refresh snapshots.
+     * Mark CPU pixel edits with image.setUpdateNeeded(). Unused snapshots expire
+     * after 120 frames; renderer cleanup releases all while the context is current.
+     * Call on the render thread (enqueue from other threads). Clone copies this
+     * request; changing a source material inside GPU Scene requires its rebuild.
+     * <pre>{@code
+     * // 第一步：照常从 j3md 创建材质并设置贴图，无需自己加载 shader/句柄。
+     * Material material = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+     * material.setTexture("DiffuseMap", assetManager.loadTexture("Textures/Terrain/BrickWall/BrickWall.jpg"));
+     * // 第二步：请求无绑定采样，不支持时自动保留普通纹理绑定与原着色逻辑。
+     * material.setBindlessTextures(true);
+     * // 第三步：关闭后恢复纹理单元；GPU Scene 是否启用与此独立。
+     * material.setBindlessTextures(false);
+     * // 第四步：GPU Scene 可统一设置它拥有的材质克隆，不修改原始资产。
+     * pipeline.setBindlessTextures(true);
+     * }</pre>
+     * @param enabled whether to request bindless sampling
+     */
+    public void setBindlessTextures(boolean enabled) {
+        bindlessTextures = enabled;
+    }
+
+    /** @return requested binding mode; hardware/resource fallback may still use units */
+    public boolean isBindlessTextures() {
+        return bindlessTextures;
+    }
+
+    private void applyOverrides(Renderer renderer, Shader shader, SafeArrayList<MatParamOverride> overrides, BindUnits bindUnits, boolean bindless) {
         for (MatParamOverride override : overrides.getArray()) {
             VarType type = override.getVarType();
 
@@ -866,14 +928,14 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             Uniform uniform = shader.getUniform(override.getPrefixedName());
 
             if (override.getValue() != null) {
-                updateShaderMaterialParameter(renderer, type, shader, override, bindUnits, true);
+                updateShaderMaterialParameter(renderer, type, shader, override, bindUnits, true, bindless);
             } else {
                 uniform.clearValue();
             }
         }
     }
 
-    private void updateShaderMaterialParameter(Renderer renderer, VarType type, Shader shader, MatParam param, BindUnits unit, boolean override) {
+    private void updateShaderMaterialParameter(Renderer renderer, VarType type, Shader shader, MatParam param, BindUnits unit, boolean override, boolean bindless) {
         if (type == VarType.UniformBufferObject || type == VarType.ShaderStorageBufferObject) {
             ShaderBufferBlock bufferBlock = shader.getBufferBlock(param.getPrefixedName());
             BufferObject bufferObject = (BufferObject) param.getValue();
@@ -897,17 +959,18 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             if (type.isTextureType() || type.isImageType()) {
                 try {
                     if (type.isTextureType()) {
-                        renderer.setTexture(unit.textureUnit, (Texture) param.getValue());
+                        unit.textureUnit = renderer.setTextureParameter(unit.textureUnit,
+                                (Texture) param.getValue(), uniform, bindless);
                     } else {
                         renderer.setTextureImage(unit.textureUnit, (TextureImage) param.getValue());
+                        uniform.setValue(VarType.Int, unit.textureUnit);
+                        unit.textureUnit++;
                     }
                 } catch (TextureUnitException ex) {
                     int numTexParams = unit.textureUnit + 1;
                     String message = "Too many texture parameters (" + numTexParams + ") assigned\n to " + this.toString();
                     throw new IllegalStateException(message);
                 }
-                uniform.setValue(VarType.Int, unit.textureUnit);
-                unit.textureUnit++;
             } else {
                 uniform.setValue(type, param.getValue());
             }
@@ -915,26 +978,32 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
     }
 
     private BindUnits updateShaderMaterialParameters(Renderer renderer, Shader shader,
-                 SafeArrayList<MatParamOverride> worldOverrides, SafeArrayList<MatParamOverride> forcedOverrides) {
+                 SafeArrayList<MatParamOverride> worldOverrides, SafeArrayList<MatParamOverride> forcedOverrides, boolean bindless) {
 
         bindUnits.textureUnit = 0;
         bindUnits.bufferUnit = 0;
 
         if (worldOverrides != null) {
-            applyOverrides(renderer, shader, worldOverrides, bindUnits);
+            applyOverrides(renderer, shader, worldOverrides, bindUnits, bindless);
         }
         if (forcedOverrides != null) {
-            applyOverrides(renderer, shader, forcedOverrides, bindUnits);
+            applyOverrides(renderer, shader, forcedOverrides, bindUnits, bindless);
         }
 
         for (int i = 0; i < paramValues.size(); i++) {
             MatParam param = paramValues.getValue(i);
             VarType type = param.getVarType();
-            updateShaderMaterialParameter(renderer, type, shader, param, bindUnits, false);
+            updateShaderMaterialParameter(renderer, type, shader, param, bindUnits, false, bindless);
         }
 
         // TODO: HACKY HACK remove this when texture unit is handled by the uniform.
         return bindUnits;
+    }
+
+    private BindUnits updateShaderMaterialParameters(Renderer renderer, Shader shader,
+            SafeArrayList<MatParamOverride> worldOverrides,
+            SafeArrayList<MatParamOverride> forcedOverrides) {
+        return updateShaderMaterialParameters(renderer, shader, worldOverrides, forcedOverrides, false);
     }
 
     private void updateRenderState(Geometry geometry, RenderManager renderManager, Renderer renderer, TechniqueDef techniqueDef) {
@@ -974,7 +1043,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         // are backward to what they should be.
         return n == 1 || n == 3;
     }
-    
+
     /**
      * Preloads this material for the given render manager.
      * <p>
@@ -1027,6 +1096,55 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
                 }
             }
         }
+    }
+
+    /**
+     * Dispatches a compute-only material technique using ordinary material parameters,
+     * defines, textures and buffer blocks. No geometry, lights or raster state are
+     * applied. Select a named compute technique first if it is not Default.
+     * Uses Renderer.dispatchCompute; FG users must still declare ResourceAccess.
+     * Render-thread only with a current graphics context; requires OpenGL 4.3.
+     * <pre>{@code
+     * // 第一步：j3md 中声明 ComputeShader GLSL430: Shaders/MyCompute.comp。
+     * // 参数声明 Boolean Increment、ShaderStorageBufferObject Values；GLSL 用 m_Increment/m_Values。
+     * Material compute = new Material(assetManager, "Materials/MyCompute.j3md");
+     * // 第二步：按普通材质设置参数，不需要上层取 Shader/绑定 GL buffer。
+     * compute.setBoolean("Increment", true);
+     * compute.setShaderStorageBufferObject("Values", buffer);
+     * // 第三步：在 FG Pass 内提交工作组数；不是线程总数。
+     * compute.dispatchCompute(renderManager, 1, 1, 1);
+     * // Pass 声明 .write(handle, ResourceAccess.STORAGE_BUFFER) 供 FG 自动同步。
+     * }</pre>
+     * @param renderManager current rendering context
+     * @param groupsX workgroup count X
+     * @param groupsY workgroup count Y
+     * @param groupsZ workgroup count Z
+     */
+    public void dispatchCompute(RenderManager renderManager, int groupsX, int groupsY, int groupsZ) {
+        Renderer renderer = renderManager.getRenderer();
+        if (!renderer.getCaps().contains(Caps.OpenGL43)) {
+            throw new UnsupportedOperationException("Compute materials require OpenGL 4.3");
+        }
+        if (groupsX < 1 || groupsY < 1 || groupsZ < 1
+                || groupsX > 65535 || groupsY > 65535 || groupsZ > 65535) {
+            throw new IllegalArgumentException("Compute group counts outside portable limits");
+        }
+        if (technique == null) {
+            selectTechnique(TechniqueDef.DEFAULT_TECHNIQUE_NAME, renderManager);
+        }
+        TechniqueDef definition = technique.getDef();
+        if (definition.getShaderProgramNames().size() != 1
+                || !definition.getShaderProgramNames().containsKey(Shader.ShaderType.Compute)) {
+            throw new IllegalStateException("Select a compute-only technique before dispatch");
+        }
+        Shader shader = technique.makeCurrent(renderManager, null, renderManager.getForcedMatParams(),
+                null, renderer.getCaps());
+        clearUniformsSetByCurrent(shader);
+        renderManager.updateUniformBindings(shader);
+        updateShaderMaterialParameters(renderer, shader, null, renderManager.getForcedMatParams());
+        resetUniformsNotSetByCurrent(shader);
+        renderer.setShader(shader);
+        renderer.dispatchCompute(groupsX, groupsY, groupsZ);
     }
 
     /**
@@ -1091,11 +1209,11 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         if (technique == null) {
             selectTechnique(TechniqueDef.DEFAULT_TECHNIQUE_NAME, renderManager);
         }
-        
+
         TechniqueDef techniqueDef = technique.getDef();
         Renderer renderer = renderManager.getRenderer();
         EnumSet<Caps> rendererCaps = renderer.getCaps();
-        
+
         if (techniqueDef.isNoRender()) {
             return;
         }
@@ -1108,19 +1226,24 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
 
         // Select shader to use
         Shader shader = technique.makeCurrent(renderManager, overrides, renderManager.getForcedMatParams(), lights, rendererCaps);
-        
+        Shader ordinaryShader = shader;
+        if (bindlessTextures) {
+            shader = renderer.getBindlessShader(shader);
+        }
+        boolean bindless = shader != ordinaryShader;
+
         // Begin tracking which uniforms were changed by material.
         clearUniformsSetByCurrent(shader);
-        
+
         // Set uniform bindings
         renderManager.updateUniformBindings(shader);
-        
+
         // Set material parameters
-        BindUnits units = updateShaderMaterialParameters(renderer, shader, overrides, renderManager.getForcedMatParams());
+        BindUnits units = updateShaderMaterialParameters(renderer, shader, overrides, renderManager.getForcedMatParams(), bindless);
 
         // Clear any uniforms not changed by material.
         resetUniformsNotSetByCurrent(shader);
-        
+
         // Delegate rendering to the technique
         technique.render(renderManager, shader, geometry, lights, units);
     }
@@ -1157,7 +1280,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         oc.write(name, "name", null);
         oc.writeStringSavableMap(paramValues, "parameters", null);
     }
-    
+
     @Override
     @SuppressWarnings("unchecked")
     public void read(JmeImporter im) throws IOException {

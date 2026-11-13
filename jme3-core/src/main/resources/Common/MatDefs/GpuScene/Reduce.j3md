@@ -1,0 +1,14 @@
+MaterialDef HiZ Maximum Reduction {
+    MaterialParameters {
+        Texture2D Previous
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/GpuScene/Reduce.vert
+        FragmentShader GLSL150: Common/MatDefs/GpuScene/Reduce.frag
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

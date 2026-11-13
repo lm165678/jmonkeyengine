@@ -1,0 +1,51 @@
+// Raw storage, not material attributes. Only gbuffer0.a is shared metadata:
+// it stores shadingId (0 means no deferred surface). Every model owns the meaning
+// of all remaining channels, including opacity. Depth is a separate attachment.
+uniform sampler2D gbuffer0;
+uniform sampler2D gbuffer1;
+uniform sampler2D gbuffer2;
+uniform sampler2D gbuffer3;
+uniform sampler2D gbuffer4;
+uniform sampler2D gbufferDepth;
+uniform mat4 InverseViewProjection;
+uniform vec3 CameraPosition;
+uniform vec2 Resolution;
+
+const int SHADING_MODEL_BACKGROUND = 0;
+const int SHADING_MODEL_LIGHTING = 1;
+const int SHADING_MODEL_PBR = 2;
+const int SHADING_MODEL_UNSHADED = 3;
+
+ivec2 getGBufferPixel() {
+    return ivec2(gl_FragCoord.xy);
+}
+vec4 getGBuffer0() {
+    return texelFetch(gbuffer0, getGBufferPixel(), 0);
+}
+vec4 getGBuffer1() {
+    return texelFetch(gbuffer1, getGBufferPixel(), 0);
+}
+vec4 getGBuffer2() {
+    return texelFetch(gbuffer2, getGBufferPixel(), 0);
+}
+vec4 getGBuffer3() {
+    return texelFetch(gbuffer3, getGBufferPixel(), 0);
+}
+vec4 getGBuffer4() {
+    return texelFetch(gbuffer4, getGBufferPixel(), 0);
+}
+
+int getShadingId() {
+    return int(getGBuffer0().a);
+}
+float getSurfaceDepth() {
+    return texelFetch(gbufferDepth, getGBufferPixel(), 0).r;
+}
+vec3 getWorldPosition() {
+    vec2 ndc = gl_FragCoord.xy / Resolution * 2.0 - 1.0;
+    vec4 world = InverseViewProjection * vec4(ndc, getSurfaceDepth() * 2.0 - 1.0, 1.0);
+    return world.xyz / world.w;
+}
+vec3 getViewDirection(vec3 worldPosition) {
+    return normalize(CameraPosition - worldPosition);
+}

@@ -45,3 +45,9 @@ task updateVersionPropertiesFile {
 }
 
 processResources.dependsOn updateVersionPropertiesFile
+
+// Run the ported JUnit 4 feature regressions alongside upstream Jupiter tests.
+dependencies {
+    testImplementation libs.junit4
+    testRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
+}

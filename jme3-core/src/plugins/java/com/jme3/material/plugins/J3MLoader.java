@@ -116,11 +116,11 @@ public class J3MLoader implements AssetLoader {
         }
     }
 
-    // LightMode <MODE>
-    private void readLightMode(String statement) throws IOException{
+    // LightModel <MODE>; LightMode is a legacy alias.
+    private void readLightModel(String statement) throws IOException{
         String[] split = statement.split(whitespacePattern);
         if (split.length != 2){
-            throw new IOException("LightMode statement syntax incorrect");
+            throw new IOException("LightModel statement syntax incorrect");
         }
 
         LightMode lm = LightMode.valueOf(split[1]);
@@ -557,11 +557,12 @@ public class J3MLoader implements AssetLoader {
         if (split[0].equals("VertexShader") ||
                 split[0].equals("FragmentShader") ||
                 split[0].equals("GeometryShader") ||
+                split[0].equals("ComputeShader") ||
                 split[0].equals("TessellationControlShader") ||
                 split[0].equals("TessellationEvaluationShader")) {
             readShaderStatement(statement.getLine());
-        }else if (split[0].equals("LightMode")){
-            readLightMode(statement.getLine());
+        }else if ((split[0].equals("LightModel") || split[0].equals("LightMode"))){
+            readLightModel(statement.getLine());
         }else if (split[0].equals("LightSpace")){
             readLightSpace(statement.getLine());
         }else if (split[0].equals("ShadowMode")){
@@ -661,6 +662,9 @@ public class J3MLoader implements AssetLoader {
             case StaticPass:
                 technique.setLogic(new StaticPassLightingLogic(technique));
                 break;
+            case DeferredSurface:
+                technique.setLogic(new DeferredSurfaceLightingLogic(technique));
+                break;
             case SinglePassAndImageBased:
                 technique.setLogic(new SinglePassAndImageBasedLightingLogic(technique));
                 break;
@@ -670,6 +674,10 @@ public class J3MLoader implements AssetLoader {
 
         List<TechniqueDef> techniqueDefs = new ArrayList<>();
 
+        boolean compute = shaderNames.containsKey(Shader.ShaderType.Compute);
+        if (compute && (shaderNames.size() != 1 || isUseNodes)) {
+            throw new IOException("Compute technique cannot contain graphics shaders or shader nodes");
+        }
         if(isUseNodes){
             //used for caching later, the shader here is not a file.
 
@@ -678,7 +686,7 @@ public class J3MLoader implements AssetLoader {
             // is now done by TechniqueDef.
             technique.setShaderFile(technique.hashCode() + "", technique.hashCode() + "", "GLSL100", "GLSL100");
             techniqueDefs.add(technique);
-        }else if (shaderNames.containsKey(Shader.ShaderType.Vertex) && shaderNames.containsKey(Shader.ShaderType.Fragment)) {
+        }else if (compute || shaderNames.containsKey(Shader.ShaderType.Vertex) && shaderNames.containsKey(Shader.ShaderType.Fragment)) {
             if (shaderLanguages.size() > 1) {
                 for (int i = 1; i < shaderLanguages.size(); i++) {
                     cloner.clearIndex();
@@ -790,7 +798,23 @@ public class J3MLoader implements AssetLoader {
             } else {
                 if (statType.equals("Technique")) {
                     readTechnique(statement);
-                } else if (statType.equals("MaterialParameters")) {
+                }else if (statType.equals("DeferredLightingShader")) {
+                    String path = statement.getLine().substring("DeferredLightingShader".length()).trim();
+                    if (path.isEmpty() || !statement.getContents().isEmpty()) {
+                        throw new MatParseException("Expected DeferredLightingShader <asset path>", statement);
+                    }
+                    materialDef.setDeferredLightingShader(path);
+                }else if ((statType.equals("ShadingId") || statType.equals("ShadingModelId"))){
+                    String[] tokens = statement.getLine().trim().split("\\s+");
+                    if (tokens.length != 2 || !statement.getContents().isEmpty()) {
+                        throw new MatParseException("Expected ShadingId <integer>", statement);
+                    }
+                    try {
+                        materialDef.setShadingId(Integer.parseInt(tokens[1]));
+                    } catch (IllegalArgumentException exception) {
+                        throw new MatParseException("ShadingId must be between 0 and 65535", statement);
+                    }
+                }else if (statType.equals("MaterialParameters")){
                     readMaterialParams(statement.getContents());
                 } else {
                     throw new MatParseException("Expected material statement, got '" + statType + "'", statement);

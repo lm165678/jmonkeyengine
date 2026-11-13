@@ -58,6 +58,18 @@ import com.jme3.util.clone.JmeCloneable;
  * StatsView statsView = new StatsView("MyStats", assetManager, stats);
  * rootNode.attachChild(statsView);
  * </pre>
+ * <p>Indirect geometry counts are whole-frame asynchronous samples. Pending data
+ * is displayed explicitly; the sample age is shown beside triangles/vertices.
+ * Draws counts submitted commands (including zero-instance commands), not scene
+ * objects. Vertices retains the nominal mesh-vertices-times-instances convention,
+ * not hardware vertex-shader invocations. No blocking GPU readback is performed.
+ * <pre>{@code
+ * // 第一步：SimpleApplication 已有统计视图时，直接启用即可。
+ * setDisplayStatView(true);
+ * // 第二步：开启 GPU Scene 后观察 Triangles/Vertices 后面的 GPU 延迟标记。
+ * // pending 表示首次快照尚未完成；Nf ago 表示 N 帧前的完整采样。
+ * // 第三步：关闭 GPU Scene 后自动恢复普通路径的 CPU 统计，无需换 HUD。
+ * }</pre>
  */
 public class StatsView extends Node implements Control, JmeCloneable {
     private final BitmapText statText;
@@ -106,7 +118,22 @@ public class StatsView extends Node implements Control, JmeCloneable {
         // Need to walk through it backwards, as the first label
         // should appear at the bottom, not the top.
         for (int i = statLabels.length - 1; i >= 0; i--) {
-            stringBuilder.append(statLabels[i]).append(" = ").append(statData[i]).append('\n');
+            stringBuilder.append(i == 3 ? "Draws" : statLabels[i]).append(" = ");
+            if (i < 2) {
+                long value = i == 0 ? statistics.getVertexCount() : statistics.getTriangleCount();
+                if (value < 0) {
+                    stringBuilder.append("pending");
+                } else {
+                    stringBuilder.append(value);
+                }
+                if (statistics.hasIndirectDraws()) {
+                    int age = statistics.getGeometrySampleAge();
+                    stringBuilder.append(age < 0 ? " (GPU)" : " (GPU " + age + "f ago)");
+                }
+            } else {
+                stringBuilder.append(statData[i]);
+            }
+            stringBuilder.append('\n');
         }
         statText.setText(stringBuilder);
 

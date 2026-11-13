@@ -90,6 +90,8 @@ tasks.register('generateTestChooserClassList') {
 }
 
 sourceSets.main.resources.srcDir(generatedTestChooserResourcesDir)
+// Custom baked models and textures supplement the upstream published testdata.
+sourceSets.main.resources.srcDir(rootProject.file('jme3-testdata/src/main/resources'))
 
 tasks.named('processResources') {
     dependsOn 'generateTestChooserClassList'
@@ -464,5 +466,432 @@ task dist (dependsOn: ['build', ':jme3-android:jar']) {
             into '../dist/opt/android'
             rename { androidNativeArtifact.name + ".${androidNativeArtifact.extension}" }
         }
+    }
+}
+
+// Separate runtime classpaths are essential: LWJGL 2 and 3 implement the same
+// engine backend class names and must never be loaded together.
+evaluationDependsOn(':jme3-lwjgl3')
+['gpuSettingsLwjgl3Check': ['TestGpuSceneSettings', []],
+ 'gpuHiZLwjgl3Check': ['TestHiZOcclusion', ['--smoke', '--compaction']],
+ 'gpuCombinedLwjgl3Check': ['TestGpuDrivenRendering', ['--smoke', '--mdi', '--bindless']]].each { taskName, config ->
+    task(taskName, type: JavaExec, dependsOn: ['classes', ':jme3-lwjgl3:classes']) {
+        group = 'verification'
+        mainClass = 'jme3test.gpuDrivenRendering.' + config[0]
+        args config[1]
+        classpath = files(sourceSets.main.output,
+                configurations.runtimeClasspath.filter {
+                    !it.name.startsWith('jme3-lwjgl-') && !it.name.startsWith('lwjgl-2.') &&
+                    !it.name.startsWith('lwjgl-platform-')
+                }, project(':jme3-lwjgl3').sourceSets.main.runtimeClasspath)
+    }
+}
+
+task gpuCompactFallbackCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestCommandCompaction'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '8g'
+    args '--benchmark', '--count=100000', '--without-count'
+}
+
+task gpuHiZCompactSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--compaction'
+}
+
+task gpuSettingsCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuSceneSettings'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+task gpuStreamingCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuSceneStreaming'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '8g'
+}
+
+task gpuHiZMergedSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--mesh-merging'
+}
+
+task gpuDrivenCombinedSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--bindless', '--mdi'
+}
+
+task gpuDrivenBindlessFallbackSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--bindless', '--without-bindless'
+}
+
+['gpuBindless': 'TestBindlessRendering', 'gpuMdi': 'TestMultiDrawIndirect', 'gpuMeshMerge': 'TestMultiDrawIndirect', 'gpuCompact': 'TestCommandCompaction', 'gpuMaterialMerge': 'TestMaterialMerging'].each { baseName, example ->
+    [false, true].each { automated ->
+        task(baseName + (automated ? 'Check' : ''), type: JavaExec, dependsOn: 'classes') {
+            group = automated ? 'verification' : 'application'
+            mainClass = 'jme3test.gpuDrivenRendering.' + example
+            classpath = sourceSets.main.runtimeClasspath
+            maxHeapSize = '8g'
+            if (baseName == 'gpuMeshMerge') {
+                args '--mesh-merging'
+            }
+            args "--count=${project.findProperty('gpuInstances') ?: '300000'}"
+            args "--frames=${project.findProperty('gpuMeasureFrames') ?: '180'}"
+            if (automated) {
+                args '--benchmark'
+            }
+            if (project.hasProperty('gpuDeferred')) {
+                args '--deferred'
+            }
+        }
+    }
+}
+
+['gpuDrivenBindlessSmoke': false, 'gpuDrivenBindlessDeferredSmoke': true].each { taskName, deferred ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--smoke', '--bindless'
+        if (deferred) {
+            args '--deferred'
+        }
+    }
+}
+
+['gpuDrivenMdiSmoke': false, 'gpuDrivenMdiDeferredSmoke': true].each { taskName, deferred ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--smoke', '--mdi'
+        if (deferred) {
+            args '--deferred'
+        }
+    }
+}
+
+['gpuHiZ': false, 'gpuHiZSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        mainClass = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+            systemProperty 'hizDebugImage', rootProject.file('.gradle/hiz-debug.png').absolutePath
+        }
+    }
+}
+
+task bakeGpuDrivenLods(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    mainClass = 'jme3test.gpuDrivenRendering.BakeGpuDrivenLods'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '4g'
+}
+
+['gpuDrivenPerformance': false, 'gpuDrivenPerformanceCheck': true].each { taskName, automated ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = automated ? 'verification' : 'application'
+        mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenPerformance'
+        classpath = sourceSets.main.runtimeClasspath
+        maxHeapSize = '8g'
+        // Optional JDK 11+ CPU/GC recording; output is local to this project.
+        if (project.hasProperty('gpuProfile')) {
+            jvmArgs "-XX:StartFlightRecording=filename=${rootProject.file('.gradle/gpu-scene.jfr')},settings=profile,dumponexit=true"
+        }
+        args "--count=${project.findProperty('gpuInstances') ?: '100000'}"
+        args "--moving=${project.findProperty('gpuMoving') ?: '1000'}"
+        args "--frames=${project.findProperty('gpuMeasureFrames') ?: '600'}"
+        if (project.hasProperty('gpuLinearUpdates')) {
+            args '--linear-updates'
+        }
+        if (project.hasProperty('gpuNoDistance')) {
+            args '--no-distance'
+        }
+        if (project.hasProperty('gpuNoLod')) {
+            args '--no-lod'
+        }
+        if (automated) {
+            args '--benchmark'
+        }
+    }
+}
+
+task gpuDrivenDeferredSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--deferred'
+}
+task gpuDrivenSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+task surfaceQuerySmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.sdf.TestSurfaceQuery'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+task bakePerformanceModels(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    mainClass = 'jme3test.sdf.BakePerformanceModels'
+    classpath = sourceSets.main.runtimeClasspath
+}
+['bakedWorldPerformance': false, 'bakedWorldPerformanceSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.TestBakedWorldPerformance'
+        classpath = sourceSets.main.runtimeClasspath
+        maxHeapSize = '2g'
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Event-maintained camera queries with 10,000 distant baked instances.
+['surfaceSceneIndex': false, 'surfaceSceneIndexSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.TestSurfaceAttributeAtlas'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--index-stress'
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Bounded runtime residency of mixed-size baked surface cards.
+['surfaceAttributeAtlas': false, 'surfaceAttributeAtlasSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.TestSurfaceAttributeAtlas'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Camera-centered composition of baked instance SDFs; Space switches visualization.
+['globalDistanceField': false, 'globalDistanceFieldSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.TestGlobalDistanceField'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+    }
+}
+// Independent surface bake, with optional SDF; all previews use saved j3o pixels.
+['surfaceAttributeBake': [], 'surfaceAttributeBakeSmoke': ['--smoke'],
+ 'surfaceAttributeOnlySmoke': ['--smoke', '--surface-only']].each { taskName, arguments ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.TestSurfaceAttributeBake'
+        classpath = sourceSets.main.runtimeClasspath
+        args arguments
+    }
+}
+// SDK-ready SDF bake data and runtime surface cache examples.
+['sdfBakeDataSmoke': 'TestSdfBakeData',
+ 'surfaceMaterialMaps': 'TestSurfaceMaterialMaps',
+ 'surfaceMaterialMapsSmoke': 'TestSurfaceMaterialMaps',
+ 'surfaceAttributes': 'TestSurfaceAttributes',
+ 'surfaceAttributesSmoke': 'TestSurfaceAttributes',
+ 'surfaceCacheLifecycle': 'TestSurfaceCacheLifecycle',
+ 'surfaceCacheLifecycleSmoke': 'TestSurfaceCacheLifecycle'].each { taskName, entry ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        mainClass = 'jme3test.sdf.' + entry
+        classpath = sourceSets.main.runtimeClasspath
+        if (taskName.endsWith('Smoke')) {
+            args '--smoke'
+        }
+    }
+}
+// Interactive whole-volume preview, separate from the slice viewer.
+['sdfSurface': false, 'sdfSurfaceSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        description = 'Switches original model and GPU SDF surface; -PsdfBox for signed box.'
+        mainClass = 'jme3test.sdf.TestSdfSurface'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+        }
+        if (project.hasProperty('sdfBox')) {
+            args '--box'
+        }
+    }
+}
+task sdfVisualization(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    description = 'Interactive SDF slices and near-surface samples; -PsdfBox for signed box.'
+    mainClass = 'jme3test.sdf.TestSdfVisualization'
+    classpath = sourceSets.main.runtimeClasspath
+    if (project.hasProperty('sdfBox')) {
+        args '--box'
+    }
+}
+
+task sdfVisualizationSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Renders all three SDF slice axes in a real window, then exits.'
+    mainClass = 'jme3test.sdf.TestSdfVisualization'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+    if (project.hasProperty('sdfBox')) {
+        args '--box'
+    }
+}
+task sponzaSdfBake(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Bakes the default-resolution Sponza field into a new output directory.'
+    mainClass = 'jme3test.sdf.TestSponzaSdf'
+    classpath = sourceSets.main.runtimeClasspath
+    systemProperty 'java.awt.headless', 'true'
+    if (project.hasProperty('sdfSigned')) {
+        args '--signed'
+    }
+}
+
+task sponzaSdfSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Bakes Sponza distance data, saves a new j3o and verifies its round trip.'
+    mainClass = 'jme3test.sdf.TestSponzaSdf'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+    systemProperty 'java.awt.headless', 'true'
+}
+
+task frameGraphVersionsSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Checks FG resource versions, canonical imports and compute-to-readback barriers.'
+    mainClass = 'jme3test.renderpath.TestFrameGraphVersions'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
+task frameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.renderpath.TestFrameGraph'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
+task dynamicFrameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.renderpath.TestDynamicFrameGraph'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
+
+task engineFrameGraphSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    description = 'Checks viewport FG stages, shadow filters, Bloom, FXAA and path round trips.'
+    mainClass = 'jme3test.renderpath.RenderPathSmoke'
+    classpath = sourceSets.main.runtimeClasspath
+    args 'TestEngineFrameGraph'
+    systemProperty 'framegraph.prepasses', 'true'
+}
+
+['frameGraphFilterSmoke': ['--smoke'],
+ 'frameGraphFilterSmokeMSAA': ['--smoke', '--msaa']].each { taskName, arguments ->
+    tasks.create(name: taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        mainClass = 'jme3test.renderpath.TestFrameGraphFilters'
+        classpath = sourceSets.main.runtimeClasspath
+        args arguments
+    }
+}
+
+//apply plugin:'application'
+
+task tiledSceneBenchmark(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.renderpath.BenchmarkTiledDeferred'
+    classpath = sourceSets.main.runtimeClasspath
+    if (project.hasProperty('nearView')) args '--near'
+    if (project.hasProperty('downView')) args '--down'
+}
+
+task renderPathSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    mainClass = 'jme3test.renderpath.RenderPathSmoke'
+    classpath = sourceSets.main.runtimeClasspath
+    args project.findProperty('renderPathExample') ?: 'TestDeferredShading'
+    if (project.hasProperty('renderPathView')) args project.property('renderPathView')
+}
+
+def renderPathScenes = [
+    'TerrainTestAdvancedRenderPath', 'TerrainTestAndroidRenderPath',
+    'TestDeferredPBRShading', 'TestDeferredShading', 'TestDeferredShadingPathShadow',
+    'TestPBRTerrainAdvancedRenderPath', 'TestPBRTerrainRenderPath',
+    'TestRenderPathChanged', 'TestRenderPathPointDirectionalAndSpotLightShadows',
+    'TestShadingModel', 'TestSimpleDeferredLighting', 'TestTileBasedDeferredShading',
+    'TestDeferredFeatures', 'TestRenderPathIsolation', 'TestDeferredTerrainFeatures'
+]
+task renderPathSuite {
+    group = 'verification'
+    description = 'Runs all ported render-path scenes and feature/isolation pixel regressions.'
+}
+
+task renderPipelineSuite {
+    group = 'verification'
+    description = 'Checks direct Pipeline installation, CPU/GPU policies and replacement lifecycle.'
+}
+def previousDirectPipelineTask = null
+['TestDeferredFeatures', 'TestRenderPathIsolation'].each { scene ->
+    def directTask = tasks.create(name: "renderPipelineCheck${scene}", type: JavaExec) {
+        dependsOn 'classes'
+        mainClass = 'jme3test.renderpath.RenderPathSmoke'
+        classpath = sourceSets.main.runtimeClasspath
+        args scene
+        systemProperty 'renderpath.direct', 'true'
+    }
+    if (previousDirectPipelineTask != null) directTask.mustRunAfter previousDirectPipelineTask
+    previousDirectPipelineTask = directTask
+    renderPipelineSuite.dependsOn directTask
+}
+def previousSceneTask = null
+renderPathScenes.each { scene ->
+    def sceneTask = tasks.create(name: "renderPathCheck${scene}", type: JavaExec) {
+        dependsOn 'classes'
+        mainClass = 'jme3test.renderpath.RenderPathSmoke'
+        classpath = sourceSets.main.runtimeClasspath
+        args scene
+    }
+    // Keep graphics checks sequential even when Gradle parallelism is enabled.
+    if (previousSceneTask != null) sceneTask.mustRunAfter previousSceneTask
+    previousSceneTask = sceneTask
+    renderPathSuite.dependsOn sceneTask
+}
+
+// Offscreen regression checks for the optional tiled deferred renderer.
+['tiledDeferredSmoke': [], 'tiledDeferredSmokeGL33': ['--gl33'],
+ 'tiledDeferredSmokeOverflow': ['--overflow'],
+ 'tiledDeferredBenchmark': ['--benchmark']].each { taskName, extraArgs ->
+    tasks.create(name: taskName, type: JavaExec) {
+        group = 'verification'
+        description = 'Checks tiled deferred rendering and Forward mode round trips offscreen.'
+        dependsOn 'classes'
+        mainClass = 'jme3test.light.TestTiledDeferred'
+        classpath = sourceSets.main.runtimeClasspath
+        args(['--smoke'] + extraArgs)
     }
 }

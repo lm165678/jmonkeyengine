@@ -31,6 +31,14 @@
  */
 package com.jme3.renderer;
 
+import com.jme3.renderer.deferred.TiledDeferredProcessor;
+import com.jme3.renderer.framegraph.FrameGraph;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import com.jme3.renderer.pipeline.OpaquePipeline;
+import com.jme3.renderer.pipeline.ViewportPipelines;
+import com.jme3.renderer.deferred.ShadingModelRegistry;
+import java.util.Objects;
 import com.jme3.light.DefaultLightFilter;
 import com.jme3.light.LightFilter;
 import com.jme3.light.LightList;
@@ -46,6 +54,7 @@ import com.jme3.post.SceneProcessor;
 import com.jme3.profile.AppProfiler;
 import com.jme3.profile.AppStep;
 import com.jme3.profile.VpStep;
+import com.jme3.profile.SpStep;
 import com.jme3.renderer.pipeline.DefaultPipelineContext;
 import com.jme3.renderer.pipeline.ForwardPipeline;
 import com.jme3.renderer.pipeline.PipelineContext;
@@ -85,6 +94,214 @@ import java.util.logging.Logger;
  * viewports.
  */
 public class RenderManager {
+    private RenderPath renderPath = RenderPath.Forward;
+    private int deferredTileSize = 16;
+    private final ViewportPipelines pipelines = new ViewportPipelines(this);
+
+    /**
+     * Sets the tile width and height in pixels for managed CPU and GPU paths.
+     * Example: {@code renderManager.setDeferredTileSize(16)} before selecting
+     * {@code RenderPath.TiledDeferredGPU}. For a directly installed
+     * DeferredPipeline, use its {@code setTileSize(16)} instead. Render-thread only.
+     * @param size tile dimension, from 1 through 256 inclusive
+     */
+    public void setDeferredTileSize(int size) {
+        if (size < 1 || size > 256) {
+            throw new IllegalArgumentException("Tile size must be 1..256");
+        }
+        deferredTileSize = size;
+    }
+
+    public int getDeferredTileSize() {
+        return deferredTileSize;
+    }
+
+    /**
+     * Changes the default strategy at the next viewport render. Render-thread only.
+     * <pre>{@code
+     * renderManager.setDeferredTileSize(16);
+     * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
+     * // Later, return to the original renderer:
+     * renderManager.setRenderPath(RenderPath.Forward);
+     * }</pre>
+     * Applies to viewports using Inherit without an explicitly installed pipeline
+     * or TiledDeferredProcessor. To remove a direct pipeline override, first call
+     * {@code renderManager.setPipeline(viewPort, null)}.
+     * @param path concrete default path; neither null nor Inherit
+     */
+    public void setRenderPath(RenderPath path) {
+        if (path == null || path == RenderPath.Inherit) {
+            throw new IllegalArgumentException("A concrete default path is required");
+        }
+        renderPath = path;
+    }
+
+    public RenderPath getRenderPath() {
+        return renderPath;
+    }
+
+    /**
+     * Registers a custom deferred model for all managed viewports. Registration
+     * survives Forward transitions and viewport recreation. Render-thread only.
+     * @see TiledDeferredProcessor#registerShadingModel(int, String)
+     */
+    public void registerDeferredShadingModel(int id, String glsl) {
+        pipelines.getShadingModels().register(id, glsl);
+    }
+
+    /** The shared registry used by the manager's default deferred pipelines. */
+    public ShadingModelRegistry getDeferredShadingModels() {
+        return pipelines.getShadingModels();
+    }
+
+    /**
+     * Installs a replacement opaque pipeline for a viewport owned by this manager.
+     * The manager owns initialization, resize and cleanup. Pass null to return to
+     * RenderPath selection. Use one instance per viewport. Render-thread only.
+     * A replacement takes precedence over RenderPath; remove an explicit
+     * TiledDeferredProcessor before installing one.
+     * <pre>{@code
+     * DeferredPipeline pipeline = new DeferredPipeline(
+     *         assetManager, renderManager.getDeferredShadingModels());
+     * pipeline.setLightCullingMode(LightCullingMode.GPU);
+     * renderManager.setPipeline(viewPort, pipeline);
+     * // Restore the manager/viewport RenderPath settings:
+     * renderManager.setPipeline(viewPort, null);
+     * }</pre>
+     * Import DeferredPipeline and LightCullingMode from
+     * {@code com.jme3.renderer.deferred}. Removing the override does not change
+     * those RenderPath settings; it does not necessarily select Forward.
+     * @param viewport viewport owned by this manager
+     * @param pipeline replacement instance, or null to restore path selection
+     */
+    public void setPipeline(ViewPort viewport, OpaquePipeline pipeline) {
+        pipelines.set(viewport, pipeline);
+    }
+
+    /** Returns the installed/allocated pipeline. Automatic Forward may have a GPU Scene decorator. */
+    public OpaquePipeline getPipeline(ViewPort viewport) {
+        return pipelines.get(viewport);
+    }
+
+    /** Compatibility diagnostic accessor for the default managed adapter. */
+    public TiledDeferredProcessor getRenderPipeline(ViewPort viewport) {
+        return pipelines.getDeferred(viewport);
+    }
+
+    /**
+     * Installs automatic GPU Scene policy. LegacyApplication calls this at startup;
+     * standalone RenderManager owners may call it before rendering. Explicit
+     * replacement pipelines are not wrapped or destroyed by this policy.
+     * <pre>{@code
+     * // 第一步：独立使用 RenderManager 时传入资源管理器和启动配置。
+     * renderManager.configureGpuScene(assetManager, settings);
+     * // 第二步：运行时可分别切换 GPU Scene 与 Bindless，调用必须在渲染线程。
+     * renderManager.setGpuSceneBindlessEnabled(false);
+     * renderManager.setGpuSceneEnabled(false);
+     * // 第三步：恢复后按当前场景注册，继续沿用各视口的 Forward/Deferred 选择。
+     * renderManager.setGpuSceneEnabled(true);
+     * renderManager.setGpuSceneBindlessEnabled(true);
+     * }</pre>
+     */
+    public void configureGpuScene(com.jme3.asset.AssetManager assets, com.jme3.system.AppSettings settings) {
+        pipelines.configureGpuScene(assets, settings.isGpuSceneEnabled(), settings.isGpuSceneBindlessEnabled());
+    }
+
+    /**
+     * Changes automatic main-view GPU Scene policy on the render thread. Releases
+     * automatic pipelines immediately so the next queue traversal cannot skip old
+     * GPU-owned objects. Explicit pipelines remain caller-configured. See
+     * configureGpuScene for complete usage. Requested mode may fall back by caps.
+     */
+    public void setGpuSceneEnabled(boolean enabled) {
+        pipelines.setGpuSceneEnabled(enabled);
+    }
+
+    /** @return requested automatic GPU Scene policy, not hardware capability */
+    public boolean isGpuSceneEnabled() {
+        return pipelines.isGpuSceneEnabled();
+    }
+
+    /**
+     * Changes automatic bindless policy on the render thread. False preserves GPU
+     * Scene with ordinary texture binding. Recreates automatic pipelines safely;
+     * see configureGpuScene for complete switching/restoration usage.
+     */
+    public void setGpuSceneBindlessEnabled(boolean enabled) {
+        pipelines.setBindlessEnabled(enabled);
+    }
+
+    /** @return requested automatic bindless policy */
+    public boolean isGpuSceneBindlessEnabled() {
+        return pipelines.isBindlessEnabled();
+    }
+
+    private final Map<ViewPort, FrameGraph> viewportGraphs = new IdentityHashMap<>();
+    private final Map<ViewPort, FrameGraph> queueGraphs = new IdentityHashMap<>();
+
+    /**
+     * Returns the engine-owned whole-viewport graph after the first rendered frame.
+     * For diagnostics only: do not rebuild, execute or close it yourself.
+     * Processor stages are ordered side effects because legacy processors may
+     * change camera, queues and output targets. Their owned resources remain borrowed.
+     * <pre>{@code
+     * // 第一步：照常添加阴影/后处理，整帧 FG 自动启用，不需要手动安装。
+     * viewPort.addProcessor(shadowRenderer);
+     * viewPort.addProcessor(filterPostProcessor);
+     * // 第二步：在 simpleRender 中查看本帧阶段（首次渲染前可能为 null）。
+     * FrameGraph graph = renderManager.getViewPortFrameGraph(viewPort);
+     * if (graph != null) {
+     *     System.out.println(graph.getExecutionOrder());
+     * }
+     * // 第三步：照常切换 Forward/Deferred；两者都在整帧图的 OpaquePipeline 中执行。
+     * renderManager.setRenderPath(RenderPath.Forward);
+     * }</pre>
+     * @param viewport rendered viewport
+     * @return viewport graph, or null before its first render or for a standalone viewport
+     */
+    public FrameGraph getViewPortFrameGraph(ViewPort viewport) {
+        return viewportGraphs.get(viewport);
+    }
+
+    /** Releases pipelines owned by this manager while the graphics context is current. */
+    public void cleanupRenderPaths() {
+        try {
+            pipelines.cleanup();
+        } finally {
+            for (FrameGraph graph : viewportGraphs.values()) {
+                graph.close();
+            }
+            viewportGraphs.clear();
+            for (FrameGraph graph : queueGraphs.values()) {
+                graph.close();
+            }
+            queueGraphs.clear();
+        }
+    }
+
+    private void cleanupRenderPath(ViewPort viewport) {
+        try {
+            pipelines.remove(viewport);
+        } finally {
+            FrameGraph queues = queueGraphs.remove(viewport);
+            if (queues != null) {
+                queues.close();
+            }
+            FrameGraph graph = viewportGraphs.remove(viewport);
+            if (graph != null) {
+                graph.close();
+            }
+        }
+    }
+
+    private boolean isManagedViewPort(ViewPort viewport) {
+        return preViewPorts.contains(viewport) || viewPorts.contains(viewport)
+                || postViewPorts.contains(viewport);
+    }
+
+    private void renderOpaquePath(ViewPort viewport) {
+        pipelines.render(viewport);
+    }
 
     private static final Logger logger = Logger.getLogger(RenderManager.class.getName());
 
@@ -111,7 +328,7 @@ public class RenderManager {
     private final HashMap<Class<? extends PipelineContext>, PipelineContext> contexts = new HashMap<>();
     private final LinkedList<PipelineContext> usedContexts = new LinkedList<>();
     private final LinkedList<RenderPipeline<? extends PipelineContext>> usedPipelines = new LinkedList<>();
-    private RenderPipeline<? extends PipelineContext> defaultPipeline = new ForwardPipeline();
+    private RenderPipeline<? extends PipelineContext> defaultPipeline = new com.jme3.renderer.pipeline.FrameGraphPipeline();
     private Camera prevCam = null;
     private int prevViewportWidth = -1;
     private int prevViewportHeight = -1;
@@ -152,7 +369,7 @@ public class RenderManager {
      * Gets the default pipeline used when a ViewPort does not have a
      * pipeline already assigned to it.
      *
-     * @return The default {@link RenderPipeline}, which is {@link ForwardPipeline} by default.
+     * @return The default {@link RenderPipeline}, which is {@link com.jme3.renderer.pipeline.FrameGraphPipeline} by default.
      */
     public RenderPipeline<? extends PipelineContext> getPipeline() {
         return defaultPipeline;
@@ -162,7 +379,7 @@ public class RenderManager {
      * Sets the default pipeline used when a ViewPort does not have a
      * pipeline already assigned to it.
      * <p>
-     * default={@link ForwardPipeline}
+     * default={@link com.jme3.renderer.pipeline.FrameGraphPipeline}
      *
      * @param pipeline The default rendering pipeline (not null).
      */
@@ -286,6 +503,7 @@ public class RenderManager {
     public boolean removePreView(String viewName) {
         for (int i = 0; i < preViewPorts.size(); i++) {
             if (preViewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(preViewPorts.get(i));
                 preViewPorts.remove(i);
                 return true;
             }
@@ -302,7 +520,9 @@ public class RenderManager {
      * @see #createPreView(java.lang.String, com.jme3.renderer.Camera)
      */
     public boolean removePreView(ViewPort view) {
-        return preViewPorts.remove(view);
+        boolean removed=preViewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -333,6 +553,7 @@ public class RenderManager {
     public boolean removeMainView(String viewName) {
         for (int i = 0; i < viewPorts.size(); i++) {
             if (viewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(viewPorts.get(i));
                 viewPorts.remove(i);
                 return true;
             }
@@ -349,7 +570,9 @@ public class RenderManager {
      * @see #createMainView(java.lang.String, com.jme3.renderer.Camera)
      */
     public boolean removeMainView(ViewPort view) {
-        return viewPorts.remove(view);
+        boolean removed=viewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -380,6 +603,7 @@ public class RenderManager {
     public boolean removePostView(String viewName) {
         for (int i = 0; i < postViewPorts.size(); i++) {
             if (postViewPorts.get(i).getName().equals(viewName)) {
+                cleanupRenderPath(postViewPorts.get(i));
                 postViewPorts.remove(i);
 
                 return true;
@@ -397,7 +621,9 @@ public class RenderManager {
      * @see #createPostView(java.lang.String, com.jme3.renderer.Camera)
      */
     public boolean removePostView(ViewPort view) {
-        return postViewPorts.remove(view);
+        boolean removed=postViewPorts.remove(view);
+        if(removed)cleanupRenderPath(view);
+        return removed;
     }
 
     /**
@@ -487,6 +713,7 @@ public class RenderManager {
 
     private void notifyReshape(ViewPort vp, int w, int h) {
         vp.setRenderTargetSize(w, h);
+        pipelines.reshape(vp, w, h);
         List<SceneProcessor> processors = vp.getProcessors();
         for (SceneProcessor proc : processors) {
             if (!proc.isInitialized()) {
@@ -607,6 +834,7 @@ public class RenderManager {
     public Material getForcedMaterial() {
         return forcedMaterial;
     }
+
 
     /**
      * Returns the forced render state previously set with
@@ -827,7 +1055,7 @@ public class RenderManager {
     /**
      * Auto-scale singlePassLightBatchSize exponentially (powers of 2) up to maxSinglePassLightBatchSize only
      * when a tecnique needs it
-     * 
+     *
      * @param tech
      * @param nLights
      */
@@ -888,16 +1116,13 @@ public class RenderManager {
                     //forcing forced technique renderState
                     forcedRenderState = geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState();
                 }
-                
-                // use geometry's material
-                material.render(geom, lightList, this);
-                
-                // resize light batch if needed before rendering
-                maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
-                material.selectTechnique(previousTechniqueName, this);
-
-                //restoring forcedRenderState
-                forcedRenderState = tmpRs;
+                try {
+                    material.render(geom, lightList, this);
+                    maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
+                } finally {
+                    forcedRenderState = tmpRs;
+                    material.selectTechnique(previousTechniqueName, this);
+                }
 
                 //Reverted this part from revision 6197
                 // If forcedTechnique does not exist and forcedMaterial is not set,
@@ -1025,7 +1250,13 @@ public class RenderManager {
      * @param vp the ViewPort to render in (not null)
      */
     private void renderSubScene(Spatial scene, ViewPort vp) {
-        // check culling first
+
+        OpaquePipeline pipeline = getPipeline(vp);
+        if (pipeline != null && pipeline.handlesSceneQueue(scene)) {
+            return;
+        }
+
+        // check culling first.
         if (!scene.checkCulling(vp.getCamera())) {
             return;
         }
@@ -1178,7 +1409,7 @@ public class RenderManager {
      * Returns the maximum number of lights allowed in a single pass batch.
      *
      * <p>
-     * The batch size will never be auto-scaled beyond this value. 
+     * The batch size will never be auto-scaled beyond this value.
      *
      * @return the maximum single pass light batch size.
      */
@@ -1241,55 +1472,71 @@ public class RenderManager {
      * @see #renderTranslucentQueue(com.jme3.renderer.ViewPort)
      */
     public void renderViewPortQueues(ViewPort vp, boolean flush) {
-        RenderQueue rq = vp.getQueue();
-        Camera cam = vp.getCamera();
-        boolean depthRangeChanged = false;
+        boolean managed = isManagedViewPort(vp);
+        FrameGraph graph = managed
+                ? queueGraphs.computeIfAbsent(vp, key -> new FrameGraph()) : new FrameGraph();
+        graph.beginFrame();
+        FrameGraph.PassBuilder previous = null;
+        for (Bucket bucket : new Bucket[] {Bucket.Opaque, Bucket.Sky, Bucket.Transparent, Bucket.Gui}) {
+            FrameGraph.PassBuilder pass = graph.addPass(bucket.name(), context -> {
+                renderGraphBucket(vp, bucket, flush);
+            }).sideEffect();
+            if (previous != null) {
+                pass.after(previous);
+            }
+            previous = pass;
+        }
+        try {
+            graph.execute(this, vp, vp.getQueue());
+        } finally {
+            if (!managed) {
+                graph.close();
+            }
+        }
+    }
 
-        // render opaque objects with default depth range
-        // opaque objects are sorted front-to-back, reducing overdraw
+    /**
+     * Declares ordinary geometry buckets in an existing planning scope. Native
+     * pre-normal/glow passes use this to avoid creating a second graph.
+     * <pre>{@code
+     * // 在 addExpansionPass 回调中，先声明绑定目标/技术的 Prepare Pass。
+     * renderManager.appendQueuePasses(graph, viewPort, false);
+     * // false 保留队列，供后面的正式绘制使用；随后声明 Restore Pass 恢复状态。
+     * }</pre>
+     * @param graph viewport graph currently being declared
+     * @param viewport geometry source
+     * @param flush whether to consume rendered geometry
+     */
+    public void appendQueuePasses(FrameGraph graph, ViewPort viewport, boolean flush) {
+        for (Bucket bucket : new Bucket[] {Bucket.Opaque, Bucket.Sky, Bucket.Transparent, Bucket.Gui}) {
+            graph.addPass(bucket.name(), context -> renderGraphBucket(viewport, bucket, flush)).sideEffect();
+        }
+    }
+
+    private void renderGraphBucket(ViewPort vp, Bucket bucket, boolean flush) {
+        RenderQueue queue = vp.getQueue();
+        Camera camera = vp.getCamera();
+        if (bucket != Bucket.Opaque && queue.isQueueEmpty(bucket)) {
+            return;
+        }
         if (prof != null) {
-            prof.vpStep(VpStep.RenderBucket, vp, Bucket.Opaque);
+            prof.vpStep(VpStep.RenderBucket, vp, bucket);
         }
-        rq.renderQueue(Bucket.Opaque, this, cam, flush);
-
-        // render the sky, with depth range set to the farthest
-        if (!rq.isQueueEmpty(Bucket.Sky)) {
-            if (prof != null) {
-                prof.vpStep(VpStep.RenderBucket, vp, Bucket.Sky);
-            }
+        if (bucket == Bucket.Sky) {
             renderer.setDepthRange(1, 1);
-            rq.renderQueue(Bucket.Sky, this, cam, flush);
-            depthRangeChanged = true;
-        }
-
-        // transparent objects are last because they require blending with the
-        // rest of the scene's objects. Consequently, they are sorted
-        // back-to-front.
-        if (!rq.isQueueEmpty(Bucket.Transparent)) {
-            if (prof != null) {
-                prof.vpStep(VpStep.RenderBucket, vp, Bucket.Transparent);
-            }
-            if (depthRangeChanged) {
-                renderer.setDepthRange(0, 1);
-                depthRangeChanged = false;
-            }
-            rq.renderQueue(Bucket.Transparent, this, cam, flush);
-        }
-
-        if (!rq.isQueueEmpty(Bucket.Gui)) {
-            if (prof != null) {
-                prof.vpStep(VpStep.RenderBucket, vp, Bucket.Gui);
-            }
+        } else if (bucket == Bucket.Gui) {
             renderer.setDepthRange(0, 0);
-            setCamera(cam, true, vp.getRenderTargetWidth(), vp.getRenderTargetHeight());
-            rq.renderQueue(Bucket.Gui, this, cam, flush);
-            setCamera(cam, false, vp.getRenderTargetWidth(), vp.getRenderTargetHeight());
-            depthRangeChanged = true;
+            setCamera(camera, true, vp.getRenderTargetWidth(), vp.getRenderTargetHeight());
         }
-
-        // restore range to default
-        if (depthRangeChanged) {
-            renderer.setDepthRange(0, 1);
+        try {
+            queue.renderQueue(bucket, this, camera, flush);
+        } finally {
+            if (bucket == Bucket.Gui) {
+                setCamera(camera, false, vp.getRenderTargetWidth(), vp.getRenderTargetHeight());
+            }
+            if (bucket == Bucket.Gui || bucket == Bucket.Sky) {
+                renderer.setDepthRange(0, 1);
+            }
         }
     }
 
@@ -1472,6 +1719,146 @@ public class RenderManager {
 
         pipeline.pipelineRender(this, context, vp, tpf);
         context.endViewPortRender(this, vp);
+    }
+
+    /**
+     * Executes the FrameGraph viewport stages through the upstream pipeline lifecycle.
+     * Internal entry point for FrameGraphPipeline; call renderViewPort normally.
+     * Runs on the render thread with a current context. Temporary state and queues
+     * are restored in finally blocks. See FrameGraphPipeline for switching examples.
+     * @param vp viewport being rendered
+     * @param tpf elapsed time in seconds
+     */
+    public void renderFrameGraphViewPort(ViewPort vp, float tpf) {
+        if (!vp.isEnabled()) {
+            return;
+        }
+        if (prof != null) {
+            prof.vpStep(VpStep.BeginRender, vp, null);
+        }
+        final SafeArrayList<SceneProcessor> processors =
+                vp.getProcessors().isEmpty() ? null : vp.getProcessors();
+        boolean managed = isManagedViewPort(vp);
+        FrameGraph graph = managed
+                ? viewportGraphs.computeIfAbsent(vp, key -> new FrameGraph()) : new FrameGraph();
+        // Rebuild logical stages each frame; processor preFrame may change the output target.
+        // Do not capture that framebuffer before preFrame has executed.
+        graph.beginFrame();
+        FrameGraph.PassBuilder preFrame = graph.addPass("PreFrame", context -> {
+            if (processors != null) {
+                if (prof != null) {
+                    prof.vpStep(VpStep.PreFrame, vp, null);
+                }
+                for (SceneProcessor proc : processors.getArray()) {
+                    if (!proc.isInitialized()) {
+                        proc.initialize(this, vp);
+                    }
+                    proc.setProfiler(this.prof);
+                    if (prof != null) {
+                        prof.spStep(SpStep.ProcPreFrame, proc.getClass().getSimpleName());
+                    }
+                    proc.preFrame(tpf);
+                }
+            }
+        }).sideEffect();
+        FrameGraph.PassBuilder prepareOutput = graph.addPass("PrepareOutput", context -> {
+            renderer.setFrameBuffer(vp.getOutputFrameBuffer());
+            setCamera(vp.getCamera(), false, vp.getRenderTargetWidth(), vp.getRenderTargetHeight());
+            if (vp.isClearDepth() || vp.isClearColor() || vp.isClearStencil()) {
+                if (vp.isClearColor()) {
+                    renderer.setBackgroundColor(vp.getBackgroundColor());
+                }
+                renderer.clearBuffers(vp.isClearColor(),
+                        vp.isClearDepth(),
+                        vp.isClearStencil());
+            }
+        }).sideEffect().after(preFrame);
+        FrameGraph.PassBuilder sceneQueue = graph.addPass("SceneQueue", context -> {
+            OpaquePipeline selected = getPipeline(vp);
+            if (selected != null && selected.isInitialized()) {
+                selected.prepareSceneQueue();
+            }
+            if (prof != null) {
+                prof.vpStep(VpStep.RenderScene, vp, null);
+            }
+            List<Spatial> scenes = vp.getScenes();
+            for (int i = scenes.size() - 1; i >= 0; i--) {
+                renderScene(scenes.get(i), vp);
+            }
+        }).sideEffect().after(prepareOutput);
+        FrameGraph.PassBuilder shadowAndPostQueue = graph.addExpansionPass("ShadowAndPostQueue", current -> {
+            if (processors != null) {
+                if (prof != null) {
+                    prof.vpStep(VpStep.PostQueue, vp, null);
+                }
+                int index = 0;
+                for (SceneProcessor proc : processors.getArray()) {
+                    if (prof != null) {
+                        prof.spStep(SpStep.ProcPostQueue, proc.getClass().getSimpleName());
+                    }
+                    if (!(proc instanceof TiledDeferredProcessor)) {
+                        current.addExpansionPass("Processor[" + index + "]:" + proc.getClass().getSimpleName(),
+                            target -> proc.appendPostQueuePasses(target, vp.getQueue()));
+                    }
+                    index++;
+                }
+            }
+        }).sideEffect().after(sceneQueue);
+        FrameGraph.PassBuilder opaquePipeline = graph.addExpansionPass("OpaquePipeline", current -> {
+            pipelines.appendPasses(current, vp);
+        }).sideEffect().after(shadowAndPostQueue);
+        FrameGraph.PassBuilder forwardAndBuckets = graph.addExpansionPass("ForwardAndBuckets", current -> {
+            if (prof != null) {
+                prof.vpStep(VpStep.FlushQueue, vp, null);
+            }
+            if (getClass() != RenderManager.class) {
+                // Preserve legacy RenderManager subclasses overriding flushQueue.
+                current.addPass("CompatibilityFlush", context -> flushQueue(vp)).sideEffect();
+            } else {
+                appendQueuePasses(current, vp, true);
+            }
+        }).sideEffect().after(opaquePipeline);
+        FrameGraph.PassBuilder postProcessing = graph.addExpansionPass("PostProcessing", current -> {
+            if (processors != null) {
+                if (prof != null) {
+                    prof.vpStep(VpStep.PostFrame, vp, null);
+                }
+                int index = 0;
+                for (SceneProcessor proc : processors.getArray()) {
+                    if (prof != null) {
+                        prof.spStep(SpStep.ProcPostFrame, proc.getClass().getSimpleName());
+                    }
+                    current.addExpansionPass("Processor[" + index++ + "]:" + proc.getClass().getSimpleName(),
+                        target -> proc.appendPostFramePasses(target, vp));
+                }
+                if (prof != null) {
+                    prof.vpStep(VpStep.ProcEndRender, vp, null);
+                }
+            }
+        }).sideEffect().after(forwardAndBuckets);
+        FrameGraph.PassBuilder translucent = graph.addPass("Translucent", context -> {
+            renderTranslucentQueue(vp);
+        }).sideEffect().after(postProcessing);
+        Material previousMaterial = forcedMaterial;
+        String previousTechnique = forcedTechnique;
+        RenderState previousState = forcedRenderState;
+        try {
+            graph.execute(this, vp, vp.getQueue());
+        } finally {
+            setForcedMaterial(previousMaterial);
+            setForcedTechnique(previousTechnique);
+            setForcedRenderState(previousState);
+            // Do not retain queued geometry or overridden depth ranges after a failed pass.
+            clearQueue(vp);
+            renderer.setDepthRange(0, 1);
+            renderer.clearClipRect();
+            if (!managed) {
+                graph.close();
+            }
+        }
+        if (prof != null) {
+            prof.vpStep(VpStep.EndRender, vp, null);
+        }
     }
 
     /**

@@ -1,0 +1,14 @@
+MaterialDef FrameGraph Color {
+    MaterialParameters {
+        Texture2D Texture
+        Int NumSamples
+        Color Color : 1.0 1.0 1.0 1.0
+    }
+    Technique {
+        VertexShader GLSL150 GLSL100: Common/MatDefs/Post/FrameGraphFullscreen.vert
+        FragmentShader GLSL150 GLSL100: Common/MatDefs/Post/FrameGraphCopy.frag
+        Defines {
+            RESOLVE_MS : NumSamples
+        }
+    }
+}

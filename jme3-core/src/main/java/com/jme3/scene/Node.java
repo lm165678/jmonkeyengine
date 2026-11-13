@@ -80,6 +80,48 @@ public class Node extends Spatial {
      * a whole list every time the scene graph changes.
      */
     private boolean updateListValid = false;
+    private transient NodeUpdateIndex updateIndex;
+
+    /**
+     * Enables runtime-only incremental child updates and a cached bound reduction
+     * tree. Default false; ordinary scene semantics and child order are retained.
+     * Useful for wide nodes with many static children and a small moving subset.
+     * Parent transform/light/override changes still update affected descendants;
+     * hierarchy edits rebuild the index. Extra memory is linear in child count.
+     * Bounds remain conservative; sphere merge grouping may differ from linear
+     * traversal. Use scene setters/forceRefresh, never mutate returned bounds.
+     * Call on the scene thread between updates. Clones and loaded j3o start disabled.
+     * Custom subclasses overriding geometric updates must preserve this contract.
+     * <pre>{@code
+     * // 第一步：在大量实例的公共父节点开启索引，不改变子节点的 parent。
+     * models.setIncrementalUpdatesEnabled(true);
+     * // 第二步：正常修改局部变换；只更新脏子树及包围体树上的祖先。
+     * movingModel.setLocalTranslation(10, 0, 0);
+     * rootNode.updateGeometricState();
+     * // 第三步：移动父节点仍会影响所有子节点，这是必须保留的场景图语义。
+     * models.move(1, 0, 0);
+     * // 第四步：可随时恢复传统更新；缓存不写入 j3o。
+     * models.setIncrementalUpdatesEnabled(false);
+     * }</pre>
+     * @param enabled whether to cache child-update and aggregate-bound state
+     */
+    public void setIncrementalUpdatesEnabled(boolean enabled) {
+        if (enabled == (updateIndex != null)) {
+            return;
+        }
+        if (updateIndex != null) {
+            updateIndex.close();
+        }
+        updateIndex = enabled ? new NodeUpdateIndex(this) : null;
+        // Switching an acceleration cache does not change the scene bound. Build
+        // the cache lazily on the next genuine bound update. Marking bounds dirty
+        // here breaks pipeline changes made after geometric update, during rendering.
+    }
+
+    /** @return runtime child-update index state; see setIncrementalUpdatesEnabled */
+    public boolean isIncrementalUpdatesEnabled() {
+        return updateIndex != null;
+    }
 
     /**
      * Instantiate a <code>Node</code> with no name, no parent, and no children.
@@ -166,6 +208,13 @@ public class Node extends Spatial {
     @Override
     protected void updateWorldBound() {
         super.updateWorldBound();
+        if (updateIndex != null) {
+            worldBound = updateIndex.updateBound(worldBound);
+            if (worldBound == null) {
+                worldBound = new BoundingBox(getWorldTranslation(), 0f, 0f, 0f);
+            }
+            return;
+        }
         // for a node, the world bound is a combination of all its children
         // bounds
         BoundingVolume resultBound = null;
@@ -186,6 +235,13 @@ public class Node extends Spatial {
             resultBound = new BoundingBox(getWorldTranslation(), 0f, 0f, 0f);
         }
         this.worldBound = resultBound;
+    }
+
+    void updateChildBounds() {
+        Spatial[] pending = updateIndex == null ? children.getArray() : updateIndex.childrenToUpdate(false);
+        for (Spatial child : pending) {
+            child.checkDoBoundUpdate();
+        }
     }
 
     @Override
@@ -284,6 +340,8 @@ public class Node extends Spatial {
             // This branch has no geometric state that requires updates.
             return;
         }
+        boolean inheritedStateChanged = (refreshFlags & (RF_TRANSFORM | RF_LIGHTLIST
+                | RF_CHILD_LIGHTLIST | RF_MATPARAM_OVERRIDE | RF_GLOBAL_LIGHTS)) != 0;
         boolean updateGlobalLights = (refreshFlags & RF_GLOBAL_LIGHTS) != 0;
         if ((refreshFlags & RF_LIGHTLIST) != 0 || (updateGlobalLights && parent == null)) {
             // Global collection replaces the root's previous list, even when
@@ -315,7 +373,9 @@ public class Node extends Spatial {
             // a round-trip later on.
             // NOTE 9/19/09
             // Although it does save a round trip,
-            for (Spatial child : children.getArray()) {
+            Spatial[] pending = updateIndex == null ? children.getArray()
+                    : updateIndex.childrenToUpdate(inheritedStateChanged);
+            for (Spatial child : pending) {
                 if (updateGlobalLights){
                     // we might have new global lights coming from a different
                     // branch of the scene graph, so we need to propagate the
@@ -329,6 +389,10 @@ public class Node extends Spatial {
 
         if ((refreshFlags & RF_BOUND) != 0) {
             updateWorldBound();
+        }
+
+        if (updateIndex != null) {
+            updateIndex.finishUpdate();
         }
 
         assert refreshFlags == 0;
@@ -414,6 +478,7 @@ public class Node extends Spatial {
             }
             child.setParent(this);
             children.add(index, child);
+            child.notifySceneChanged(SceneChangeListener.Change.ATTACHED);
             // XXX: Not entirely correct? Forces bound update up the
             // tree stemming from the attached child. Also forces
             // transform update down the tree-
@@ -492,6 +557,7 @@ public class Node extends Spatial {
             // Refresh while the old parent is still reachable, so global lights
             // anywhere in the detached subtree also invalidate the old root.
             child.setLightListRefresh();
+            child.notifySceneChanged(SceneChangeListener.Change.DETACHING);
             child.setParent(null);
             logger.log(Level.FINE, "{0}: Child removed.", this);
 
@@ -806,6 +872,7 @@ public class Node extends Spatial {
     @Override
     public void cloneFields(Cloner cloner, Object original) {
         super.cloneFields(cloner, original);
+        updateIndex = null;
 
         this.children = cloner.clone(children);
 

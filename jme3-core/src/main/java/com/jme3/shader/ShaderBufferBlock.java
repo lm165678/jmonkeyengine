@@ -52,6 +52,9 @@ public class ShaderBufferBlock extends ShaderVariable {
     protected BufferObject bufferObject;
     protected WeakReference<BufferObject> bufferObjectRef;
     protected BufferType type;
+    // A shared buffer may move between material binding slots. Track the last
+    // binding applied to this program, independently of the buffer's current slot.
+    private int appliedBinding = -1;
 
     /**
      * Set the new buffer object.
@@ -80,13 +83,14 @@ public class ShaderBufferBlock extends ShaderVariable {
      * @return true if need to update this storage block.
      */
     public boolean isUpdateNeeded(){
-        return updateNeeded;
+        return updateNeeded || (bufferObject != null && bufferObject.getBinding() != appliedBinding);
     }
 
     /**
      * Clear the flag {@link #isUpdateNeeded()}.
      */
     public void clearUpdateNeeded(){
+        appliedBinding = bufferObject == null ? -1 : bufferObject.getBinding();
         updateNeeded = false;
     }
 
@@ -95,6 +99,7 @@ public class ShaderBufferBlock extends ShaderVariable {
      */
     public void reset() {
         location = -1;
+        appliedBinding = -1;
         updateNeeded = true;
     }
 

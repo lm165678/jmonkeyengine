@@ -1,0 +1,12 @@
+MaterialDef GPU Scene Command Compaction {
+    MaterialParameters {
+        ShaderStorageBufferObject Commands
+        ShaderStorageBufferObject Compacted
+        ShaderStorageBufferObject DrawCount
+        Int Capacity
+        Boolean Reset
+    }
+    Technique {
+        ComputeShader GLSL430: Common/MatDefs/GpuScene/Compact.comp
+    }
+}

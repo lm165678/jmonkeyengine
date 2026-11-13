@@ -1,0 +1,21 @@
+MaterialDef SDF Surface Preview {
+    MaterialParameters {
+        Texture3D DistanceField
+        Vector3 BoundsMin
+        Vector3 BoundsMax
+        Vector3 Resolution
+        Vector3 CellSize
+        Matrix4 ClipToLocal
+        Float HitDistance
+        Boolean StepHeatmap
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Post/FrameGraphFullscreen.vert
+        FragmentShader GLSL150: Materials/Sdf/Surface.frag
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

@@ -194,12 +194,54 @@ public final class GLRenderer implements Renderer {
     private int vpX, vpY, vpW, vpH;
     private int clipX, clipY, clipW, clipH;
     private int defaultAnisotropicFilter = 1;
+    private final BindlessTextureCache bindlessCache = new BindlessTextureCache(this);
+
+    @Override
+    public Shader getBindlessShader(Shader original) {
+        return bindlessCache.variant(original);
+    }
+
+    @Override
+    public int setTextureParameter(int unit, Texture texture, Uniform uniform, boolean bindless) throws TextureUnitException {
+        if (bindless && caps.contains(Caps.BindlessTextures) && bindlessCache.supports(uniform)) {
+            long handle = bindlessCache.acquire(texture);
+            if (handle != 0) {
+                uniform.setTextureHandle(handle);
+                return unit;
+            }
+        }
+        setTexture(unit, texture);
+        uniform.setValue(VarType.Int, unit);
+        return unit + 1;
+    }
+
+    @Override
+    public int getBindlessTextureCount() {
+        return bindlessCache.count();
+    }
+
+    @Override
+    public long getBindlessTextureBytes() {
+        return bindlessCache.bytes();
+    }
+
     private boolean linearizeSrgbImages;
     private boolean mainFrameBufferSrgb;
     private HashSet<String> extensions;
     private boolean generateMipmapsForFramebuffers = true;
 
     private final GL gl;
+    private BufferObject indirectCommands;
+    private IndirectDrawStatistics indirectStatistics;
+    private boolean profilingActive;
+    private final java.util.Set<Integer> profilingQueries = new java.util.HashSet<>();
+    private final java.util.Set<GLBufferReadback> bufferReadbacks = new java.util.HashSet<>();
+    private long indirectOffset;
+    private BufferObject indirectCountBuffer;
+    private BufferObject statisticsCommands;
+    private int indirectDrawCount = 1;
+    private int[] indirectVertexCounts;
+
     private final GL2 gl2;
     private final GL3 gl3;
     private final GL4 gl4;
@@ -251,6 +293,7 @@ public final class GLRenderer implements Renderer {
     }
 
     
+
 
     @Override
     public Statistics getStatistics() {
@@ -464,6 +507,12 @@ public final class GLRenderer implements Renderer {
 
     private void loadCapabilitiesCommon() {
         extensions = loadExtensions();
+        if (gl4 != null && hasExtension("GL_ARB_indirect_parameters")) {
+            caps.add(Caps.IndirectDrawCount);
+        }
+        if (gl4 != null && hasExtension("GL_ARB_bindless_texture")) {
+            caps.add(Caps.BindlessTextures);
+        }
 
         limits.put(Limits.VertexTextureUnits, getInteger(GL.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS));
         if (limits.get(Limits.VertexTextureUnits) > 0) {
@@ -471,6 +520,10 @@ public final class GLRenderer implements Renderer {
         }
 
         limits.put(Limits.FragmentTextureUnits, getInteger(GL.GL_MAX_TEXTURE_IMAGE_UNITS));
+        int combinedTextureUnits = getInteger(GL.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS);
+        if (combinedTextureUnits > 0) {
+            context.boundTextures = java.util.Arrays.copyOf(context.boundTextures, combinedTextureUnits);
+        }
 
         if (caps.contains(Caps.OpenGLES20)) {
             limits.put(Limits.FragmentUniformVectors, getInteger(GL.GL_MAX_FRAGMENT_UNIFORM_VECTORS));
@@ -1039,6 +1092,16 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public void resetGLObjects() {
+        bindlessCache.close(true);
+        profilingActive = false;
+        profilingQueries.clear();
+        for (GLBufferReadback request : new java.util.ArrayList<>(bufferReadbacks)) {
+            request.invalidate();
+        }
+        if (indirectStatistics != null) {
+            indirectStatistics.close(true);
+            indirectStatistics = null;
+        }
         logger.log(Level.FINE, "Resetting objects and invalidating state");
         objManager.resetObjects();
         for (IntMap.Entry<FrameBufferState> entry : frameBufferStates) {
@@ -1054,6 +1117,20 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public void cleanup() {
+        bindlessCache.close(false);
+        if (profilingActive) {
+            stopProfiling();
+        }
+        for (int query : new java.util.ArrayList<>(profilingQueries)) {
+            deleteProfilingTasks(query);
+        }
+        for (GLBufferReadback request : new java.util.ArrayList<>(bufferReadbacks)) {
+            request.close();
+        }
+        if (indirectStatistics != null) {
+            indirectStatistics.close(false);
+            indirectStatistics = null;
+        }
         logger.log(Level.FINE, "Deleting objects and invalidating state");
         texUtil.cleanup();
         objManager.deleteAllObjects(this);
@@ -1549,6 +1626,14 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public void postFrame() {
+        bindlessCache.endFrame();
+        if (indirectStatistics != null) {
+            indirectStatistics.endFrame();
+            if (!statistics.isEnabled()) {
+                indirectStatistics.close(false);
+                indirectStatistics = null;
+            }
+        }
         objManager.deleteUnused(this);
         gl.resetStats();
     }
@@ -1650,6 +1735,10 @@ public final class GLRenderer implements Renderer {
         statistics.onUniformSet();
 
         uniform.clearUpdateNeeded();
+        if (uniform.hasTextureHandle()) {
+            gl4.glUniformTextureHandle(loc, uniform.getTextureHandle());
+            return;
+        }
         FloatBuffer fb;
         IntBuffer ib;
         switch (uniform.getVarType()) {
@@ -1852,6 +1941,11 @@ public final class GLRenderer implements Renderer {
 
     public int convertShaderType(ShaderType type) {
         switch (type) {
+            case Compute:
+                if (!caps.contains(Caps.OpenGL43)) {
+                    throw new UnsupportedOperationException("Compute requires OpenGL 4.3");
+                }
+                return GL4.GL_COMPUTE_SHADER;
             case Fragment:
                 return GL.GL_FRAGMENT_SHADER;
             case Vertex:
@@ -2081,6 +2175,34 @@ public final class GLRenderer implements Renderer {
             updateShaderBufferBlocks(shader);
             bindProgram(shader);
         }
+    }
+
+    @Override
+    public void dispatchCompute(int x, int y, int z) {
+        if (!caps.contains(Caps.OpenGL43) || gl4 == null) {
+            throw new UnsupportedOperationException("Compute requires OpenGL 4.3");
+        }
+        if (x < 1 || y < 1 || z < 1 || x > 65535 || y > 65535 || z > 65535) {
+            throw new IllegalArgumentException("Compute group counts outside portable limits");
+        }
+        gl4.glDispatchCompute(x, y, z);
+        gl4.glMemoryBarrier(GL4.GL_SHADER_STORAGE_BARRIER_BIT);
+    }
+
+    @Override
+    public void memoryBarrier(int barriers) {
+        if (barriers == 0) {
+            return;
+        }
+        if (!caps.contains(Caps.OpenGL43) || gl4 == null) {
+            throw new UnsupportedOperationException("Graph storage barriers require OpenGL 4.3");
+        }
+        gl4.glMemoryBarrier(barriers);
+    }
+
+    @Override
+    public int getCurrentFrameBufferSamples() {
+        return Math.max(1, getInteger(0x80A9)); // GL_SAMPLES
     }
 
     @Override
@@ -2335,6 +2457,7 @@ public final class GLRenderer implements Renderer {
 
     private void updateRenderTextureInternal(FrameBuffer fb, RenderBuffer rb) {
         Texture tex = rb.getTexture();
+        bindlessCache.renderTarget(tex.getImage());
         Image image = tex.getImage();
         if (image.isUpdateNeeded()) {
             // Check NPOT requirements
@@ -3406,7 +3529,7 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public void setTexture(int unit, Texture tex) throws TextureUnitException {
-        if (unit < 0 || unit >= RenderContext.maxTextureUnits) {
+        if (unit < 0 || unit >= context.boundTextures.length) {
             throw new TextureUnitException();
         }
         
@@ -3443,7 +3566,7 @@ public final class GLRenderer implements Renderer {
     
     @Override
     public void setTextureImage(int unit, TextureImage tex) throws TextureUnitException {
-        if (unit < 0 || unit >= RenderContext.maxTextureUnits) {
+        if (unit < 0 || unit >= context.boundTextures.length) {
             throw new TextureUnitException();
         }
         WeakReference<Image> ref = context.boundTextures[unit];
@@ -3498,6 +3621,7 @@ public final class GLRenderer implements Renderer {
     @Deprecated
     @Override
     public void modifyTexture(Texture tex, Image pixels, int x, int y) {
+        bindlessCache.renderTarget(tex.getImage());
         final int textureUnitIndex = 0;
         try {
             setTexture(textureUnitIndex, tex);
@@ -3527,6 +3651,7 @@ public final class GLRenderer implements Renderer {
      */
     public void modifyTexture(Texture2D dest, Image src, int destX, int destY,
             int srcX, int srcY, int areaW, int areaH) {
+        bindlessCache.renderTarget(dest.getImage());
         final int textureUnitIndex = 0;
         try {
             setTexture(textureUnitIndex, dest);
@@ -3541,6 +3666,34 @@ public final class GLRenderer implements Renderer {
         bindTextureAndUnit(target, dest.getImage(), textureUnitIndex);
         texUtil.uploadSubTexture(target, src, 0, destX, destY,
                 srcX, srcY, areaW, areaH, linearizeSrgbImages, dest.getImage().getColorSpace());
+    }
+
+    @Override
+    public void updateTexture3DRegion(com.jme3.texture.Texture3D texture,
+            int x, int y, int z, int width, int height, int depth, ByteBuffer pixels) {
+        if (gl2 == null) {
+            throw new UnsupportedOperationException("3D region uploads unavailable");
+        }
+        Image image = texture.getImage();
+        bindlessCache.renderTarget(image);
+        if (image.getFormat() != Image.Format.R32F || image.hasMipmaps()
+                || texture.getMinFilter().usesMipMapLevels()) {
+            throw new UnsupportedOperationException("Requires non-mipmapped R32F texture");
+        }
+        if (x < 0 || y < 0 || z < 0 || width <= 0 || height <= 0 || depth <= 0
+                || (long) x + width > image.getWidth() || (long) y + height > image.getHeight()
+                || (long) z + depth > image.getDepth() || !pixels.isDirect()
+                || pixels.remaining() != (long) width * height * depth * 4) {
+            throw new IllegalArgumentException("Invalid volume region or packed buffer");
+        }
+        try {
+            setTexture(0, texture);
+        } catch (TextureUnitException exception) {
+            throw new RendererException(exception);
+        }
+        gl.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 4);
+        gl2.glTexSubImage3D(GL2.GL_TEXTURE_3D, 0, x, y, z, width, height, depth,
+                GL.GL_RED, GL.GL_FLOAT, pixels);
     }
 
     @Override
@@ -3766,6 +3919,40 @@ public final class GLRenderer implements Renderer {
             }
         }
         bo.clearUpdateNeeded();
+    }
+
+    @Override
+    public void readBufferData(BufferObject buffer, long byteOffset, ByteBuffer destination) {
+        if (buffer == null || destination == null || byteOffset < 0
+                || !destination.isDirect() || destination.isReadOnly()) {
+            throw new IllegalArgumentException("Readback requires a direct writable buffer and non-negative offset");
+        }
+        if (gl3 == null || !caps.contains(Caps.OpenGL31)
+               ) {
+            throw new UnsupportedOperationException("GPU buffer readback is unavailable");
+        }
+        if (buffer.getId() < 0) {
+            throw new IllegalArgumentException("Cannot read an unallocated GPU buffer");
+        }
+        // COPY_READ_BUFFER has independent binding state; indexed SSBO/UBO bindings are untouched.
+        final int copyReadBuffer = 0x8F36;
+        final int bufferSize = 0x8764;
+        int previous = getInteger(copyReadBuffer);
+        try {
+            gl.glBindBuffer(copyReadBuffer, buffer.getId());
+            long size = gl3.glGetBufferParameter(copyReadBuffer, bufferSize);
+            if (byteOffset > size || destination.remaining() > size - byteOffset) {
+                throw new IllegalArgumentException("Readback range exceeds GPU buffer storage");
+            }
+            if (destination.hasRemaining()) {
+                if (caps.contains(Caps.OpenGL43)) {
+                    memoryBarrier(0x200); // BUFFER_UPDATE: also safe outside a FrameGraph.
+                }
+                gl.glGetBufferSubData(copyReadBuffer, byteOffset, destination.duplicate());
+            }
+        } finally {
+            gl.glBindBuffer(copyReadBuffer, previous);
+        }
     }
 
     @Override
@@ -4026,6 +4213,19 @@ public final class GLRenderer implements Renderer {
             //statistics.onVertexBufferUse(indexBuf, true);
         }
 
+        if (indirectCommands != null) {
+            if (indirectCountBuffer != null) {
+                gl4.glMultiDrawElementsIndirectCount(convertElementMode(mesh.getMode()),
+                        convertFormat(indexBuf.getFormat()), indirectOffset, 0, indirectDrawCount, 20);
+            } else if (indirectDrawCount > 1) {
+                gl4.glMultiDrawElementsIndirect(convertElementMode(mesh.getMode()),
+                        convertFormat(indexBuf.getFormat()), indirectOffset, indirectDrawCount, 20);
+            } else {
+                gl4.glDrawElementsIndirect(convertElementMode(mesh.getMode()),
+                        convertFormat(indexBuf.getFormat()), indirectOffset);
+            }
+            return;
+        }
         int vertCount = mesh.getVertexCount();
         boolean useInstancing = count > 1 && caps.contains(Caps.MeshInstancing);
 
@@ -4202,6 +4402,120 @@ public final class GLRenderer implements Renderer {
     }
 
     @Override
+    public long getTextureHandle(Texture texture) {
+        if (!caps.contains(Caps.BindlessTextures)) {
+            throw new UnsupportedOperationException("Bindless textures unavailable");
+        }
+        try {
+            setTexture(0, texture);
+        } catch (TextureUnitException exception) {
+            throw new RendererException(exception);
+        }
+        return gl4.glGetTextureHandle(texture.getImage().getId());
+    }
+
+    @Override
+    public void setTextureHandleResident(long handle, boolean resident) {
+        if (!caps.contains(Caps.BindlessTextures)) {
+            throw new UnsupportedOperationException("Bindless textures unavailable");
+        }
+        gl4.glTextureHandleResident(handle, resident);
+    }
+
+
+    @Override
+    public void renderMeshIndirect(Mesh mesh, int lod, BufferObject commands, long byteOffset) {
+        renderMeshIndirect(mesh, lod, commands, byteOffset, null);
+    }
+
+    @Override
+    public void renderMeshIndirect(Mesh mesh, int lod, BufferObject commands, long byteOffset, VertexBuffer[] instanceData) {
+        if (!caps.contains(Caps.OpenGL43) || gl4 == null) {
+            throw new UnsupportedOperationException("Indirect rendering requires OpenGL 4.3");
+        }
+        if (commands == null || byteOffset < 0 || (byteOffset & 3) != 0
+                || mesh.getMode() != Mode.Triangles || indirectCommands != null) {
+            throw new IllegalArgumentException("Invalid indexed indirect draw");
+        }
+        VertexBuffer indices = mesh.getNumLodLevels() > 0 ? mesh.getLodLevel(lod) : mesh.getBuffer(Type.Index);
+        if (indices == null) {
+            throw new IllegalArgumentException("Indirect draw requires indices");
+        }
+        if (commands.isUpdateNeeded() || commands.getId() < 0) {
+            updateShaderStorageBufferObjectData(commands);
+        }
+        indirectCommands = commands;
+        indirectOffset = byteOffset;
+        gl.glBindBuffer(0x8F3F, commands.getId()); // GL_DRAW_INDIRECT_BUFFER
+        try {
+            renderMesh(mesh, lod, 1, instanceData);
+        } finally {
+            indirectCommands = null;
+            gl.glBindBuffer(0x8F3F, 0);
+        }
+    }
+
+    @Override
+    public void renderMeshCompactedIndirect(Mesh mesh, BufferObject compacted,
+            BufferObject count, BufferObject original, int maxDraws,
+            VertexBuffer[] attributes, int[] sourceVertexCounts) {
+        if (!caps.contains(Caps.IndirectDrawCount)) {
+            renderMeshMultiDrawIndirect(mesh, original, 0, maxDraws, attributes, sourceVertexCounts);
+            return;
+        }
+        if (indirectCommands != null) {
+            throw new IllegalArgumentException("Nested indirect submission");
+        }
+        if (count.isUpdateNeeded()) {
+            updateShaderStorageBufferObjectData(count);
+        }
+        indirectCountBuffer = count;
+        statisticsCommands = original;
+        gl.glBindBuffer(0x80EE, count.getId()); // PARAMETER_BUFFER_ARB
+        try {
+            renderMeshMultiDrawIndirect(mesh, compacted, 0, maxDraws, attributes, sourceVertexCounts);
+        } finally {
+            indirectCountBuffer = null;
+            statisticsCommands = null;
+            gl.glBindBuffer(0x80EE, 0);
+        }
+    }
+
+    @Override
+    public void renderMeshMultiDrawIndirect(Mesh mesh, BufferObject commands, long byteOffset,
+            int drawCount, VertexBuffer[] instanceData) {
+        if (drawCount < 0 || indirectCommands != null) {
+            throw new IllegalArgumentException("Invalid multi-draw count or nested submission");
+        }
+        if (drawCount == 0) {
+            return;
+        }
+        indirectDrawCount = drawCount;
+        try {
+            renderMeshIndirect(mesh, 0, commands, byteOffset, instanceData);
+        } finally {
+            indirectDrawCount = 1;
+        }
+    }
+
+    @Override
+    public void renderMeshMultiDrawIndirect(Mesh mesh, BufferObject commands, long byteOffset,
+            int drawCount, VertexBuffer[] instanceData, int[] sourceVertexCounts) {
+        if (sourceVertexCounts != null && sourceVertexCounts.length != drawCount) {
+            throw new IllegalArgumentException("One vertex count per command required");
+        }
+        if (indirectCommands != null) {
+            throw new IllegalArgumentException("Nested indirect draw");
+        }
+        indirectVertexCounts = sourceVertexCounts;
+        try {
+            renderMeshMultiDrawIndirect(mesh, commands, byteOffset, drawCount, instanceData);
+        } finally {
+            indirectVertexCounts = null;
+        }
+    }
+
+    @Override
     public void renderMesh(Mesh mesh, int lod, int count, VertexBuffer[] instanceData) {
         if (mesh.getVertexCount() == 0 || mesh.getTriangleCount() == 0 || count == 0) {
             return;
@@ -4220,7 +4534,19 @@ public final class GLRenderer implements Renderer {
         if (gl4 != null && mesh.getMode().equals(Mode.Patch)) {
             gl4.glPatchParameter(mesh.getPatchVertexCount());
         }
-        statistics.onMeshDrawn(mesh, lod, instanceCount);
+        if (indirectCommands == null) {
+            statistics.onMeshDrawn(mesh, lod, instanceCount);
+        } else {
+            statistics.onIndirectMeshDrawn();
+            if (statistics.isEnabled()) {
+                if (indirectStatistics == null) {
+                    indirectStatistics = new IndirectDrawStatistics(gl, gl3, glext, statistics);
+                }
+                memoryBarrier(0x200); // BUFFER_UPDATE: command writes must be visible to the GPU copy.
+                indirectStatistics.recordRange(statisticsCommands == null ? indirectCommands.getId() : statisticsCommands.getId(), indirectOffset,
+                        indirectDrawCount, mesh.getVertexCount(), indirectVertexCounts);
+            }
+        }
 //        if (ctxCaps.GL_ARB_vertex_array_object){
 //            renderMeshVertexArray(mesh, lod, count);
 //        }else{
@@ -4260,7 +4586,38 @@ public final class GLRenderer implements Renderer {
         }
         IntBuffer ids = BufferUtils.createIntBuffer(numTasks);
         gl.glGenQueries(numTasks, ids);
-        return BufferUtils.getIntArray(ids);
+        int[] tasks = BufferUtils.getIntArray(ids);
+        for (int task : tasks) {
+            profilingQueries.add(task);
+        }
+        return tasks;
+    }
+
+    @Override
+    public void deleteProfilingTasks(int... taskIds) {
+        for (int id : taskIds) {
+            // Renderer cleanup owns final deletion while the context is current.
+            // Application/pipeline cleanup may run later on the LWJGL 2 display path.
+            if (profilingQueries.remove(id)) {
+                intBuf1.clear();
+                intBuf1.put(id).flip();
+                gl3.glDeleteQueries(intBuf1);
+            }
+        }
+    }
+
+    @Override
+    public com.jme3.renderer.BufferReadback requestBufferReadback(BufferObject source, long offset, int size) {
+        if (!caps.contains(Caps.OpenGL43)) {
+            throw new UnsupportedOperationException("Asynchronous snapshots require OpenGL 4.3");
+        }
+        if (source == null || source.getId() < 0 || offset < 0 || size <= 0) {
+            throw new IllegalArgumentException("Invalid GPU snapshot source/range");
+        }
+        memoryBarrier(0x200);
+        GLBufferReadback request = new GLBufferReadback(gl, gl3, glext, source.getId(), offset, size, bufferReadbacks);
+        bufferReadbacks.add(request);
+        return request;
     }
 
     @Override
@@ -4268,7 +4625,11 @@ public final class GLRenderer implements Renderer {
         if (!caps.contains(Caps.GpuTimerQuery)) {
             throw new RendererException("GPU timer queries are not supported by the current renderer");
         }
+        if (profilingActive) {
+            throw new IllegalStateException("Elapsed-time queries cannot be nested");
+        }
         gl.glBeginQuery(GL.GL_TIME_ELAPSED, taskId);
+        profilingActive = true;
     }
 
     @Override
@@ -4276,7 +4637,15 @@ public final class GLRenderer implements Renderer {
         if (!caps.contains(Caps.GpuTimerQuery)) {
             throw new RendererException("GPU timer queries are not supported by the current renderer");
         }
+        if (profilingActive) {
         gl.glEndQuery(GL.GL_TIME_ELAPSED);
+            profilingActive = false;
+        }
+    }
+
+    @Override
+    public boolean isProfilingActive() {
+        return profilingActive;
     }
 
     @Override

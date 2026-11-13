@@ -106,6 +106,23 @@ public class SSAOFilter extends Filter {
         return true;
     }
 
+    /** Registers the pre-render geometry passes in the shared viewport graph. */
+    @Override
+    public void appendPostQueuePasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
+        if (!approximateNormals) {
+            graph.addPass("PreNormalPass/Prepare", context -> {
+                renderManager.getRenderer().setFrameBuffer(normalPass.getRenderFrameBuffer());
+                renderManager.getRenderer().clearBuffers(true, true, true);
+                renderManager.setForcedTechnique("PreNormalPass");
+            }).sideEffect();
+            renderManager.appendQueuePasses(graph, viewPort, false);
+            graph.addPass("PreNormalPass/Restore", context -> {
+                renderManager.setForcedTechnique(null);
+                renderManager.getRenderer().setFrameBuffer(viewPort.getOutputFrameBuffer());
+            }).sideEffect();
+        }
+    }
+
     @Override
     protected void postQueue(RenderQueue queue) {
         if(!approximateNormals) {

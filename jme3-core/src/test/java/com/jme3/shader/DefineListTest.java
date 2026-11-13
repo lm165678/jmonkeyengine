@@ -41,6 +41,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class DefineListTest {
 
+    @Test
+    public void testMoreThan64Defines() {
+        DefineList original = new DefineList(140);
+        original.set(0, 1);
+        original.set(64, 2);
+        original.set(139, 3);
+        DefineList clone = original.deepClone();
+        assertEquals(original, clone);
+        assertEquals(original.hashCode(), clone.hashCode());
+        clone.unset(64);
+        assertTrue(clone.isSet(0));
+        assertTrue(clone.isSet(139));
+        assertFalse(clone.isSet(64));
+        assertTrue(original.isSet(64));
+        assertFalse(original.equals(clone));
+        clone.clear();
+        assertFalse(clone.isSet(139));
+        assertFalse(original.equals(new DefineList(1)));
+        assertFalse(original.equals(null));
+    }
+
     private static final List<String> DEFINE_NAMES = Arrays.asList("BOOL_VAR", "INT_VAR", "FLOAT_VAR");
     private static final List<VarType> DEFINE_TYPES = Arrays.asList(VarType.Boolean, VarType.Int, VarType.Float);
     private static final int NUM_DEFINES = DEFINE_NAMES.size();

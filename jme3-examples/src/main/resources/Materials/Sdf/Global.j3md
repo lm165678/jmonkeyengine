@@ -1,0 +1,23 @@
+MaterialDef Global Distance Field Preview {
+    MaterialParameters {
+        Texture3D Field0
+        Texture3D Field1
+        Texture3D Field2
+        Vector3 Min0
+        Vector3 Min1
+        Vector3 Min2
+        Vector3 Cells
+        Float Resolution
+        Matrix4 ClipToWorld
+        Boolean CascadeColors
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Post/FrameGraphFullscreen.vert
+        FragmentShader GLSL150: Materials/Sdf/Global.frag
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

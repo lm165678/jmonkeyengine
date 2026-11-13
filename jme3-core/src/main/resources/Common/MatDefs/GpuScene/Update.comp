@@ -1,0 +1,32 @@
+// Scatter only changed instance records into persistent scene storage.
+// Each update is 21 floats: exact integer instance index, column-major matrix,
+// then world-space bounding sphere. Float indices are exact up to 2^24 entries.
+layout(local_size_x = 64) in;
+struct Instance {
+    mat4 world;
+    vec4 sphere;
+};
+layout(std430) buffer m_Instances {
+    Instance instances[];
+};
+layout(std430) readonly buffer m_Updates {
+    float updates[];
+};
+uniform int m_UpdateCount;
+
+void main() {
+    uint update = gl_GlobalInvocationID.x;
+    if (update >= uint(m_UpdateCount)) {
+        return;
+    }
+    uint start = update * 21u;
+    uint index = uint(updates[start]);
+    for (uint column = 0u; column < 4u; column++) {
+        uint p = start + 1u + column * 4u;
+        instances[index].world[column] = vec4(updates[p], updates[p + 1u],
+                updates[p + 2u], updates[p + 3u]);
+    }
+    uint p = start + 17u;
+    instances[index].sphere = vec4(updates[p], updates[p + 1u],
+            updates[p + 2u], updates[p + 3u]);
+}

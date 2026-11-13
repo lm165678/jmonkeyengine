@@ -34,7 +34,7 @@ MaterialDef Phong Lighting Deferred {
     }
 
     Technique {
-        LightMode MultiPass
+        LightModel MultiPass
 
         VertexShader   GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/Deferred.vert
         FragmentShader GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Deferred.frag

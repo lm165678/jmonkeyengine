@@ -4,6 +4,9 @@
 #import "Common/ShaderLib/MorphAnim.glsllib"
 
 attribute vec3 inPosition;
+#ifdef SURFACE_CAPTURE
+varying vec3 capturePosition;
+#endif
 
 #if defined(HAS_COLORMAP) || (defined(HAS_LIGHTMAP) && !defined(SEPARATE_TEXCOORD))
     #define NEED_TEXCOORD1
@@ -48,5 +51,8 @@ void main(){
         Skinning_Compute(modelSpacePos);
     #endif
 
+    #ifdef SURFACE_CAPTURE
+        capturePosition = TransformWorld(modelSpacePos).xyz;
+    #endif
     gl_Position = TransformWorldViewProjection(modelSpacePos);
 }

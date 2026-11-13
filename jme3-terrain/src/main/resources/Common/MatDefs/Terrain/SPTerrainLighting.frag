@@ -1,4 +1,5 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/DeferredSurface.glsllib"
 #import "Common/ShaderLib/BlinnPhongLighting.glsllib"
 #import "Common/ShaderLib/Lighting.glsllib"
 
@@ -639,6 +640,17 @@ void main(){
     //-----------------------
     // lighting calculations
     //-----------------------
+#ifdef DEFERRED_GBUFFER
+    vec3 viewNormal = normal;
+#if defined(NORMALMAP) || defined(NORMALMAP_1) || defined(NORMALMAP_2) || defined(NORMALMAP_3) || defined(NORMALMAP_4) || defined(NORMALMAP_5) || defined(NORMALMAP_6) || defined(NORMALMAP_7) || defined(NORMALMAP_8) || defined(NORMALMAP_9) || defined(NORMALMAP_10) || defined(NORMALMAP_11)
+    viewNormal = tbnMat * normal;
+#endif
+    vec3 worldNormal = normalize(transpose(mat3(g_ViewMatrix)) * viewNormal);
+    writeDeferredSurface(DiffuseSum.rgb * diffuseColor.rgb,
+        worldNormal, m_Shininess, SpecularSum.rgb, AmbientSum.rgb * diffuseColor.rgb,
+        diffuseColor.a, vec3(0.0), 0.0, m_DeferredShadingId);
+    return;
+#endif
     gl_FragColor = AmbientSum * diffuseColor;
     for( int i = 0;i < NB_LIGHTS; i+=3){
         #if (defined(GL_ES) && __VERSION__ >= 300) || (!defined(GL_ES) && __VERSION__ >= 150)

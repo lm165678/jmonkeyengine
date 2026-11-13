@@ -39,6 +39,47 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.*;
 
 public class Uniform extends ShaderVariable {
+    private boolean bindlessSampler;
+
+    /** Renderer shader-variant metadata; independent of the mutable uniform value. */
+    public void setBindlessSampler(boolean supported) {
+        bindlessSampler = supported;
+    }
+
+    /** @return whether this shader declaration was compiled for handle assignments */
+    public boolean isBindlessSampler() {
+        return bindlessSampler;
+    }
+
+    private long textureHandle;
+    private boolean textureHandleSet;
+
+    /**
+     * Renderer-managed resident sampler handle. Internal material binding API;
+     * application code should use Material.setBindlessTextures instead. The
+     * renderer owns residency, and a subsequent Int assignment restores unit binding.
+     * @param handle nonzero resident texture handle
+     */
+    public void setTextureHandle(long handle) {
+        if (handle == 0) {
+            throw new IllegalArgumentException("Nonzero resident handle required");
+        }
+        setValue(VarType.Int, 0);
+        textureHandleSet = true;
+        textureHandle = handle;
+        updateNeeded = true;
+    }
+
+    /** @return whether this uniform uses a resident handle rather than a texture unit */
+    public boolean hasTextureHandle() {
+        return textureHandleSet;
+    }
+
+    /** @return renderer-owned resident handle; valid only when hasTextureHandle is true */
+    public long getTextureHandle() {
+        return textureHandle;
+    }
+
 
     private static final Integer ZERO_INT = 0;
     private static final Float ZERO_FLT = Float.valueOf(0);
@@ -141,6 +182,7 @@ public class Uniform extends ShaderVariable {
     }
 
     public void clearValue(){
+        textureHandleSet = false;
         updateNeeded = true;
 
         if (multiData != null){
@@ -153,7 +195,11 @@ public class Uniform extends ShaderVariable {
             }
 
             multiData.clear();
-
+            // Matrix equality must describe the uploaded data, which is now zero.
+            // Otherwise A(matrix) -> B(no matrix) -> A(same matrix) keeps zeros.
+            if (varType == VarType.Matrix3 || varType == VarType.Matrix4) {
+                value = null;
+            }
             return;
         }
 
@@ -200,6 +246,10 @@ public class Uniform extends ShaderVariable {
 
     public void setValue(VarType type, Object value) {
         assert !(value instanceof BindUnits);
+        if (textureHandleSet) {
+            textureHandleSet = false;
+            updateNeeded = true;
+        }
         if (location == LOC_NOT_DEFINED) {
             return;
         }
@@ -256,6 +306,7 @@ public class Uniform extends ShaderVariable {
                     ((IntBuffer)this.value).put(ia);
                 }
                 ((IntBuffer)this.value).clear();
+                ((IntBuffer)this.value).put(ia).flip();
                 break;
             case FloatArray:
                 float[] fa = (float[]) value;
@@ -263,9 +314,9 @@ public class Uniform extends ShaderVariable {
                     multiData = BufferUtils.createFloatBuffer(fa);
                 } else {
                     multiData = BufferUtils.ensureLargeEnough(multiData, fa.length);
-                    multiData.put(fa);
                 }
                 multiData.clear();
+                multiData.put(fa).flip();
                 break;
             case Vector2Array:
                 Vector2f[] v2a = (Vector2f[]) value;

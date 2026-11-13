@@ -1,7 +1,11 @@
 MaterialDef PBR Lighting {
+    ShadingId 2
 
     MaterialParameters {
         Int BoundDrawBuffer
+        Texture2D DeferredLightData
+        Int DeferredLightCount
+        Int DeferredShadingId
 
         // Alpha threshold for fragment discarding
         Float AlphaDiscardThreshold (AlphaTestFallOff)
@@ -165,7 +169,7 @@ MaterialDef PBR Lighting {
     }
 
     Technique {
-        LightMode SinglePassAndImageBased
+        LightModel SinglePassAndImageBased
         
         VertexShader GLSL300 GLSL150 GLSL110:   Common/MatDefs/Light/PBRLighting.vert
         FragmentShader GLSL300 GLSL150 GLSL110: Common/MatDefs/Light/PBRLighting.frag
@@ -340,4 +344,137 @@ MaterialDef PBR Lighting {
         }
     }
 
+
+    // Deferred path: this technique renders mesh geometry into the GBuffer.
+    // VS: Common/MatDefs/Light/PBRLighting.vert
+    // FS: Common/MatDefs/Light/PBRLighting.frag, compiled with DEFERRED_GBUFFER below.
+    // DeferredPipeline then uses Tiled/Fullscreen.vert + Tiled/Lighting.frag.
+    // The shared lighting FS reads shadingId 2 and evaluates PBR direct lighting; probe/IBL and emissive terms are evaluated in the surface pass.
+    // Built-in direct-light branches are in that shared FS; this material does not
+    // declare a separate DeferredLightingShader. Custom models use that declaration
+    // to contribute a deferredLighting(...) function to the shared lighting FS.
+    Technique GBuffer {
+        LightModel DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/PBRLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/PBRLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            CameraPosition
+            WorldMatrix
+            WorldNormalMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            BASECOLORMAP : BaseColorMap
+            NORMALMAP : NormalMap
+            NORMALSCALE : NormalScale
+            METALLICMAP : MetallicMap
+            ROUGHNESSMAP : RoughnessMap
+            EMISSIVEMAP : EmissiveMap
+            EMISSIVE : Emissive
+            SPECGLOSSPIPELINE : UseSpecGloss
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            NUM_BONES : NumberOfBones
+            INSTANCING : UseInstancing
+            USE_PACKED_MR: MetallicRoughnessMap
+            USE_PACKED_SG: SpecularGlossinessMap
+            SPECULARMAP : SpecularMap
+            SPECULAR_AA : UseSpecularAA
+            SPECULAR_AA_SCREEN_SPACE_VARIANCE : SpecularAASigma
+            SPECULAR_AA_THRESHOLD : SpecularAAKappa
+            GLOSSINESSMAP : GlossinessMap
+            NORMAL_TYPE: NormalType
+            VERTEX_COLOR : UseVertexColor
+            AO_MAP: LightMapAsAOMap
+            AO_PACKED_IN_MR_MAP : AoPackedInMRMap
+            AO_STRENGTH : AoStrength
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+            HORIZON_FADE: HorizonFade
+            EXPOSUREMAP : SunLightExposureMap
+            USE_VERTEX_COLORS_AS_SUN_INTENSITY : UseVertexColorsAsSunIntensity
+            STATIC_SUN_INTENSITY : StaticSunIntensity
+            BRIGHTEN_INDOOR_SHADOWS : BrightenIndoorShadows
+            DEBUG_VALUES_MODE : DebugValuesMode
+            USE_FOG : UseFog
+            FOG_LINEAR : LinearFog
+            FOG_EXP : ExpFog
+            FOG_EXPSQ : ExpSqFog
+            HSV_OFFSET : HSVOffset
+        }
+    }
+    // Static surface attributes only; no scene lighting or fog is captured.
+    Technique SurfaceCapture {
+        LightModel DeferredSurface
+
+        VertexShader GLSL330:   Common/MatDefs/Light/PBRLighting.vert
+        FragmentShader GLSL330: Common/MatDefs/Light/PBRLighting.frag
+
+        WorldParameters {
+            WorldViewProjectionMatrix
+            CameraPosition
+            WorldMatrix
+            WorldNormalMatrix
+            ViewProjectionMatrix
+            ViewMatrix
+        }
+
+        Defines {
+            DEFERRED_GBUFFER
+            SURFACE_CAPTURE
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            BASECOLORMAP : BaseColorMap
+            NORMALMAP : NormalMap
+            NORMALSCALE : NormalScale
+            METALLICMAP : MetallicMap
+            ROUGHNESSMAP : RoughnessMap
+            EMISSIVEMAP : EmissiveMap
+            EMISSIVE : Emissive
+            SPECGLOSSPIPELINE : UseSpecGloss
+            PARALLAXMAP : ParallaxMap
+            NORMALMAP_PARALLAX : PackedNormalParallax
+            STEEP_PARALLAX : SteepParallax
+            LIGHTMAP : LightMap
+            SEPARATE_TEXCOORD : SeparateTexCoord
+            DISCARD_ALPHA : AlphaDiscardThreshold
+            NUM_BONES : NumberOfBones
+            INSTANCING : UseInstancing
+            USE_PACKED_MR: MetallicRoughnessMap
+            USE_PACKED_SG: SpecularGlossinessMap
+            SPECULARMAP : SpecularMap
+            SPECULAR_AA : UseSpecularAA
+            SPECULAR_AA_SCREEN_SPACE_VARIANCE : SpecularAASigma
+            SPECULAR_AA_THRESHOLD : SpecularAAKappa
+            GLOSSINESSMAP : GlossinessMap
+            NORMAL_TYPE: NormalType
+            VERTEX_COLOR : UseVertexColor
+            AO_MAP: LightMapAsAOMap
+            AO_PACKED_IN_MR_MAP : AoPackedInMRMap
+            AO_STRENGTH : AoStrength
+            NUM_MORPH_TARGETS: NumberOfMorphTargets
+            NUM_TARGETS_BUFFERS: NumberOfTargetsBuffers
+            HORIZON_FADE: HorizonFade
+            EXPOSUREMAP : SunLightExposureMap
+            USE_VERTEX_COLORS_AS_SUN_INTENSITY : UseVertexColorsAsSunIntensity
+            STATIC_SUN_INTENSITY : StaticSunIntensity
+            BRIGHTEN_INDOOR_SHADOWS : BrightenIndoorShadows
+            DEBUG_VALUES_MODE : DebugValuesMode
+            USE_FOG : UseFog
+            FOG_LINEAR : LinearFog
+            FOG_EXP : ExpFog
+            FOG_EXPSQ : ExpSqFog
+            HSV_OFFSET : HSVOffset
+        }
+    }
 }
