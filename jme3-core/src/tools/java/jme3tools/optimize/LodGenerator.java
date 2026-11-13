@@ -187,6 +187,7 @@ public class LodGenerator {
         Set<Triangle> triangles = new HashSet<Triangle>();
         Vertex collapseTo;
         boolean isSeam;
+        boolean collapsed;
         int index;//index in the buffer for debugging
 
         @Override
@@ -410,6 +411,9 @@ public class LodGenerator {
     }
     
     float computeEdgeCollapseCost(Vertex src, Edge dstEdge) {
+        if (src.collapsed || dstEdge.destination.collapsed) {
+            return NEVER_COLLAPSE_COST;
+        }
         // This is based on Ogre's collapse cost calculation algorithm.
 
         Vertex dest = dstEdge.destination;
@@ -571,11 +575,9 @@ public class LodGenerator {
                         if (!collapse(v)) {
                             logger.log(Level.FINE, "Couldn''t collapse vertex{0}", v.index);
                         }
-                        Iterator<Vertex> it2 = collapseCostSet.iterator();
-                        if (it2.hasNext()) {
-                            it2.next();
-                            it2.remove();// Remove src from collapse costs.
-                        }
+                        // Collapse updates neighboring costs and can reorder the list.
+                        // Remove the actual source, not whichever vertex is now first.
+                        collapseCostSet.remove(v);
                         
                     } else {
                         break;
@@ -589,7 +591,9 @@ public class LodGenerator {
             boolean outSkipped = (lastBakeVertexCount == tricount);
             if (!outSkipped) {
                 lastBakeVertexCount = tricount;
-                lods[curLod + 1] = makeLod(mesh);
+                // Reductions may plateau before a later level collapses again.
+                // Keep successful levels contiguous so skipped levels never serialize as null.
+                lods[numBakedLods] = makeLod(mesh);
                 numBakedLods++;
             }
         }
@@ -844,6 +848,10 @@ public class LodGenerator {
     }
     
     private void updateVertexCollapseCost(Vertex vertex) {
+        if (vertex.collapsed) {
+            collapseCostSet.remove(vertex);
+            return;
+        }
         float collapseCost = UNINITIALIZED_COLLAPSE_COST;
         Vertex collapseTo = null;
         
@@ -968,6 +976,9 @@ public class LodGenerator {
             }
         }
         
+        // Neighbor updates must not reinsert a retired source through stale
+        // adjacency references retained by the collapse optimization.
+        src.collapsed = true;
         if (bestQuality) {
             for (Edge edge : src.edges) {
                 updateVertexCollapseCost(edge.destination);

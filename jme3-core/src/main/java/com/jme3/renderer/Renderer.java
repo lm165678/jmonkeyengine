@@ -190,6 +190,72 @@ public interface Renderer {
      */
     public void setShader(Shader shader);
 
+    /**
+     * Returns a bindless handle for an uploaded texture. Requires BindlessTextures.
+     * Handle extraction freezes texture/sampler parameters on OpenGL: do not change
+     * filters/wrap afterward. Call only on the renderer thread.
+     * <pre>{@code
+     * // 第一步：完成纹理采样参数设置，再申请句柄。
+     * long handle = renderer.getTextureHandle(texture);
+     * // 第二步：驻留后才能把句柄写入 GPU 材质表供 shader 使用。
+     * renderer.setTextureHandleResident(handle, true);
+     * // 第三步：移除所有 GPU 使用者后取消驻留，再释放纹理。
+     * renderer.setTextureHandleResident(handle, false);
+     * // 不支持时保留 GPU Scene，改用常规纹理绑定路径。
+     * }</pre>
+     * @param texture immutable-sampler texture
+     * @return opaque 64-bit handle, not a texture ID
+     */
+    default long getTextureHandle(Texture texture) {
+        throw new UnsupportedOperationException("Bindless textures unavailable");
+    }
+
+    /** @param handle borrowed handle @param resident residency requested on render thread */
+    default void setTextureHandleResident(long handle, boolean resident) {
+        throw new UnsupportedOperationException("Bindless textures unavailable");
+    }
+
+    /**
+     * Draws an indexed mesh from a GPU-produced DrawElementsIndirectCommand.
+     * Requires OpenGL 4.3 in the initial backend. The active shader/material and
+     * render state must already be bound. No command readback occurs.
+     * <pre>{@code
+     * // 第一步：Compute 写入五个 uint：count, instanceCount, firstIndex, baseVertex, baseInstance。
+     * renderer.dispatchCompute(groups, 1, 1);
+     * // 第二步：命令/SSBO 写入对间接绘制和顶点读取可见。
+     * renderer.memoryBarrier(0x2040);
+     * // 第三步：材质/Shader 已绑定后绘制；offset 以字节为单位，必须四字节对齐。
+     * renderer.renderMeshIndirect(mesh, 0, commands, 0);
+     * // 第四步：停止使用后 dispose commands；常规 renderMesh 不受影响。
+     * }</pre>
+     * @param mesh indexed triangle mesh
+     * @param lod index-buffer LOD
+     * @param commands GPU command storage
+     * @param byteOffset command offset
+     */
+    default void renderMeshIndirect(com.jme3.scene.Mesh mesh, int lod,
+            BufferObject commands, long byteOffset) {
+        throw new UnsupportedOperationException("Indirect rendering unavailable");
+    }
+
+    /**
+     * Indirect indexed draw with GPU-produced instance attributes. The attributes
+     * use the material's existing instancing contract; no shading logic is replaced.
+     * @param mesh source mesh
+     * @param lod index-buffer LOD
+     * @param commands GPU command buffer
+     * @param byteOffset byte offset
+     * @param instanceData borrowed vertex attribute views of GPU storage
+     */
+    default void renderMeshIndirect(com.jme3.scene.Mesh mesh, int lod,
+            BufferObject commands, long byteOffset, com.jme3.scene.VertexBuffer[] instanceData) {
+        if (instanceData != null) {
+            throw new UnsupportedOperationException("Indirect instance attributes unavailable");
+        }
+        renderMeshIndirect(mesh, lod, commands, byteOffset);
+    }
+
+
     /** Dispatches the current compute shader and makes SSBO writes visible. */
     default void dispatchCompute(int groupsX, int groupsY, int groupsZ) {
         throw new UnsupportedOperationException("Compute shaders are unavailable");
@@ -213,6 +279,11 @@ public interface Renderer {
     }
 
     /** Number of samples in the currently bound framebuffer (one if unknown). */
+    /** @return borrowed currently bound framebuffer, null for default; never dispose the result */
+    default com.jme3.texture.FrameBuffer getCurrentFrameBuffer() {
+        throw new UnsupportedOperationException("Framebuffer inspection unavailable");
+    }
+
     default int getCurrentFrameBufferSamples() { return 1; }
 
     /**
@@ -533,12 +604,54 @@ public interface Renderer {
     public int[] generateProfilingTasks(int numTasks);
 
     /**
+     * Releases GPU profiling query IDs on the render thread. End any active query
+     * first. See startProfiling/isTaskResultAvailable; queries need not be complete
+     * before deletion. The OpenGL renderer owns final context-time cleanup; releasing
+     * an already deleted query afterward is a no-op. Use finally/cleanup to pair calls.
+     * <pre>{@code
+     * // 第一步：分配并记录，不能嵌套 elapsed-time 查询。
+     * int[] ids = renderer.generateProfilingTasks(1);
+     * renderer.startProfiling(ids[0]);
+     * // 执行需要计时的 GPU 工作。
+     * renderer.stopProfiling();
+     * // 第二步：后续帧先检查可用性，再读取，不能假定下一帧必定完成。
+     * if (renderer.isTaskResultAvailable(ids[0])) {
+     *     long nanoseconds = renderer.getProfilingTime(ids[0]);
+     * }
+     * // 第三步：工具退出时释放查询。
+     * renderer.deleteProfilingTasks(ids);
+     * }</pre>
+     * @param taskIds owned query identifiers
+     */
+    default void deleteProfilingTasks(int... taskIds) {
+        throw new UnsupportedOperationException("Profiling query deletion unavailable");
+    }
+
+    /**
+     * Copies a GPU range to an owned asynchronous snapshot; does not wait for it.
+     * Requires backend support and an allocated source. Render thread only.
+     * See {@link BufferReadback} for a complete polling/cleanup usage example.
+     * @param source GPU buffer to snapshot, borrowed
+     * @param offset non-negative source byte offset
+     * @param size positive byte count
+     * @return owned request, closed by caller or renderer cleanup
+     */
+    default BufferReadback requestBufferReadback(com.jme3.shader.BufferObject source, long offset, int size) {
+        throw new UnsupportedOperationException("Asynchronous buffer readback unavailable");
+    }
+
+    /**
      * Starts a time profiling task on the GPU.
      * This will profile all operations called between startProfiling and stopProfiling
      *
      * @param taskId the id of the task to start profiling.
      */
     public void startProfiling(int taskId);
+
+    /** @return whether an elapsed-time query is already active; such queries cannot nest */
+    default boolean isProfilingActive() {
+        return false;
+    }
 
     /**
      * Will stop the last profiling task started with startProfiling
@@ -549,8 +662,8 @@ public interface Renderer {
      * Returns the time in nano seconds elapsed for the task with the given id.
      * Note that the result may not be available right after stopProfiling has been called.
      * You need to check if the result is available with isTaskResultAvailable.
-     * Also note that it's guaranteed that the result will be available on next frame.
-     * If you use getProfilingTime on the next frame you called stopProfiling, you don't need to check the result availability with isTaskResultAvailable
+     * Availability is not guaranteed on the next frame. Always check
+     * isTaskResultAvailable first to avoid stalling the render thread.
      *
      * @param taskId the id of the task given by startProfiling.
      * @return the time in nano second of the profiling task with the given id.
@@ -578,4 +691,121 @@ public interface Renderer {
      */
     public int getDefaultAnisotropicFilter();
 
+    /**
+     * Submits compacted indexed commands with a GPU-resident count. The original
+     * command list is required for nonblocking statistics and capability fallback;
+     * it must describe exactly the same visible work, in its original order.
+     * All commands contain five uints (20 bytes). Count is one uint at offset zero.
+     * Call on the render thread after a command/storage barrier. Buffers remain
+     * caller-owned and must live through submission. Unsupported renderers submit
+     * the original fixed-length list without a synchronous count readback.
+     * <pre>{@code
+     * // 第一步：计算剔除结果，然后压缩非空命令并生成 GPU count。
+     * compactMaterial.dispatchCompute(renderManager, groups, 1, 1);
+     * // 第二步：让计算结果对间接命令读取可见。
+     * renderer.memoryBarrier(0x2041);
+     * // 第三步：通过 Renderer 提交；不支持计数提交时自动使用原始列表。
+     * renderer.renderMeshCompactedIndirect(mesh, compacted, count, original,
+     *         maxDraws, attributes, sourceVertexCounts);
+     * }</pre>
+     */
+    default void renderMeshCompactedIndirect(com.jme3.scene.Mesh mesh,
+            com.jme3.shader.BufferObject compacted, com.jme3.shader.BufferObject count,
+            com.jme3.shader.BufferObject original, int maxDraws,
+            com.jme3.scene.VertexBuffer[] attributes, int[] sourceVertexCounts) {
+        renderMeshMultiDrawIndirect(mesh, original, 0, maxDraws, attributes, sourceVertexCounts);
+    }
+
+    /**
+     * Submits tightly packed indexed indirect commands sharing one mesh index buffer,
+     * shader, material and render state. GPU commands are five uints (20 bytes)
+     * each; firstIndex is measured in indices, not bytes. Zero-instance commands
+     * are allowed. Caller provides COMMAND and VERTEX_ATTRIB_ARRAY barriers after
+     * compute writes. Render thread/current context only; no ownership transfer.
+     * The default implementation falls back to individual indirect submissions.
+     * <pre>{@code
+     * // 第一步：绑定相同材质/Shader，准备共享顶点及打包后的索引缓冲。
+     * // 第二步：GPU 写入 commands 后，确保间接命令与实例属性对绘制可见。
+     * renderer.memoryBarrier(0x2041);
+     * // 第三步：每条命令通过 firstIndex/count 选择对应 LOD 的索引范围。
+     * renderer.renderMeshMultiDrawIndirect(mesh, commands, 0, lodCount, instanceAttributes);
+     * // 第四步：不支持合并的 Renderer 默认逐条提交，结果保持一致。
+     * }</pre>
+     * @param mesh mesh with a shared index buffer (LOD zero)
+     * @param commands tightly packed GPU command buffer
+     * @param byteOffset aligned byte offset of the first command
+     * @param drawCount number of commands, nonnegative
+     * @param instanceData borrowed instance attributes
+     */
+    default void renderMeshMultiDrawIndirect(com.jme3.scene.Mesh mesh,
+            com.jme3.shader.BufferObject commands, long byteOffset, int drawCount,
+            com.jme3.scene.VertexBuffer[] instanceData) {
+        if (drawCount < 0 || byteOffset < 0 || (byteOffset & 3) != 0) {
+            throw new IllegalArgumentException("Invalid multi-draw range");
+        }
+        for (int i = 0; i < drawCount; i++) {
+            renderMeshIndirect(mesh, 0, commands, byteOffset + i * 20L, instanceData);
+        }
+    }
+    /**
+     * Material integration hook: returns a compatible bindless sampler variant,
+     * or the original shader when unsupported. Renderer owns caching/lifecycle.
+     * Called before material/world uniforms are assigned, on the render thread.
+     * Applications use Material.setBindlessTextures, not shader-source registration.
+     * @param original ordinary material shader
+     * @return compatible variant or the unchanged input
+     */
+    default com.jme3.shader.Shader getBindlessShader(com.jme3.shader.Shader original) {
+        return original;
+    }
+
+    /**
+     * Binds a material sampler and returns the next free texture unit. Bindless
+     * requests may fall back per texture (e.g. render targets or a full cache).
+     * Internal render-thread material hook; never transfers texture ownership.
+     * @param unit next available conventional texture unit
+     * @param texture texture parameter
+     * @param uniform sampler uniform
+     * @param bindless whether the shader supports handle assignments
+     * @return next free conventional unit
+     */
+    default int setTextureParameter(int unit, com.jme3.texture.Texture texture,
+            com.jme3.shader.Uniform uniform, boolean bindless) {
+        setTexture(unit, texture);
+        uniform.setValue(com.jme3.shader.VarType.Int, unit);
+        return unit + 1;
+    }
+
+    /** @return resident managed bindless snapshots; zero on unsupported renderers */
+    default int getBindlessTextureCount() {
+        return 0;
+    }
+
+    /** @return approximate resident managed snapshot bytes; excludes ordinary textures */
+    default long getBindlessTextureBytes() {
+        return 0;
+    }
+    /**
+     * Multi-draw variant with per-command source vertex counts for accurate
+     * nominal vertex statistics when several meshes share packed vertex storage.
+     * Same context, barrier and ownership rules as renderMeshMultiDrawIndirect.
+     * Counts are borrowed only for this call, not GPU vertex-shader invocations.
+     * <pre>{@code
+     * // 第一步：打包多个网格，各条命令保留各自的 baseVertex/firstIndex。
+     * // 第二步：提供源网格顶点数，避免把整个共享顶点池计入每条命令。
+     * int[] sourceVertices = {tankMesh.getVertexCount(), boatMesh.getVertexCount()};
+     * renderer.renderMeshMultiDrawIndirect(packedMesh, commands, 0, 2, attributes, sourceVertices);
+     * }</pre>
+     * @param mesh shared packed mesh
+     * @param commands tightly packed indirect commands
+     * @param byteOffset first command byte offset
+     * @param drawCount number of commands
+     * @param instanceData instance attributes
+     * @param sourceVertexCounts per-command vertex counts, or null for mesh vertex count
+     */
+    default void renderMeshMultiDrawIndirect(com.jme3.scene.Mesh mesh,
+            com.jme3.shader.BufferObject commands, long byteOffset, int drawCount,
+            com.jme3.scene.VertexBuffer[] instanceData, int[] sourceVertexCounts) {
+        renderMeshMultiDrawIndirect(mesh, commands, byteOffset, drawCount, instanceData);
+    }
 }

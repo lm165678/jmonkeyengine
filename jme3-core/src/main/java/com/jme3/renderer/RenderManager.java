@@ -162,15 +162,62 @@ public class RenderManager {
         pipelines.set(viewport, pipeline);
     }
 
-    /** Returns the installed/allocated pipeline, or null for ordinary Forward. */
+    /** Returns the installed/allocated pipeline. Automatic Forward may have a GPU Scene decorator. */
     public RenderPipeline getPipeline(ViewPort viewport) {
         return pipelines.get(viewport);
     }
 
     /** Compatibility diagnostic accessor for the default managed adapter. */
     public TiledDeferredProcessor getRenderPipeline(ViewPort viewport) {
-        RenderPipeline pipeline = getPipeline(viewport);
-        return pipeline instanceof TiledDeferredProcessor ? (TiledDeferredProcessor) pipeline : null;
+        return pipelines.getDeferred(viewport);
+    }
+
+    /**
+     * Installs automatic GPU Scene policy. LegacyApplication calls this at startup;
+     * standalone RenderManager owners may call it before rendering. Explicit
+     * replacement pipelines are not wrapped or destroyed by this policy.
+     * <pre>{@code
+     * // 第一步：独立使用 RenderManager 时传入资源管理器和启动配置。
+     * renderManager.configureGpuScene(assetManager, settings);
+     * // 第二步：运行时可分别切换 GPU Scene 与 Bindless，调用必须在渲染线程。
+     * renderManager.setGpuSceneBindlessEnabled(false);
+     * renderManager.setGpuSceneEnabled(false);
+     * // 第三步：恢复后按当前场景注册，继续沿用各视口的 Forward/Deferred 选择。
+     * renderManager.setGpuSceneEnabled(true);
+     * renderManager.setGpuSceneBindlessEnabled(true);
+     * }</pre>
+     */
+    public void configureGpuScene(com.jme3.asset.AssetManager assets, com.jme3.system.AppSettings settings) {
+        pipelines.configureGpuScene(assets, settings.isGpuSceneEnabled(), settings.isGpuSceneBindlessEnabled());
+    }
+
+    /**
+     * Changes automatic main-view GPU Scene policy on the render thread. Releases
+     * automatic pipelines immediately so the next queue traversal cannot skip old
+     * GPU-owned objects. Explicit pipelines remain caller-configured. See
+     * configureGpuScene for complete usage. Requested mode may fall back by caps.
+     */
+    public void setGpuSceneEnabled(boolean enabled) {
+        pipelines.setGpuSceneEnabled(enabled);
+    }
+
+    /** @return requested automatic GPU Scene policy, not hardware capability */
+    public boolean isGpuSceneEnabled() {
+        return pipelines.isGpuSceneEnabled();
+    }
+
+    /**
+     * Changes automatic bindless policy on the render thread. False preserves GPU
+     * Scene with ordinary texture binding. Recreates automatic pipelines safely;
+     * see configureGpuScene for complete switching/restoration usage.
+     */
+    public void setGpuSceneBindlessEnabled(boolean enabled) {
+        pipelines.setBindlessEnabled(enabled);
+    }
+
+    /** @return requested automatic bindless policy */
+    public boolean isGpuSceneBindlessEnabled() {
+        return pipelines.isBindlessEnabled();
     }
 
     private final Map<ViewPort, FrameGraph> viewportGraphs = new IdentityHashMap<>();
@@ -897,6 +944,11 @@ public class RenderManager {
     // recursively renders the scene
     private void renderSubScene(Spatial scene, ViewPort vp) {
 
+        RenderPipeline pipeline = getPipeline(vp);
+        if (pipeline != null && pipeline.handlesSceneQueue(scene)) {
+            return;
+        }
+
         // check culling first.
         if (!scene.checkCulling(vp.getCamera())) {
             return;
@@ -1307,6 +1359,10 @@ public class RenderManager {
             }
         }).sideEffect().after(preFrame);
         FrameGraph.PassBuilder sceneQueue = graph.addPass("SceneQueue", context -> {
+            RenderPipeline selected = getPipeline(vp);
+            if (selected != null && selected.isInitialized()) {
+                selected.prepareSceneQueue();
+            }
             if (prof != null) {
                 prof.vpStep(VpStep.RenderScene, vp, null);
             }

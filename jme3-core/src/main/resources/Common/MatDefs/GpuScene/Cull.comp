@@ -1,0 +1,217 @@
+layout(local_size_x = 64) in;
+struct Instance {
+    mat4 world;
+    vec4 sphere;
+};
+layout(std430) readonly buffer m_Instances {
+    Instance instances[];
+};
+layout(std430) buffer m_Visible {
+    mat4 visible[];
+};
+layout(std430) buffer m_Commands {
+    uint command[];
+};
+uniform mat4 m_ViewProjection;
+uniform mat4 m_OcclusionViewProjection;
+uniform mat4 m_View;
+uniform vec3 m_CameraPosition;
+uniform float m_MaxDistance;
+uniform float m_MinPixels;
+uniform float m_ProjectionScale;
+uniform int m_Count;
+uniform int m_DrawCount;
+layout(std430) readonly buffer m_DrawMetadata {
+    uvec4 drawMetadata[]; // indexCount, firstIndex, baseVertex, baseInstance
+};
+layout(std430) readonly buffer m_InstanceDraws {
+    uvec2 instanceDraws[]; // first draw command and available LOD count per instance
+};
+uniform float m_LodThresholds[8];
+uniform bool m_Reset;
+uniform bool m_Frustum;
+uniform bool m_Orthographic;
+uniform bool m_Occlusion;
+uniform int m_HiZLevels;
+uniform sampler2D m_HiZ0;
+uniform sampler2D m_HiZ1;
+uniform sampler2D m_HiZ2;
+uniform sampler2D m_HiZ3;
+uniform sampler2D m_HiZ4;
+uniform sampler2D m_HiZ5;
+uniform sampler2D m_HiZ6;
+uniform sampler2D m_HiZ7;
+uniform sampler2D m_HiZ8;
+uniform sampler2D m_HiZ9;
+uniform sampler2D m_HiZ10;
+uniform sampler2D m_HiZ11;
+
+ivec2 hizSize(int level) {
+    if (level == 0) {
+        return textureSize(m_HiZ0, 0);
+    }
+    if (level == 1) {
+        return textureSize(m_HiZ1, 0);
+    }
+    if (level == 2) {
+        return textureSize(m_HiZ2, 0);
+    }
+    if (level == 3) {
+        return textureSize(m_HiZ3, 0);
+    }
+    if (level == 4) {
+        return textureSize(m_HiZ4, 0);
+    }
+    if (level == 5) {
+        return textureSize(m_HiZ5, 0);
+    }
+    if (level == 6) {
+        return textureSize(m_HiZ6, 0);
+    }
+    if (level == 7) {
+        return textureSize(m_HiZ7, 0);
+    }
+    if (level == 8) {
+        return textureSize(m_HiZ8, 0);
+    }
+    if (level == 9) {
+        return textureSize(m_HiZ9, 0);
+    }
+    if (level == 10) {
+        return textureSize(m_HiZ10, 0);
+    }
+    return textureSize(m_HiZ11, 0);
+}
+float hizDepth(int level, ivec2 p) {
+    if (level == 0) {
+        return texelFetch(m_HiZ0, p, 0).r;
+    }
+    if (level == 1) {
+        return texelFetch(m_HiZ1, p, 0).r;
+    }
+    if (level == 2) {
+        return texelFetch(m_HiZ2, p, 0).r;
+    }
+    if (level == 3) {
+        return texelFetch(m_HiZ3, p, 0).r;
+    }
+    if (level == 4) {
+        return texelFetch(m_HiZ4, p, 0).r;
+    }
+    if (level == 5) {
+        return texelFetch(m_HiZ5, p, 0).r;
+    }
+    if (level == 6) {
+        return texelFetch(m_HiZ6, p, 0).r;
+    }
+    if (level == 7) {
+        return texelFetch(m_HiZ7, p, 0).r;
+    }
+    if (level == 8) {
+        return texelFetch(m_HiZ8, p, 0).r;
+    }
+    if (level == 9) {
+        return texelFetch(m_HiZ9, p, 0).r;
+    }
+    if (level == 10) {
+        return texelFetch(m_HiZ10, p, 0).r;
+    }
+    return texelFetch(m_HiZ11, p, 0).r;
+}
+bool occluded(vec4 sphere) {
+    vec2 low = vec2(1.0);
+    vec2 high = vec2(0.0);
+    float nearest = 1.0;
+    for (int corner = 0; corner < 8; corner++) {
+        vec3 signCorner = vec3((corner & 1) == 0 ? -1.0 : 1.0,
+                (corner & 2) == 0 ? -1.0 : 1.0, (corner & 4) == 0 ? -1.0 : 1.0);
+        vec4 clip = m_OcclusionViewProjection * vec4(sphere.xyz + signCorner * sphere.w, 1.0);
+        if (clip.w <= 0.0 || clip.z <= -clip.w) {
+            return false;
+        }
+        vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+        low = min(low, projected.xy);
+        high = max(high, projected.xy);
+        nearest = min(nearest, projected.z);
+    }
+    low = clamp(low, vec2(0.0), vec2(1.0));
+    high = clamp(high, vec2(0.0), vec2(1.0));
+    float span = max((high.x - low.x) * float(hizSize(0).x),
+                     (high.y - low.y) * float(hizSize(0).y));
+    int level = clamp(int(floor(log2(max(span, 1.0)))), 0, m_HiZLevels - 1);
+    // Ceil-sized odd mip levels are not a normalized-UV partition. Map base pixels
+    // through the exact 2^level reduction footprint instead.
+    ivec2 base = hizSize(0);
+    ivec2 maximum = hizSize(level) - 1;
+    ivec2 a = clamp(ivec2(floor(low * vec2(base))) >> level, ivec2(0), maximum);
+    ivec2 b = clamp(ivec2(floor(high * vec2(base))) >> level, ivec2(0), maximum);
+    float farthest = 0.0;
+    for (int y = a.y; y <= b.y; y++) {
+        for (int x = a.x; x <= b.x; x++) {
+            farthest = max(farthest, hizDepth(level, ivec2(x, y)));
+        }
+    }
+    return nearest > farthest + 0.0001;
+}
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (m_Reset) {
+        if (id < uint(m_DrawCount)) {
+            uint p = id * 5u;
+            command[p] = drawMetadata[id].x;
+            command[p + 1u] = 0u;
+            command[p + 2u] = drawMetadata[id].y;
+            command[p + 3u] = drawMetadata[id].z;
+            command[p + 4u] = drawMetadata[id].w;
+        }
+        return;
+    }
+    if (id >= uint(m_Count)) {
+        return;
+    }
+    vec4 sphere = instances[id].sphere;
+    if (m_MaxDistance > 0.0 && distance(sphere.xyz, m_CameraPosition) - sphere.w > m_MaxDistance) {
+        return;
+    }
+    if (m_Frustum) {
+        mat4 rows = transpose(m_ViewProjection);
+        for (int axis = 0; axis < 3; axis++) {
+            vec4 a = rows[3] + rows[axis];
+            vec4 b = rows[3] - rows[axis];
+            if (dot(a, vec4(sphere.xyz, 1.0)) < -sphere.w * length(a.xyz)
+                    || dot(b, vec4(sphere.xyz, 1.0)) < -sphere.w * length(b.xyz)) {
+                return;
+            }
+        }
+    }
+    float depth = -(m_View * vec4(sphere.xyz, 1.0)).z;
+    // Crossing the eye plane is never rejected by a screen-size approximation.
+    if ((m_Orthographic || depth > sphere.w) && m_MinPixels > 0.0
+            && 2.0 * sphere.w * m_ProjectionScale / (m_Orthographic ? 1.0 : depth - sphere.w) < m_MinPixels) {
+        return;
+    }
+    if (m_Occlusion && occluded(sphere)) {
+        return;
+    }
+    // Keep full detail when crossing the eye plane. Otherwise choose an existing
+    // mesh LOD from conservative projected diameter; no material-specific logic.
+    float pixels = 3.402823e38;
+    if (m_Orthographic || depth > sphere.w) {
+        pixels = 2.0 * sphere.w * m_ProjectionScale / (m_Orthographic ? 1.0 : depth - sphere.w);
+    }
+    uvec2 range = instanceDraws[id];
+    int level = 0;
+    while (level + 1 < int(range.y) && pixels < m_LodThresholds[level]) {
+        level++;
+    }
+    uint draw = range.x + uint(level);
+    uint slot = drawMetadata[draw].w + atomicAdd(command[draw * 5u + 1u], 1u);
+    mat4 instanceMatrix = instances[id].world;
+    // Existing jME instance-attribute ABI reserves bottom-row components for normal quaternion.
+    instanceMatrix[0].w = 0.0;
+    instanceMatrix[1].w = 0.0;
+    instanceMatrix[2].w = 0.0;
+    instanceMatrix[3].w = 1.0;
+    visible[slot] = instanceMatrix;
+}
+

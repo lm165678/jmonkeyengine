@@ -148,6 +148,11 @@ public final class RenderPathSmoke extends BaseAppState {
             int index = (frame - 120) / 30;
             RenderPipeline installed =
                 example.getRenderManager().getPipeline(example.getViewPort());
+            // Automatic GPU Scene decorates the shading path. Inspect the borrowed
+            // downstream pipeline; do not initialize or clean it up independently.
+            while (installed instanceof com.jme3.renderer.gpuscene.GpuScenePipeline) {
+                installed = ((com.jme3.renderer.gpuscene.GpuScenePipeline) installed).getShadingPipeline();
+            }
             DeferredPipeline pipeline = installed instanceof DeferredPipeline
                 ? (DeferredPipeline) installed
                 : installed instanceof TiledDeferredProcessor

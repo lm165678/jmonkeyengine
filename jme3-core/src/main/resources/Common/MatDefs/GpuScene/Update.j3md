@@ -1,0 +1,10 @@
+MaterialDef GPU Scene Instance Updates {
+    MaterialParameters {
+        BufferObject Instances
+        BufferObject Updates
+        Int UpdateCount
+    }
+    Technique {
+        ComputeShader GLSL430: Common/MatDefs/GpuScene/Update.comp
+    }
+}

@@ -572,6 +572,18 @@ public class Image extends NativeObject implements Savable /*, Cloneable*/ {
 //    protected int mipOffset = 0;
     
     // attributes relating to GL object
+    private transient long contentRevision;
+
+    /**
+     * Monotonic runtime invalidation counter for renderer-owned texture snapshots.
+     * Incremented by setUpdateNeeded, not serialized. CPU buffer writes must call
+     * setUpdateNeeded as for normal texture uploads. Not a GPU-render-target revision.
+     * @return content invalidation revision
+     */
+    public long getContentRevision() {
+        return contentRevision;
+    }
+
     protected boolean mipsWereGenerated = false;
     protected boolean needGeneratedMips = false;
     protected LastTextureState lastTextureState = new LastTextureState();
@@ -633,6 +645,7 @@ public class Image extends NativeObject implements Savable /*, Cloneable*/ {
      */
     @Override
     public void setUpdateNeeded() {
+        contentRevision++;
         super.setUpdateNeeded();
         if (isGeneratedMipmapsRequired() && !hasMipmaps()) {
             // Mipmaps are no longer valid, since the image was changed.

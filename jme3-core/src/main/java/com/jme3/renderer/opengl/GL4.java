@@ -109,4 +109,26 @@ public interface GL4 extends GL3 {
      * @param storageBlockBinding The index storage block binding to associate with the specified storage block.
      */
     public void glShaderStorageBlockBinding(int program, int storageBlockIndex, int storageBlockBinding);
+    /** Draw from the currently bound GL_DRAW_INDIRECT_BUFFER; offset is in bytes. */
+    default void glDrawElementsIndirect(int mode, int type, long offset) {
+        throw new UnsupportedOperationException("Indirect rendering unavailable");
+    }
+    /** Indexed multi-draw from the bound indirect buffer; stride zero means 20 bytes. */
+    default void glMultiDrawElementsIndirect(int mode, int type, long offset, int count, int stride) {
+        throw new UnsupportedOperationException("Multi-draw indirect unavailable");
+    }
+    /** Read the draw count from the bound parameter buffer, without CPU readback. */
+    default void glMultiDrawElementsIndirectCount(int mode, int type, long offset,
+            long countOffset, int maxCount, int stride) {
+        throw new UnsupportedOperationException("Indirect draw count unavailable");
+    }
+    default void glUniformTextureHandle(int location, long handle) {
+        throw new UnsupportedOperationException("Bindless sampler uniforms unavailable");
+    }
+    default long glGetTextureHandle(int texture) {
+        throw new UnsupportedOperationException("Bindless textures unavailable");
+    }
+    default void glTextureHandleResident(long handle, boolean resident) {
+        throw new UnsupportedOperationException("Bindless textures unavailable");
+    }
 }

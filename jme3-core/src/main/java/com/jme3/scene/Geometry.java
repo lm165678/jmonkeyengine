@@ -232,6 +232,7 @@ public class Geometry extends Spatial {
         }
 
         this.mesh = mesh;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         setBoundRefresh();
 
         if (isGrouped()) {
@@ -258,6 +259,7 @@ public class Geometry extends Spatial {
     @Override
     public void setMaterial(Material material) {
         this.material = material;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         nbSimultaneousGPUMorph = -1;
         if (isGrouped()) {
             groupNode.onMaterialChange(this);
@@ -346,6 +348,7 @@ public class Geometry extends Spatial {
      * @param startIndex The starting index of this geometry in the group.
      */
     public void associateWithGroupNode(GeometryGroupNode node, int startIndex) {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         if (isGrouped()) {
             unassociateFromGroupNode();
         }
@@ -361,6 +364,7 @@ public class Geometry extends Spatial {
      * Should only be called by the parent {@link GeometryGroupNode}.
      */
     public void unassociateFromGroupNode() {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         if (groupNode != null) {
             // Once the geometry is removed
             // from the parent, the group node needs to be updated.

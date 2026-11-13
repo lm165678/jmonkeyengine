@@ -1,3 +1,175 @@
+// Separate runtime classpaths are essential: LWJGL 2 and 3 implement the same
+// engine backend class names and must never be loaded together.
+evaluationDependsOn(':jme3-lwjgl3')
+['gpuSettingsLwjgl3Check': ['TestGpuSceneSettings', []],
+ 'gpuHiZLwjgl3Check': ['TestHiZOcclusion', ['--smoke', '--compaction']],
+ 'gpuCombinedLwjgl3Check': ['TestGpuDrivenRendering', ['--smoke', '--mdi', '--bindless']]].each { taskName, config ->
+    task(taskName, type: JavaExec, dependsOn: ['classes', ':jme3-lwjgl3:classes']) {
+        group = 'verification'
+        main = 'jme3test.gpuDrivenRendering.' + config[0]
+        args config[1]
+        classpath = files(sourceSets.main.output,
+                configurations.runtimeClasspath.filter {
+                    !it.name.startsWith('jme3-lwjgl-') && !it.name.startsWith('lwjgl-2.') &&
+                    !it.name.startsWith('lwjgl-platform-')
+                }, project(':jme3-lwjgl3').sourceSets.main.runtimeClasspath)
+    }
+}
+
+task gpuCompactFallbackCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestCommandCompaction'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '8g'
+    args '--benchmark', '--count=100000', '--without-count'
+}
+
+task gpuHiZCompactSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--compaction'
+}
+
+task gpuSettingsCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuSceneSettings'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+task gpuStreamingCheck(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuSceneStreaming'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '8g'
+}
+
+task gpuHiZMergedSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--mesh-merging'
+}
+
+task gpuDrivenCombinedSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--bindless', '--mdi'
+}
+
+task gpuDrivenBindlessFallbackSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--bindless', '--without-bindless'
+}
+
+['gpuBindless': 'TestBindlessRendering', 'gpuMdi': 'TestMultiDrawIndirect', 'gpuMeshMerge': 'TestMultiDrawIndirect', 'gpuCompact': 'TestCommandCompaction', 'gpuMaterialMerge': 'TestMaterialMerging'].each { baseName, example ->
+    [false, true].each { automated ->
+        task(baseName + (automated ? 'Check' : ''), type: JavaExec, dependsOn: 'classes') {
+            group = automated ? 'verification' : 'application'
+            main = 'jme3test.gpuDrivenRendering.' + example
+            classpath = sourceSets.main.runtimeClasspath
+            maxHeapSize = '8g'
+            if (baseName == 'gpuMeshMerge') {
+                args '--mesh-merging'
+            }
+            args "--count=${project.findProperty('gpuInstances') ?: '300000'}"
+            args "--frames=${project.findProperty('gpuMeasureFrames') ?: '180'}"
+            if (automated) {
+                args '--benchmark'
+            }
+            if (project.hasProperty('gpuDeferred')) {
+                args '--deferred'
+            }
+        }
+    }
+}
+
+['gpuDrivenBindlessSmoke': false, 'gpuDrivenBindlessDeferredSmoke': true].each { taskName, deferred ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--smoke', '--bindless'
+        if (deferred) {
+            args '--deferred'
+        }
+    }
+}
+
+['gpuDrivenMdiSmoke': false, 'gpuDrivenMdiDeferredSmoke': true].each { taskName, deferred ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = 'verification'
+        main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+        classpath = sourceSets.main.runtimeClasspath
+        args '--smoke', '--mdi'
+        if (deferred) {
+            args '--deferred'
+        }
+    }
+}
+
+['gpuHiZ': false, 'gpuHiZSmoke': true].each { taskName, smoke ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = smoke ? 'verification' : 'application'
+        main = 'jme3test.gpuDrivenRendering.TestHiZOcclusion'
+        classpath = sourceSets.main.runtimeClasspath
+        if (smoke) {
+            args '--smoke'
+            systemProperty 'hizDebugImage', rootProject.file('.gradle/hiz-debug.png').absolutePath
+        }
+    }
+}
+
+task bakeGpuDrivenLods(type: JavaExec, dependsOn: 'classes') {
+    group = 'application'
+    main = 'jme3test.gpuDrivenRendering.BakeGpuDrivenLods'
+    classpath = sourceSets.main.runtimeClasspath
+    maxHeapSize = '4g'
+}
+
+['gpuDrivenPerformance': false, 'gpuDrivenPerformanceCheck': true].each { taskName, automated ->
+    task(taskName, type: JavaExec, dependsOn: 'classes') {
+        group = automated ? 'verification' : 'application'
+        main = 'jme3test.gpuDrivenRendering.TestGpuDrivenPerformance'
+        classpath = sourceSets.main.runtimeClasspath
+        maxHeapSize = '8g'
+        // Optional JDK 11+ CPU/GC recording; output is local to this project.
+        if (project.hasProperty('gpuProfile')) {
+            jvmArgs "-XX:StartFlightRecording=filename=${rootProject.file('.gradle/gpu-scene.jfr')},settings=profile,dumponexit=true"
+        }
+        args "--count=${project.findProperty('gpuInstances') ?: '100000'}"
+        args "--moving=${project.findProperty('gpuMoving') ?: '1000'}"
+        args "--frames=${project.findProperty('gpuMeasureFrames') ?: '600'}"
+        if (project.hasProperty('gpuLinearUpdates')) {
+            args '--linear-updates'
+        }
+        if (project.hasProperty('gpuNoDistance')) {
+            args '--no-distance'
+        }
+        if (project.hasProperty('gpuNoLod')) {
+            args '--no-lod'
+        }
+        if (automated) {
+            args '--benchmark'
+        }
+    }
+}
+
+task gpuDrivenDeferredSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--deferred'
+}
+task gpuDrivenSmoke(type: JavaExec, dependsOn: 'classes') {
+    group = 'verification'
+    main = 'jme3test.gpuDrivenRendering.TestGpuDrivenRendering'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+}
 task surfaceQuerySmoke(type: JavaExec, dependsOn: 'classes') {
     group = 'verification'
     main = 'jme3test.sdf.TestSurfaceQuery'

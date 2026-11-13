@@ -1,0 +1,20 @@
+MaterialDef HiZ Debug View {
+    MaterialParameters {
+        Texture2D Depth
+        Float Near
+        Float Far
+        Float DisplayRange
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/GpuScene/HiZDebug.vert
+        FragmentShader GLSL150: Common/MatDefs/GpuScene/HiZDebug.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

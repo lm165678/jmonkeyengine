@@ -6,15 +6,12 @@
 // instead the function ApplyNormalTransform is used to transform
 // the normal and tangent vectors into world view space.
 
-// The world matrix and normal transform quaternion need to be passed
-// as vertex attributes "inWorldMatrix" and "inNormalRotationQuaternion"
-// respectively. 
-// The VertexBuffers for those two attributes 
-// need to be configured into instanced mode (VertexBuffer.setInstanced(true)). 
-//  - inWorldMatrix should have 12 * numInstances floats.
-//  - inNormalRotationQuaternion should have 4 * numInstances.
-// Thus, instancing data occupies 4 vertex attributes (16 / 4 = 4).
-// 
+// inInstanceData contains 16 floats per instance (four instanced attributes).
+// The top three rows hold the world transform. The bottom row is reserved for
+// legacy normal-quaternion data; normal transforms now derive from the matrix
+// to support nonuniform scale. Both legacy and GPU-generated buffers use this ABI.
+// Configure the InstanceData VertexBuffer with setInstanced(true).
+//
 // The GL_ARB_draw_instanced and GL_ARB_instanced_arrays extensions 
 // are required (OGL 3.3).
 
@@ -63,10 +60,16 @@ vec4 TransformWorldViewProjection(vec4 position)
 }
 
 vec3 TransformWorldNormal(vec3 vec) {
-    vec4 quat = vec4(inInstanceData[0].w, inInstanceData[1].w,
-                     inInstanceData[2].w, inInstanceData[3].w);
-
-    return vec + vec3(2.0) * cross(cross(vec, quat.xyz) + vec3(quat.w) * vec, quat.xyz);
+    vec3 a = inInstanceData[0].xyz;
+    vec3 b = inInstanceData[1].xyz;
+    vec3 c = inInstanceData[2].xyz;
+    float determinant = dot(a, cross(b, c));
+    // Cofactor inverse transpose supports rotation, nonuniform and mirrored scale.
+    // Singular transforms have no defined normal; avoid propagating NaNs.
+    if (abs(determinant) < 1e-20) {
+        return vec3(0.0);
+    }
+    return mat3(cross(b, c), cross(c, a), cross(a, b)) * vec / determinant;
 }
 
 vec3 TransformNormal(vec3 vec)

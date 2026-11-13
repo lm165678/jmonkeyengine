@@ -39,6 +39,15 @@ import java.nio.IntBuffer;
  * @author Kirill Vainer
  */
 public interface GL3 extends GL2 {
+    /** Releases query objects without waiting for their results. */
+    default void glDeleteQueries(java.nio.IntBuffer ids) {
+        throw new UnsupportedOperationException("Query deletion unavailable");
+    }
+    /** Copies GPU buffer ranges without a CPU readback. */
+    default void glCopyBufferSubData(int readTarget, int writeTarget, long readOffset,
+            long writeOffset, long size) {
+        throw new UnsupportedOperationException("GPU buffer copy unavailable");
+    }
     /** Returns the bound buffer parameter; used to validate readback bounds. */
     default int glGetBufferParameter(int target, int parameter) {
         throw new UnsupportedOperationException("Buffer parameter queries are unavailable");

@@ -46,6 +46,14 @@ import java.nio.ShortBuffer;
  * The LWJGL implementation of interfaces {@link GL}, {@link GL2}, {@link GL3}, {@link GL4}.
  */
 public class LwjglGL extends LwjglRender implements GL, GL2, GL3, GL4 {
+    @Override
+    public void glDeleteQueries(java.nio.IntBuffer ids) {
+        GL15.glDeleteQueries(ids);
+    }
+    @Override
+    public void glCopyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
+        GL31.glCopyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
+    }
 
     @Override
     public void glPushDebugGroup(String name) {
@@ -679,5 +687,38 @@ public class LwjglGL extends LwjglRender implements GL, GL2, GL3, GL4 {
     @Override
     public void glUniformBlockBinding(final int program, final int uniformBlockIndex, final int uniformBlockBinding) {
         GL31.glUniformBlockBinding(program, uniformBlockIndex, uniformBlockBinding);
+    }
+    @Override
+    public void glMultiDrawElementsIndirect(int mode, int type, long offset, int count, int stride) {
+        org.lwjgl.opengl.GL43.glMultiDrawElementsIndirect(mode, type, offset, count, stride);
+    }
+
+    @Override
+    public void glDrawElementsIndirect(int mode, int type, long offset) {
+        org.lwjgl.opengl.GL40.glDrawElementsIndirect(mode, type, offset);
+    }
+    @Override
+    public void glMultiDrawElementsIndirectCount(int mode, int type, long offset,
+            long countOffset, int maxCount, int stride) {
+        org.lwjgl.opengl.ARBIndirectParameters.glMultiDrawElementsIndirectCountARB(
+                mode, type, offset, countOffset, maxCount, stride);
+    }
+
+    @Override
+    public void glUniformTextureHandle(int location, long handle) {
+        org.lwjgl.opengl.ARBBindlessTexture.glUniformHandleui64ARB(location, handle);
+    }
+
+    @Override
+    public long glGetTextureHandle(int texture) {
+        return org.lwjgl.opengl.ARBBindlessTexture.glGetTextureHandleARB(texture);
+    }
+    @Override
+    public void glTextureHandleResident(long handle, boolean resident) {
+        if (resident) {
+            org.lwjgl.opengl.ARBBindlessTexture.glMakeTextureHandleResidentARB(handle);
+        } else {
+            org.lwjgl.opengl.ARBBindlessTexture.glMakeTextureHandleNonResidentARB(handle);
+        }
     }
 }

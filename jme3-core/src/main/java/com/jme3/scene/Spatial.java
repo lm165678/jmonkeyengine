@@ -312,6 +312,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     }
 
     protected void setLightListRefresh() {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         refreshFlags |= RF_LIGHTLIST;
         // Make sure next updateGeometricState() visits this branch
         // to update lights.
@@ -328,6 +329,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     }
 
     protected void setMatParamOverrideRefresh() {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         refreshFlags |= RF_MATPARAM_OVERRIDE;
         Spatial p = parent;
         while (p != null) {
@@ -753,11 +755,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
         // Go to children recursively and update their bound
         if (this instanceof Node) {
             Node node = (Node) this;
-            int len = node.getQuantity();
-            for (int i = 0; i < len; i++) {
-                Spatial child = node.getChild(i);
-                child.checkDoBoundUpdate();
-            }
+            node.updateChildBounds();
         }
 
         // All children's bounds have been updated. Update my own now.
@@ -802,6 +800,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * @see Spatial#removeControl(java.lang.Class)
      */
     public void addControl(Control control) {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         controls.add(control);
         control.setSpatial(this);
@@ -820,6 +819,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * @see Spatial#addControl(com.jme3.scene.control.Control)
      */
     public void removeControl(Class<? extends Control> controlType) {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         for (int i = 0; i < controls.size(); i++) {
             if (controlType.isAssignableFrom(controls.get(i).getClass())) {
@@ -847,6 +847,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * @see Spatial#addControl(com.jme3.scene.control.Control)
      */
     public boolean removeControl(Control control) {
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
         boolean before = requiresUpdates();
         boolean result = controls.remove(control);
         if (result) {
@@ -1660,6 +1661,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setCullHint(CullHint hint) {
         cullHint = hint;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**
@@ -1673,6 +1675,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setBatchHint(BatchHint hint) {
         batchHint = hint;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**
@@ -1700,6 +1703,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setQueueBucket(RenderQueue.Bucket queueBucket) {
         this.queueBucket = queueBucket;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**

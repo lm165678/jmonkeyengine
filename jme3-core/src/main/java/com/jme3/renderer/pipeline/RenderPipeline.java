@@ -52,6 +52,41 @@ import com.jme3.renderer.queue.RenderQueue;
  */
 public interface RenderPipeline {
     /**
+     * Declares an entire subtree submitted independently by this pipeline. The
+     * manager may omit CPU culling, render controls and queue insertion for that
+     * subtree. Default false preserves legacy behavior. Return true only when
+     * all descendants are owned and render-control/processor semantics are preserved.
+     * Called on the render thread before scene traversal, possibly before initialize.
+     * <pre>{@code
+     * // 第一步：默认返回 false，沿用传统队列；普通自定义管线无需覆盖。
+     * // 第二步：只有已经建立完整 GPU 提交映射、且子树没有渲染 Control 时才接管。
+     * // 第三步：关闭或结构变更时立即返回 false，重建完成后才能重新接管。
+     * @Override
+     * public boolean handlesSceneQueue(Spatial subtree) {
+     *     return initialized && enabled && !rebuilding && ownedSubtrees.contains(subtree);
+     * }
+     * }</pre>
+     * @param subtree candidate scene subtree, borrowed
+     * @return true if the complete subtree needs no traditional queue traversal
+     */
+    default boolean handlesSceneQueue(com.jme3.scene.Spatial subtree) {
+        return false;
+    }
+
+    /**
+     * Validates queue ownership before scene traversal, after processor preFrame.
+     * Default no-op. Called only for initialized installed pipelines. Do not draw
+     * here; invalidate stale ownership so unsupported objects enter normal queues.
+     * <pre>{@code
+     * // 第一步：普通管线可保留默认实现。
+     * // 第二步：缓存材质/场景提交的管线在此检测变更，并撤销过期的子树接管。
+     * // 第三步：实际绘制仍由 appendPasses/render 完成，不在此提交绘制。
+     * }</pre>
+     */
+    default void prepareSceneQueue() {
+    }
+
+    /**
      * Initializes this instance for one viewport; the graphics context is current.
      * @param manager owning render manager
      * @param viewport owning viewport

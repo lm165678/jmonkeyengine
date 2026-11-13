@@ -50,12 +50,18 @@ import java.util.Objects;
 public final class ViewportPipelines {
     private final RenderManager manager;
     private final Map<ViewPort, Entry> entries = new IdentityHashMap<>();
+    private com.jme3.asset.AssetManager gpuAssets;
+    private boolean gpuEnabled;
+    private boolean bindlessEnabled;
     private final ShadingModelRegistry models = new ShadingModelRegistry();
 
     private static final class Entry {
         final RenderPipeline pipeline;
         final boolean replacement;
         boolean initialized;
+        RenderPath automaticPath;
+        TiledDeferredProcessor automaticDeferred;
+        java.util.List<com.jme3.scene.Spatial> automaticRoots;
         int width, height;
         Entry(RenderPipeline pipeline, boolean replacement) {
             this.pipeline = pipeline;
@@ -67,6 +73,44 @@ public final class ViewportPipelines {
         this.manager = Objects.requireNonNull(manager);
     }
 
+    /** Internal startup policy; RenderManager owns the public usage contract. */
+    public void configureGpuScene(com.jme3.asset.AssetManager assets, boolean enabled, boolean bindless) {
+        invalidateAutomatic();
+        gpuAssets = Objects.requireNonNull(assets);
+        gpuEnabled = enabled;
+        bindlessEnabled = bindless;
+    }
+
+    public void setGpuSceneEnabled(boolean enabled) {
+        if (gpuEnabled != enabled) {
+            invalidateAutomatic();
+            gpuEnabled = enabled;
+        }
+    }
+
+    public boolean isGpuSceneEnabled() {
+        return gpuEnabled;
+    }
+
+    public void setBindlessEnabled(boolean enabled) {
+        if (bindlessEnabled != enabled) {
+            invalidateAutomatic();
+            bindlessEnabled = enabled;
+        }
+    }
+
+    public boolean isBindlessEnabled() {
+        return bindlessEnabled;
+    }
+
+    private void invalidateAutomatic() {
+        for (ViewPort viewport : new java.util.ArrayList<>(entries.keySet())) {
+            if (!entries.get(viewport).replacement) {
+                remove(viewport);
+            }
+        }
+    }
+
     public ShadingModelRegistry getShadingModels() {
         return models;
     }
@@ -74,6 +118,16 @@ public final class ViewportPipelines {
     public RenderPipeline get(ViewPort viewport) {
         Entry entry = entries.get(viewport);
         return entry == null ? null : entry.pipeline;
+    }
+
+    /** Preserves the legacy deferred diagnostic accessor through automatic wrappers. */
+    public TiledDeferredProcessor getDeferred(ViewPort viewport) {
+        Entry entry = entries.get(viewport);
+        if (entry == null) {
+            return null;
+        }
+        return entry.automaticDeferred != null ? entry.automaticDeferred
+                : entry.pipeline instanceof TiledDeferredProcessor ? (TiledDeferredProcessor) entry.pipeline : null;
     }
 
     public void set(ViewPort viewport, RenderPipeline pipeline) {
@@ -134,6 +188,53 @@ public final class ViewportPipelines {
         }
         RenderPath path = viewport.getRenderPath() == RenderPath.Inherit ? manager.getRenderPath()
                                                                          : viewport.getRenderPath();
+        boolean automatic = gpuEnabled && gpuAssets != null && manager.getMainViews().contains(viewport)
+                && manager.getRenderer().getCaps().contains(com.jme3.renderer.Caps.OpenGL43)
+                && !viewport.getScenes().isEmpty();
+        if (automatic) {
+            if (entry != null && (entry.automaticPath != path
+                    || !viewport.getScenes().equals(entry.automaticRoots))) {
+                remove(viewport);
+                entry = null;
+            }
+            if (entry == null) {
+                RenderPipeline shading;
+                TiledDeferredProcessor adapter = null;
+                if (path == RenderPath.Forward) {
+                    shading = new ForwardPipeline();
+                } else {
+                    TiledDeferredProcessor deferred = new TiledDeferredProcessor(gpuAssets, models);
+                    deferred.setMode(TiledDeferredProcessor.Mode.valueOf(path.name()));
+                    deferred.setTileSize(manager.getDeferredTileSize());
+                    shading = deferred;
+                    adapter = deferred;
+                }
+                for (com.jme3.scene.Spatial scene : viewport.getScenes()) {
+                    com.jme3.renderer.gpuscene.GpuScenePipeline gpu =
+                            new com.jme3.renderer.gpuscene.GpuScenePipeline(gpuAssets, scene, shading);
+                    gpu.setEnabled(true);
+                    gpu.setBindlessTextures(bindlessEnabled);
+                    gpu.setMultiDrawIndirect(true);
+                    gpu.setMeshMerging(true);
+                    gpu.setMaterialMerging(true);
+                    shading = gpu;
+                }
+                entry = new Entry(shading, false);
+                entry.automaticPath = path;
+                entry.automaticDeferred = adapter;
+                entry.automaticRoots = new java.util.ArrayList<>(viewport.getScenes());
+                entries.put(viewport, entry);
+            }
+            if (entry.automaticDeferred != null) {
+                entry.automaticDeferred.setTileSize(manager.getDeferredTileSize());
+            }
+            render(entry, viewport, graph);
+            return;
+        }
+        if (entry != null && entry.automaticRoots != null) {
+            remove(viewport);
+            entry = null;
+        }
         if (path == RenderPath.Forward) {
             remove(viewport);
             return;

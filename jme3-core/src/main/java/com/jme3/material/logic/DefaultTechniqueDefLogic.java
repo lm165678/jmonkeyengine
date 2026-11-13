@@ -60,6 +60,10 @@ public class DefaultTechniqueDefLogic implements TechniqueDefLogic {
     }
 
     public static void renderMeshFromGeometry(Renderer renderer, Geometry geom) {
+        if (geom instanceof com.jme3.renderer.gpuscene.GpuSceneGeometry) {
+            ((com.jme3.renderer.gpuscene.GpuSceneGeometry) geom).draw(renderer);
+            return;
+        }
         Mesh mesh = geom.getMesh();
         int lodLevel = geom.getLodLevel();
         if (geom instanceof InstancedGeometry) {

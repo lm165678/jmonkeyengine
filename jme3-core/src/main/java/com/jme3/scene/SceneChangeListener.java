@@ -30,7 +30,9 @@ public interface SceneChangeListener {
         /** Subtree attached; parent link is already established. */
         ATTACHED,
         /** Subtree detaching; notification occurs before its old parent link is cleared. */
-        DETACHING
+        DETACHING,
+        /** Material, mesh, inherited queue/cull policy or other render registration changed. */
+        RENDERING
     }
 
     /** @param spatial actual mutation source @param change invalidation category */

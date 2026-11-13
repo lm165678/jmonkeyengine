@@ -140,6 +140,12 @@ public enum Caps {
      * Supports OpenGL 4.3
      */
     OpenGL43,
+
+    /** ARB bindless texture handles and residency. */
+    BindlessTextures,
+
+    /** GPU-supplied indexed multi-draw count (ARB_indirect_parameters). */
+    IndirectDrawCount,
     /**
      * Supports OpenGL 4.4
      */
