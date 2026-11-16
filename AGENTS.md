@@ -1,5 +1,19 @@
 # Usage documentation
 
+## Cross-machine handoff
+
+- Read `DEV_HANDOFF.md` before continuing development, and read the sibling
+  `../jmesdk/AGENTS.md` and `../jmesdk/DEV_HANDOFF.md` for SDK integration work.
+- Keep this file for long-lived rules. Update `DEV_HANDOFF.md` when work changes
+  the implementation, validation results, remaining issues or next steps, and
+  before handing work to another machine. Distinguish tested behavior from plans.
+- Record compatible engine/SDK implementation revisions; documentation-only
+  commits may follow those revisions. Do not claim a push succeeded until verified.
+- Commit handoff documents with the related work. Never store credentials,
+  private keys or access tokens in them. Preserve unrelated working-tree changes.
+
+## Source documentation
+
 - When adding or changing public APIs, configuration options, or rendering-path
   behavior, update the relevant source comments/Javadoc in the same change.
 - Include a complete usage example and explain relevant defaults, fallback behavior,
