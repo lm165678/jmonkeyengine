@@ -418,6 +418,12 @@ public final class ShadowManager implements AutoCloseable {
         }
         slot.renderer.setShadowCompareMode(CompareMode.Software);
         slot.renderer.initialize(manager, viewport);
+        // Material PreShadow techniques use a legacy slope offset of 5. At
+        // grazing angles that moves blockers across wall/ceiling junctions.
+        // Managed shadows already apply explicit receiver depth/normal bias.
+        slot.renderer.managedRasterState = true;
+        slot.renderer.getPreShadowForcedRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
+        slot.renderer.getPreShadowForcedRenderState().setPolyOffset(0f, 0f);
         return slot;
     }
 

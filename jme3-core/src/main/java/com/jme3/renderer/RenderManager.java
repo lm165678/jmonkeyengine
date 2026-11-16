@@ -375,6 +375,7 @@ public class RenderManager {
     private Material forcedMaterial = null;
     private String forcedTechnique = null;
     private RenderState forcedRenderState = null;
+    private boolean forcedRenderStateOverridesTechnique;
     private final SafeArrayList<MatParamOverride> forcedOverrides = new SafeArrayList<>(MatParamOverride.class);
 
     private final Matrix4f orthoMatrix = new Matrix4f();
@@ -898,6 +899,42 @@ public class RenderManager {
     }
 
     /**
+     * Returns whether pass-owned state takes precedence over forced techniques.
+     * @return false by default, preserving material-owned forced technique state
+     */
+    public boolean isForcedRenderStateOverridesTechnique() {
+        return forcedRenderStateOverridesTechnique;
+    }
+
+    /**
+     * Gives a non-null forced render state precedence over a technique's state.
+     * Use on the render thread only and restore the previous value in a finally
+     * block. A null forced state always leaves technique state in effect.
+     * This is intended for passes that own their rasterization policy, such as
+     * managed shadow maps, whose receiver bias must not stack with material bias.
+     * <pre>
+     * // 第一步：保存当前通道的状态和优先级。
+     * RenderState previous = renderManager.getForcedRenderState();
+     * boolean priority = renderManager.isForcedRenderStateOverridesTechnique();
+     * try {
+     *     // 第二步：设置通道状态并绘制。
+     *     renderManager.setForcedRenderState(passState);
+     *     renderManager.setForcedRenderStateOverridesTechnique(true);
+     *     renderManager.renderGeometry(geometry);
+     * } finally {
+     *     // 第三步：恢复状态，避免影响后续通道。
+     *     renderManager.setForcedRenderState(previous);
+     *     renderManager.setForcedRenderStateOverridesTechnique(priority);
+     * }
+     * </pre>
+     * @param override true to prioritize the pass state; false restores the
+     * default technique-first behavior
+     */
+    public void setForcedRenderStateOverridesTechnique(boolean override) {
+        forcedRenderStateOverridesTechnique = override;
+    }
+
+    /**
      * Sets the timer that should be used to query the time based
      * {@link UniformBinding}s for material world parameters.
      *
@@ -1150,7 +1187,8 @@ public class RenderManager {
                 geom.getMaterial().selectTechnique(forcedTechnique, this);
                 //saving forcedRenderState for future calls
                 RenderState tmpRs = forcedRenderState;
-                if (geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState() != null) {
+                if ((!forcedRenderStateOverridesTechnique || forcedRenderState == null)
+                        && geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState() != null) {
                     //forcing forced technique renderState
                     forcedRenderState = geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState();
                 }

@@ -23,6 +23,10 @@ import java.nio.ByteBuffer;
  * also require GBuffer callbacks, preventing silent Forward fallback with shadows. Tent PCF radii
  * 1 and 2 are exercised in the same run (hard comparison on the backlight). APIs:
  * RenderManager.getShadowManager(), Light.setCastShadow(), ViewPort.setRenderPath().
+ * Managed casters use two-sided, zero polygon-offset rasterization; tune their
+ * receiver depth/normal bias through LightShadowSettings on the render thread.
+ * Material PreShadow polygon offsets remain effective for legacy processors.
+ * No scene rebake or additional shadow samples are needed for this policy.
  */
 public final class TestManagedShadows extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
@@ -97,6 +101,10 @@ public final class TestManagedShadows extends SimpleApplication {
         // 第二步：按灯配置阴影质量，同一个 light 始终返回同一个设置对象。
         renderManager.getShadowManager(viewPort).getSettings(sun).setMapSize(256);
         renderManager.getShadowManager(viewPort).getSettings(sun).setShadowDistance(30);
+        // 第六步：管理器直接使用接收端偏移，不叠加材质隐藏的投射偏移。
+        // 数值越大越容易产生接触分离；恢复默认时使用 0.001 和 0.02。
+        renderManager.getShadowManager(viewPort).getSettings(sun).setDepthBias(0.001f);
+        renderManager.getShadowManager(viewPort).getSettings(sun).setNormalBias(0.02f);
         setDisplayFps(false);
         setDisplayStatView(false);
     }

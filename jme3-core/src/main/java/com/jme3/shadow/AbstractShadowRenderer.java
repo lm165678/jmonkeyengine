@@ -546,6 +546,9 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         }).sideEffect();
     }
 
+    // Managed shadows own raster bias; legacy processors retain material state.
+    boolean managedRasterState;
+
     protected void renderShadowMap(int shadowMapIndex) {
         shadowMapOccluders = getOccludersToRender(shadowMapIndex, shadowMapOccluders);
         Camera shadowCam = getShadowCam(shadowMapIndex);
@@ -556,14 +559,19 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
         renderManager.getRenderer().setFrameBuffer(shadowFB[shadowMapIndex]);
         renderManager.getRenderer().clearBuffers(true, true, true);
-        renderManager.setForcedRenderState(forcedRenderState);
-
-        // render shadow casters to shadow map and disables the light filter
+        RenderState previousState = renderManager.getForcedRenderState();
+        boolean previousPriority = renderManager.isForcedRenderStateOverridesTechnique();
         LightFilter tmpLightFilter = renderManager.getLightFilter();
-        renderManager.setLightFilter(NULL_LIGHT_FILTER);
-        viewPort.getQueue().renderShadowQueue(shadowMapOccluders, renderManager, shadowCam, true);
-        renderManager.setLightFilter(tmpLightFilter);
-        renderManager.setForcedRenderState(null);
+        try {
+            renderManager.setForcedRenderState(forcedRenderState);
+            renderManager.setForcedRenderStateOverridesTechnique(managedRasterState);
+            renderManager.setLightFilter(NULL_LIGHT_FILTER);
+            viewPort.getQueue().renderShadowQueue(shadowMapOccluders, renderManager, shadowCam, true);
+        } finally {
+            renderManager.setLightFilter(tmpLightFilter);
+            renderManager.setForcedRenderState(previousState);
+            renderManager.setForcedRenderStateOverridesTechnique(previousPriority);
+        }
     }
 
     /**
