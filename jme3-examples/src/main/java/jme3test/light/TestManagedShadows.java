@@ -27,6 +27,11 @@ import java.nio.ByteBuffer;
  * receiver depth/normal bias through LightShadowSettings on the render thread.
  * Material PreShadow polygon offsets remain effective for legacy processors.
  * No scene rebake or additional shadow samples are needed for this policy.
+ * Soft managed shadows correct each PCF comparison using the receiver tangent
+ * plane, analytically projected for directional, point and spot shadow maps.
+ * Degenerate projections fall back to ordinary biased PCF. Hard shadows and
+ * legacy filters retain their behavior. Receiver bias still handles depth
+ * quantization and should not generally be set to zero.
  */
 public final class TestManagedShadows extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,

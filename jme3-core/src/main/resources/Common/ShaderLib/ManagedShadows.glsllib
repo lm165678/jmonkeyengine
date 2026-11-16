@@ -18,8 +18,31 @@ vec4 managedShadowRecord(float light, float texel) {
 
 #import "Common/ShaderLib/ShadowFilter.glsllib"
 
-float managedShadowPcf(vec2 uv, vec4 rect, float referenceDepth, float radius) {
-    return ShadowFilter_Tent(g_ShadowAtlas, uv, g_ShadowAtlasSize, rect, referenceDepth, radius);
+// Project the receiver tangent plane analytically. Screen derivatives inside
+// per-light/cascade branches are undefined, especially in tiled deferred paths.
+// This formulation also handles perspective spot/point maps (including clip.w).
+vec2 managedShadowDepthGradient(mat4 matrix, vec4 clip, vec3 normal, vec4 rect) {
+    if (dot(normal, normal) < 1e-12) {
+        return vec2(0.0);
+    }
+    vec3 n = normalize(normal);
+    vec3 axis = abs(n.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 tangent = cross(n, axis);
+    vec4 a = matrix * vec4(tangent, 0.0);
+    vec4 b = matrix * vec4(cross(n, tangent), 0.0);
+    vec3 da = a.xyz * clip.w - clip.xyz * a.w;
+    vec3 db = b.xyz * clip.w - clip.xyz * b.w;
+    float determinant = da.x * db.y - da.y * db.x;
+    float scale = length(da.xy) * length(db.xy);
+    // Degenerate/grazing projections have no reliable inverse. Fall back to
+    // ordinary biased PCF instead of producing unbounded corrections or NaNs.
+    if (scale < 1e-12 || abs(determinant) < scale * 0.001) {
+        return vec2(0.0);
+    }
+    vec2 gradient = vec2(db.y * da.z - da.y * db.z,
+            da.x * db.z - db.x * da.z) / determinant / rect.zw;
+    // Bound the normalized depth change to one percent per atlas texel.
+    return clamp(gradient / g_ShadowAtlasSize, vec2(-0.01), vec2(0.01)) * g_ShadowAtlasSize;
 }
 
 // Visibility modulates one light's direct contribution, never a composed color.
@@ -70,9 +93,13 @@ float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) 
         return 1.0;
     }
     vec4 rect = managedShadowRecord(light, 27.0 + face);
-    vec2 texel = 1.0 / g_ShadowAtlasSize;
     vec2 uv = rect.xy + coordinate.xy * rect.zw;
-    return managedShadowPcf(uv, rect, coordinate.z - header.w,
-            managedShadowRecord(light, 33.0).x);
+    float radius = managedShadowRecord(light, 33.0).x;
+    vec2 gradient = vec2(0.0);
+    if (radius >= 0.5) {
+        gradient = managedShadowDepthGradient(matrix, clip, normal, rect);
+    }
+    return ShadowFilter_TentPlane(g_ShadowAtlas, uv, g_ShadowAtlasSize, rect,
+            coordinate.z - header.w, radius, gradient);
 }
 #endif

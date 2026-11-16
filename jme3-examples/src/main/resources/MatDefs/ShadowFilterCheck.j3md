@@ -4,12 +4,16 @@ MaterialDef Shadow filter check {
         Vector2 AtlasSize
         Vector4 Rect
         Float Radius
+        Vector2 PlaneSlope
     }
     Technique {
         VertexShader GLSL150: Common/MatDefs/Misc/Unshaded.vert
         FragmentShader GLSL150: MatDefs/ShadowFilterCheck.frag
         WorldParameters {
             WorldViewProjectionMatrix
+        }
+        Defines {
+            PLANE: PlaneSlope
         }
         RenderState {
             DepthTest Off

@@ -63,8 +63,9 @@ float ShadowFilter_Box(JME_FILTER_SAMPLER tex, vec2 uv, vec2 mapSize,
     return visibility / (kernel * kernel);
 }
 
-float ShadowFilter_Tent(JME_FILTER_SAMPLER tex, vec2 uv, vec2 mapSize,
-        vec4 rect, float referenceDepth, float radius) {
+// Gradient is depth per atlas UV, not per tile UV. Legacy callers pass zero.
+float ShadowFilter_TentPlane(JME_FILTER_SAMPLER tex, vec2 uv, vec2 mapSize,
+        vec4 rect, float referenceDepth, float radius, vec2 depthGradient) {
     vec2 texel = 1.0 / mapSize;
     vec2 lo = rect.xy + texel * 0.5;
     vec2 hi = rect.xy + rect.zw - texel * 0.5;
@@ -96,10 +97,18 @@ float ShadowFilter_Tent(JME_FILTER_SAMPLER tex, vec2 uv, vec2 mapSize,
                 continue;
             }
             vec2 sampleUv = clamp((base + vec2(float(x), float(y)) + 0.5) * texel, lo, hi);
-            visibility += weight * ShadowFilter_Compare(tex, sampleUv, referenceDepth);
+            // Use the actual clamped texel center: an offset outside the tile
+            // must not extrapolate depth beyond the sample we really read.
+            float correction = clamp(dot(depthGradient, sampleUv - uv), -0.02, 0.02);
+            visibility += weight * ShadowFilter_Compare(tex, sampleUv, referenceDepth + correction);
             totalWeight += weight;
         }
     }
     return visibility / max(totalWeight, 0.00001);
+}
+
+float ShadowFilter_Tent(JME_FILTER_SAMPLER tex, vec2 uv, vec2 mapSize,
+        vec4 rect, float referenceDepth, float radius) {
+    return ShadowFilter_TentPlane(tex, uv, mapSize, rect, referenceDepth, radius, vec2(0.0));
 }
 #endif
