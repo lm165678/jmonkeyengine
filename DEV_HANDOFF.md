@@ -190,3 +190,5 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - Both engine and SDK AGENTS.md now require startup reading of their handoff and the engine rendering roadmap, including on machine switches. Relevant backlog reminders are required; plans do not imply implementation.
 - Documentation only; implementation baselines unchanged. No build, commit or push.
 
+## 2026-11-17 paired implementation snapshot
+- Engine implementation: 4ee85daa4; SDK implementation: e38d71c5. These identify the paired source snapshots, not a newly validated binary release. No additional build/runtime checks for this Git request. Earlier test results and unresolved issues remain as documented.
