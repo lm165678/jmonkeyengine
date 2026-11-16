@@ -1021,6 +1021,15 @@ tasks.register('giVisibilityFilteringSmoke', JavaExec) {
     enableAssertions = true
 }
 
+tasks.register('giCompactVisibilitySmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiVisibilityFiltering'
+    classpath = sourceSets.main.runtimeClasspath
+    systemProperty 'gi.test.compact', 'true'
+    enableAssertions = true
+}
+
 tasks.register('giProbeCellContinuitySmoke', JavaExec) {
     group = 'verification'
     dependsOn 'classes'

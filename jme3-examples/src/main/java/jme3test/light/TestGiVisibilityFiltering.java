@@ -29,12 +29,22 @@ import java.nio.ByteBuffer;
  * foreground/background moments manufacture variance; fully blocked probes
  * remain blocked. The normal hemisphere and spatial-stencil tests must also
  * remain valid when the angular support is widened.
+ * The companion {@code giCompactVisibilitySmoke} task retains eight probes and
+ * four moment taps. It checks planar illumination and fully blocked probes on
+ * the same four paths and two materials. The compact moment filter can still
+ * merge foreground/background distributions; it does not claim the strict
+ * checkerboard occlusion guarantee of the wide reference mode.
+ * Receiver-plane correction uses triangle geometry, while normal maps continue
+ * to affect irradiance. Existing bakes and the default eight-probe mode remain
+ * usable without new application setup or changes to saved intensity.
  * <pre>
  * 第一步：普通应用加载包含 GI 的 J3O，自动场景服务会接入可见性过滤。
  * 第二步：无需平滑开关，也无需重烘焙；关闭 GI 则恢复没有体积间接光的结果。
  * 第三步：本例在渲染线程构造近远深度交界，验证遮挡不会借用背景深度。
  * 第四步：面背后探针即使距离图判断可见也不得贡献；普通模式和稳定模式均验证。
  * 第五步：旧平滑标志不再启用漏光权重。绑定在渲染线程释放。
+ * 第六步：运行 giCompactVisibilitySmoke 检查默认八探针的平面照明和完整遮挡。
+ * 第七步：原场景保持八探针及原亮度，无需重新烘焙；模型法线贴图仍用于照明。
  * </pre>
  */public final class TestGiVisibilityFiltering extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
@@ -46,6 +56,7 @@ import java.nio.ByteBuffer;
     private static final int PLANE_STEPS = 17;
     private final int[] planeValues = new int[PLANE_STEPS];
     private final int[] values = new int[7];
+    private static final boolean COMPACT = Boolean.getBoolean("gi.test.compact");
 
     public static void main(String[] args) {
         TestGiVisibilityFiltering app = new TestGiVisibilityFiltering();
@@ -130,7 +141,7 @@ import java.nio.ByteBuffer;
         sh.put(source.getData(0).duplicate().clear()).clear();
         int columns = source.getWidth() / 9;
         int resolution = variant == 4 ? 8 : 4;
-        atlas.z = 0.015625f + resolution + (variant >= 2 ? 0.03125f : 0f) + (variant == 6 || (planeSweep && planeCase >= 8) ? 0.125f : 0f);
+        atlas.z = (COMPACT ? 0f : 0.015625f) + resolution + (variant >= 2 ? 0.03125f : 0f) + (variant == 6 || (planeSweep && planeCase >= 8) ? 0.125f : 0f);
         material.setVector4("GiAtlas", atlas);
         int width = columns * resolution;
         int height = source.getHeight() * resolution;
@@ -214,7 +225,18 @@ import java.nio.ByteBuffer;
             values[variant] = value;
             if (variant == 6) {
                 System.out.println("GI_VISIBILITY values=" + java.util.Arrays.toString(values));
-                if (values[0] < 40 || Math.abs(values[1] - values[3]) > 1
+                if (COMPACT) {
+                    if (values[0] < 40 || Math.abs(values[1] - values[3]) > 1
+                            || values[1] >= values[0] / 2 || Math.abs(values[4] - values[0]) > 2) {
+                        throw new AssertionError("Compact visibility lost planar illumination or blocker rejection");
+                    }
+                    if (frame == 56 * 3 - 1) {
+                        binding.close();
+                        data.dispose();
+                        System.out.println("GI_COMPACT_VISIBILITY_PASS");
+                        stop();
+                    }
+                } else if (values[0] < 40 || Math.abs(values[1] - values[3]) > 1
                         || values[2] <= values[1] || values[2] >= values[0] - 10
                         || Math.abs(values[4] - values[0]) > 2
                         || Math.abs(values[5] - values[1]) > 1 || Math.abs(values[6] - values[1]) > 1) {

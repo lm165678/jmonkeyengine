@@ -110,17 +110,36 @@ float giReadVisibility(float probe, vec3 direction, vec3 normal, float distanceT
     }
     return result;
 }
-// Eight-probe path: filter the distance distribution before evaluating visibility.
+// Translate each angular distance distribution to the central receiver ray
+// before merging it. A flat receiver otherwise manufactures variance from its
+// own slope, admitting differently colored occluded probes at wall contacts.
+// Keep the variance of each distribution unchanged by this translation.
+vec2 giPlaneMoment(float probe, vec2 pixel, vec3 direction, vec3 planeNormal,
+        float distanceToProbe, vec4 atlasInfo, vec4 dimensions) {
+    vec2 moments = giMomentTexel(probe, pixel, atlasInfo, dimensions);
+    float size = floor(atlasInfo.w);
+    vec3 tapDirection = giOctDecode((giWrapMomentPixel(pixel, size) + 0.5) * (2.0 / size) - 1.0);
+    float denominator = dot(tapDirection, planeNormal);
+    float numerator = dot(direction, planeNormal);
+    if (abs(denominator) > 0.05 && numerator * denominator > 0.0) {
+        float support = smoothstep(0.05, 0.1, abs(denominator))
+                * smoothstep(0.0, 0.05, abs(numerator));
+        moments.x += support * distanceToProbe * (1.0 - numerator / denominator);
+    }
+    return moments;
+}
+// Eight probes still use four moment taps. Near the plane horizon, smoothly
+// retain the original distribution rather than extrapolating unbounded depth.
 // Stored standard deviations cannot be linearly filtered as second moments.
-float giCompactVisibility(float probe, vec3 direction, float distanceToProbe,
+float giCompactVisibility(float probe, vec3 direction, vec3 planeNormal, float distanceToProbe,
         vec4 atlasInfo, vec4 dimensions) {
     vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * floor(atlasInfo.w) - 0.5;
     vec2 a = fract(p);
     vec2 b = floor(p);
-    vec2 m0 = giMomentTexel(probe, b, atlasInfo, dimensions);
-    vec2 m1 = giMomentTexel(probe, b + vec2(1.0, 0.0), atlasInfo, dimensions);
-    vec2 m2 = giMomentTexel(probe, b + vec2(0.0, 1.0), atlasInfo, dimensions);
-    vec2 m3 = giMomentTexel(probe, b + vec2(1.0), atlasInfo, dimensions);
+    vec2 m0 = giPlaneMoment(probe, b, direction, planeNormal, distanceToProbe, atlasInfo, dimensions);
+    vec2 m1 = giPlaneMoment(probe, b + vec2(1.0, 0.0), direction, planeNormal, distanceToProbe, atlasInfo, dimensions);
+    vec2 m2 = giPlaneMoment(probe, b + vec2(0.0, 1.0), direction, planeNormal, distanceToProbe, atlasInfo, dimensions);
+    vec2 m3 = giPlaneMoment(probe, b + vec2(1.0), direction, planeNormal, distanceToProbe, atlasInfo, dimensions);
     float mean = mix(mix(m0.x, m1.x, a.x), mix(m2.x, m3.x, a.x), a.y);
     // Parallel-axis variance merge, avoiding cancellation of large squared means.
     vec4 d = vec4(m0.x, m1.x, m2.x, m3.x) - mean;
@@ -154,6 +173,11 @@ float giSpatialKernel(float distance) {
 vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
         vec3 counts, vec2 encoding, vec4 atlasInfo, vec4 dimensions, float fade, bool metadata, out vec2 skyResult) {
     skyResult = vec2(1.0, 0.0);
+    // Evaluate derivatives before coverage/probe branches. Normal maps describe
+    // lighting detail, not the plane intersected by the baked distance rays.
+    // A degenerate screen-space triangle leaves a zero plane and no correction.
+    vec3 receiverPlane = cross(dFdx(worldPosition), dFdy(worldPosition));
+    receiverPlane *= inversesqrt(max(dot(receiverPlane, receiverPlane), 1.0e-20));
     vec3 coordinate = (worldPosition - origin) / spacing;
     if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, counts - 1.0))) {
         return vec4(0.0);
@@ -264,7 +288,7 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
         }
         float visibility;
         if (!wide && !surfaceLayout) {
-            visibility = giCompactVisibility(probe, direction, distanceToProbe / encoding.x, atlasInfo, dimensions);
+            visibility = giCompactVisibility(probe, direction, receiverPlane, distanceToProbe / encoding.x, atlasInfo, dimensions);
         } else {
             visibility = giReadVisibility(probe, direction, normal, distanceToProbe / encoding.x, atlasInfo, dimensions);
         }
