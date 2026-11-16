@@ -226,7 +226,10 @@ public class SpotLightShadowRenderer extends AbstractShadowRenderer {
      * @return true if intersects, otherwise false
      */
     @Override
-    protected boolean checkCulling(Camera viewCam) {      
+    protected boolean checkCulling(Camera viewCam) {
+        if (light == null || !light.isEnabled() || !light.isCastShadow()) {
+            return false;
+        }
         Camera cam = viewCam;
         if(frustumCam != null){
             cam = frustumCam;            

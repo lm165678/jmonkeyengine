@@ -1,4 +1,9 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/GI/ProbeSampling.glsllib"
+#ifdef GI_PROBES
+varying vec3 giWorldPosition;
+varying vec3 giWorldNormal;
+#endif
 #import "Common/ShaderLib/DeferredSurface.glsllib"
 #import "Common/ShaderLib/SurfaceCapture.glsllib"
 
@@ -74,6 +79,10 @@ void main(){
         // Unshaded is explicitly treated as emissive, never as diffuse reflectance.
         writeSurfaceAttributes(vec3(0.0), captureNormal, color.rgb);
         return;
+    #endif
+    #ifdef GI_PROBES
+        // Explicit additive receiver mode preserves the original unlit base.
+        color.rgb += color.rgb * giSampleIrradiance(giWorldPosition, normalize(giWorldNormal)) / 3.14159265359;
     #endif
     gl_FragColor = color;
     #ifdef DEFERRED_GBUFFER

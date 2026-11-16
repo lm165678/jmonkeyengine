@@ -94,6 +94,39 @@ import java.util.logging.Logger;
  * viewports.
  */
 public class RenderManager {
+    private final java.util.Map<ViewPort, com.jme3.shadow.ShadowManager> shadowManagers = new java.util.IdentityHashMap<>();
+    private com.jme3.shadow.ShadowManager currentShadows;
+
+    /**
+     * Returns the viewport's automatic, per-light shadow policy. See ShadowManager
+     * for configuration, defaults and render-thread usage. Lights cast by default;
+     * Light.castShadow and viewport settings can independently disable casting.
+     */
+    public com.jme3.shadow.ShadowManager getShadowManager(ViewPort viewport) {
+        return shadowManagers.computeIfAbsent(viewport, key -> new com.jme3.shadow.ShadowManager(this, key));
+    }
+
+    /** Releases shadow resources of a temporary viewport, outside rendering. */
+    public void releaseShadowManager(ViewPort viewport) {
+        com.jme3.shadow.ShadowManager shadows = shadowManagers.remove(viewport);
+        if (shadows != null) {
+            shadows.close();
+        }
+    }
+
+    /** Current viewport's managed record index, or -1 outside managed drawing. */
+    public int getShadowLightIndex(com.jme3.light.Light light) {
+        return currentShadows == null ? -1 : currentShadows.getLightIndex(light);
+    }
+
+    /** Internal material/deferred binding hook; returns the next free texture unit. */
+    public int bindManagedShadows(Shader shader, int unit) {
+        if (currentShadows == null || getForcedTechnique() != null || getForcedMaterial() != null) {
+            shader.getUniform("g_ManagedShadows").setValue(com.jme3.shader.VarType.Boolean, false);
+            return unit;
+        }
+        return currentShadows.bind(shader, unit);
+    }
     private RenderPath renderPath = RenderPath.Forward;
     private int deferredTileSize = 16;
     private final ViewportPipelines pipelines = new ViewportPipelines(this);
@@ -265,6 +298,10 @@ public class RenderManager {
 
     /** Releases pipelines owned by this manager while the graphics context is current. */
     public void cleanupRenderPaths() {
+        for (com.jme3.shadow.ShadowManager shadows : shadowManagers.values()) {
+            shadows.close();
+        }
+        shadowManagers.clear();
         try {
             pipelines.cleanup();
         } finally {
@@ -280,6 +317,7 @@ public class RenderManager {
     }
 
     private void cleanupRenderPath(ViewPort viewport) {
+        releaseShadowManager(viewport);
         try {
             pipelines.remove(viewport);
         } finally {
@@ -1787,6 +1825,7 @@ public class RenderManager {
             }
         }).sideEffect().after(prepareOutput);
         FrameGraph.PassBuilder shadowAndPostQueue = graph.addExpansionPass("ShadowAndPostQueue", current -> {
+            current.addExpansionPass("ManagedShadows", target -> getShadowManager(vp).appendPasses(target));
             if (processors != null) {
                 if (prof != null) {
                     prof.vpStep(VpStep.PostQueue, vp, null);
@@ -1842,12 +1881,16 @@ public class RenderManager {
         Material previousMaterial = forcedMaterial;
         String previousTechnique = forcedTechnique;
         RenderState previousState = forcedRenderState;
+        com.jme3.shadow.ShadowManager previousShadows = currentShadows;
+        currentShadows = getShadowManager(vp);
         try {
             graph.execute(this, vp, vp.getQueue());
         } finally {
             setForcedMaterial(previousMaterial);
             setForcedTechnique(previousTechnique);
             setForcedRenderState(previousState);
+            currentShadows.finishFrame();
+            currentShadows = previousShadows;
             // Do not retain queued geometry or overridden depth ranges after a failed pass.
             clearQueue(vp);
             renderer.setDepthRange(0, 1);

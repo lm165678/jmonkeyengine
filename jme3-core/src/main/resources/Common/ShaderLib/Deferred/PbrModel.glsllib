@@ -18,7 +18,7 @@ struct PbrSurface {
 };
 // PBR uses upstream inverse-square attenuation. Phong/custom models retain
 // getLight's legacy attenuation; changing that shared helper would alter them.
-DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition) {
+DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition, vec3 normal) {
     int index = list.allLights ? entry : readLightIndex(list.offset + entry);
     vec4 colorAndType = texelFetch(Lights, ivec2(0, index), 0);
     vec4 positionAndRadius = texelFetch(Lights, ivec2(1, index), 0);
@@ -27,7 +27,8 @@ DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition)
     vec3 vector = positional ? positionAndRadius.xyz - worldPosition : -positionAndRadius.xyz;
     float distance = max(length(vector), 0.00001);
     DeferredLight light;
-    light.color = colorAndType.rgb;
+    light.color = colorAndType.rgb * managedShadow(texelFetch(Lights, ivec2(3, index), 0).x,
+            worldPosition, normal, getReceivesShadow());
     light.direction = vector / distance;
     light.attenuation = 1.0;
     if (positional) {
@@ -83,7 +84,7 @@ vec4 shadePbrSurface() {
     DeferredLightList lights = getLightList();
     vec3 result = surface.indirect;
     for (int entry = 0; entry < lights.count; ++entry) {
-        DeferredLight light = getPbrLight(lights, entry, position);
+        DeferredLight light = getPbrLight(lights, entry, position, surface.normal);
         result += evaluatePbrLight(surface, viewDirection, light);
     }
     return vec4(result, surface.opacity);

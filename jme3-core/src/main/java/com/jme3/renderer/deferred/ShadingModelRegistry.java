@@ -172,7 +172,12 @@ public final class ShadingModelRegistry {
      * getViewDirection(position), getLightList() and getLight(list, entry, position).
      * The returned DeferredLight contains color, direction and attenuation.
      * Full-surface functions return final RGB/opacity and apply attenuation themselves.
-     * Only gbuffer0.a is reserved for shadingId; depth has its own attachment.
+     * Only gbuffer0.a is reserved for the shared header; depth has its own attachment.
+     * Its integer part is shadingId; fractional 0.25 disables shadow receiving.
+     * Use writeGBuffer() to preserve the geometry's ShadowMode and getShadingId()
+     * to decode the header. getLight() applies only that light's managed shadow to
+     * its color; an overload accepts a world normal for normal bias. Other channels
+     * remain model-owned, including normals and indirect illumination.
      *
      * <p>Compatibility: vec3 deferredModel7(vec4 record0, vec4 record1, vec4 record2,
      * vec4 record3, vec3 viewDir, vec3 lightDir, vec3 lightColor) remains supported.

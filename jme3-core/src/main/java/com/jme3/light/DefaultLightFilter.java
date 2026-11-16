@@ -100,7 +100,9 @@ public final class DefaultLightFilter implements LightFilter {
                     }
                 }
 
-                if (light.getType() == Light.Type.Probe) {
+                if (light instanceof SkyLight && ((SkyLight) light).isReady()) {
+                    filteredLightList.add(light);
+                } else if (light.getType() == Light.Type.Probe) {
                     probeBlendStrategy.registerProbe((LightProbe) light);
                 } else {
                     filteredLightList.add(light);

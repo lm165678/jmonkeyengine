@@ -1,0 +1,231 @@
+package com.jme3.app;
+
+import com.jme3.app.state.AbstractAppState;
+import com.jme3.app.state.AppStateManager;
+import com.jme3.asset.AssetKey;
+import com.jme3.environment.gi.*;
+import com.jme3.material.Material;
+import com.jme3.math.Vector3f;
+import com.jme3.renderer.Limits;
+import com.jme3.scene.*;
+import java.io.FileNotFoundException;
+import java.util.*;
+import java.util.concurrent.*;
+
+/**
+ * Automatic runtime services for the SimpleApplication world root. Loading an
+ * asset alone has no side effects: attaching it to the root activates services
+ * on the next application frame. Detached scenes release their registrations.
+ * Serialized GI volumes create a lazy page streamer; PhysicsControl instances
+ * create/reuse a BulletAppState when an optional Bullet implementation is present.
+ * Existing physics-space assignments are never stolen. Custom controls, sounds
+ * and animation clips are not automatically started. SkyLightControl and managed
+ * light shadows retain their own existing renderer lifecycle.
+ * Adaptive refinement children are ordinary serialized GiProbeVolume nodes:
+ * discovery, external payload loading and shader binding are automatic too.
+ * Ship every referenced .giprobe asset with the J3O. Loading never rebakes GI.
+ *
+ * <p>Default GI budget is 256 MiB (including page CPU mirrors), preload distance
+ * 200 world units, unload multiplier 1.3, upload budget 1 MiB / 2 ms (soft).
+ * At most 16 volumes are active. External GI assets must ship alongside J3O.
+ * Embedded bake payloads remain scene-owned even when evicted from GPU memory.
+ * Headless renderers without texture limits leave GI inactive; physics still runs.
+ * All configuration, attachment and queries below belong on the application
+ * thread. Worker threads only load/decompress immutable external payloads.
+ *
+ * <pre>{@code
+ * // 第一步：普通加载并挂载即可；不创建 GI 或物理管理器。
+ * rootNode.attachChild(assetManager.loadModel("Scenes/World.j3o"));
+ * // 第二步：下一帧服务按需创建后，可以读取并调整现有管理对象。
+ * SceneServicesState services = getSceneServices();
+ * GiProbeStreamer gi = services.getGiStreamer(); // 尚未出现 GI 时返回 null
+ * if (gi != null) {
+ *     gi.setUploadBudget(512 * 1024, 1_000_000);
+ * }
+ * // 若应用依赖 Bullet：stateManager.getState(BulletAppState.class)。
+ * // 第三步：切回手动管理前禁用自动服务；恢复开启会重新扫描场景。
+ * services.setEnabled(false);
+ * services.setEnabled(true);
+ * // 第四步：移除场景后自动注销；应用销毁时释放自建线程池和服务。
+ * }</pre>
+ * GI bindings exist only during rendering and are restored in a finally block,
+ * so saving a J3O never serializes the transient multi-volume atlas. Physics
+ * controls remain registered while attached; disabled controls remain disabled.
+ */
+public final class SceneServicesState extends AbstractAppState {
+    private SimpleApplication app;
+    private final ScenePhysicsBridge physics = new ScenePhysicsBridge();
+    private final Map<GiProbeVolume, Source> sources = new IdentityHashMap<>();
+    private final Set<Material> bound = Collections.newSetFromMap(new IdentityHashMap<>());
+    private GiProbeStreamer gi;
+    private ExecutorService io;
+    private long sequence;
+
+    private static final class Source {
+        String id;
+        GiProbeData data;
+        String asset;
+        Vector3f offset;
+    }
+
+    @Override
+    public void initialize(AppStateManager manager, Application application) {
+        super.initialize(manager, application);
+        app = (SimpleApplication) application;
+    }
+
+    /** Lazy runtime instance, or null when no valid volume is attached. Never owns scene bake data. */
+    public GiProbeStreamer getGiStreamer() {
+        return gi;
+    }
+
+    @Override
+    public void update(float tpf) {
+        physics.update(app);
+    }
+
+    /** Internal SimpleApplication render hook, after geometric updates. */
+    void prepareRender() {
+        if (!isEnabled() || !isInitialized()) {
+            return;
+        }
+        Integer textureLimit = app.getRenderer().getLimits().get(Limits.TextureSize);
+        if (textureLimit == null || textureLimit < 16) {
+            closeGi();
+            return;
+        }
+        Set<GiProbeVolume> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Material> materials = Collections.newSetFromMap(new IdentityHashMap<>());
+        app.getRootNode().depthFirstTraversal(spatial -> {
+            if (spatial instanceof GiProbeVolume) {
+                GiProbeVolume volume = (GiProbeVolume) spatial;
+                if (volume.getData() != null || volume.getStreamAsset() != null) {
+                    seen.add(volume);
+                }
+            }
+            if (spatial instanceof Geometry) {
+                Material material = ((Geometry) spatial).getMaterial();
+                if (material != null) {
+                    materials.add(material);
+                }
+            }
+        });
+        if (seen.isEmpty()) {
+            closeGi();
+            return;
+        }
+        if (gi == null) {
+            io = Executors.newFixedThreadPool(2, runnable -> {
+                Thread thread = new Thread(runnable, "jME GI streaming");
+                thread.setDaemon(true);
+                return thread;
+            });
+            gi = new GiProbeStreamer(io, 256L << 20,
+                    textureLimit, 200, app.getRenderer());
+            gi.setUnloadMultiplier(1.3);
+        }
+        Iterator<Map.Entry<GiProbeVolume, Source>> iterator = sources.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<GiProbeVolume, Source> entry = iterator.next();
+            if (!seen.contains(entry.getKey())) {
+                gi.unregister(entry.getValue().id);
+                iterator.remove();
+            }
+        }
+        for (GiProbeVolume volume : seen) {
+            GiProbeData data = volume.getData();
+            String asset = volume.getStreamAsset();
+            Vector3f offset = volume.getWorldTranslation();
+            Source old = sources.get(volume);
+            if (old != null && old.data == data && Objects.equals(old.asset, asset)
+                    && old.offset.equals(offset)) {
+                gi.setAppearance(old.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending());
+                continue;
+            }
+            if (old != null) {
+                gi.unregister(old.id);
+            }
+            Source source = new Source();
+            source.id = "scene-volume-" + sequence++;
+            source.data = data;
+            source.asset = asset;
+            source.offset = offset.clone();
+            GiProbeGrid grid = data == null ? volume.getBakeGrid() : data.getGrid();
+            Vector3f size = grid.getCounts().subtract(1, 1, 1).multLocal(grid.getSpacing());
+            if (asset == null) {
+                gi.register(GiProbeStreamer.Chunk.borrowed(source.id,
+                        offset.x, offset.y, offset.z, size, data));
+            } else {
+                com.jme3.asset.AssetManager assets = app.getAssetManager();
+                gi.register(new GiProbeStreamer.Chunk(source.id, offset.x, offset.y, offset.z,
+                        size, volume.getStreamBytes(), () -> {
+                            com.jme3.asset.AssetInfo info = assets.locateAsset(new AssetKey<>(asset));
+                            if (info == null) {
+                                throw new FileNotFoundException(asset);
+                            }
+                            try (java.io.InputStream input = info.openStream()) {
+                                return GiProbeData.loadCompressed(input);
+                            }
+                        }));
+            }
+            sources.put(volume, source);
+            gi.setAppearance(source.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending());
+        }
+        gi.update(app.getCamera().getLocation(), 0, 0, 0);
+        for (Material material : materials) {
+            if (supportsGi(material)) {
+                gi.addMaterial(material);
+                bound.add(material);
+            }
+        }
+    }
+
+    private boolean supportsGi(Material material) {
+        for (String name : new String[]{"GiIrradiance", "GiMoments", "GiVolumeData",
+                "GiVolumeCount", "GiTextureSize", "GiBias", "GiEnabled", "GiSkyVisibility"}) {
+            if (material.getMaterialDef().getMaterialParam(name) == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void finishRender() {
+        if (gi != null) {
+            for (Material material : bound) {
+                gi.removeMaterial(material);
+            }
+        }
+        bound.clear();
+    }
+
+    private void closeGi() {
+        finishRender();
+        if (gi != null) {
+            gi.close();
+            gi = null;
+        }
+        if (io != null) {
+            io.shutdownNow();
+            io = null;
+        }
+        sources.clear();
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        if (!enabled) {
+            closeGi();
+            physics.close();
+        }
+        super.setEnabled(enabled);
+    }
+
+    @Override
+    public void cleanup() {
+        closeGi();
+        physics.close();
+        app = null;
+        super.cleanup();
+    }
+}

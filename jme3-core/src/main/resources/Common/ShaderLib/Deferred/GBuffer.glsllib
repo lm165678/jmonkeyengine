@@ -1,5 +1,7 @@
 // Raw storage, not material attributes. Only gbuffer0.a is shared metadata:
-// it stores shadingId (0 means no deferred surface). Every model owns the meaning
+// its integer part stores shadingId (0 means no deferred surface). Fractional
+// 0.25 disables receiving shadows; this header carries no material attributes.
+// Every model owns the meaning
 // of all remaining channels, including opacity. Depth is a separate attachment.
 uniform sampler2D gbuffer0;
 uniform sampler2D gbuffer1;
@@ -37,6 +39,9 @@ vec4 getGBuffer4() {
 
 int getShadingId() {
     return int(getGBuffer0().a);
+}
+bool getReceivesShadow() {
+    return fract(getGBuffer0().a) < 0.125;
 }
 float getSurfaceDepth() {
     return texelFetch(gbufferDepth, getGBufferPixel(), 0).r;

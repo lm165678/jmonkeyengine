@@ -737,6 +737,18 @@
                     color3.rgb *= finalLightingScale;
                 #endif
 
+                #ifdef ENVIRONMENT_LIGHTING
+                    environmentReflectionCoverage = smoothstep(0.0, 0.2, 1.0 - ndf);
+                    #if NB_PROBES >= 2
+                        environmentReflectionCoverage = max(environmentReflectionCoverage, smoothstep(0.0, 0.2, 1.0 - ndf2));
+                    #endif
+                    #if NB_PROBES == 3
+                        environmentReflectionCoverage = max(environmentReflectionCoverage, smoothstep(0.0, 0.2, 1.0 - ndf3));
+                    #endif
+                    weight1 *= environmentReflectionCoverage;
+                    weight2 *= environmentReflectionCoverage;
+                    weight3 *= environmentReflectionCoverage;
+                #endif
                 surface.envLightContribution.rgb += color1 * clamp(weight1,0.0,1.0) + color2 * clamp(weight2,0.0,1.0) + color3 * clamp(weight3,0.0,1.0);
                 
             #endif

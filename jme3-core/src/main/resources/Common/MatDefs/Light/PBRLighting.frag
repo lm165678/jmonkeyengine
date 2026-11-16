@@ -1,4 +1,7 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/ManagedShadows.glsllib"
+#import "Common/ShaderLib/GI/ProbeSampling.glsllib"
+#import "Common/ShaderLib/EnvironmentLighting.glsllib"
 #import "Common/ShaderLib/DeferredSurface.glsllib"
 #import "Common/ShaderLib/SurfaceCapture.glsllib"
 
@@ -20,6 +23,7 @@
 #endif
 
 uniform vec4 g_LightData[NB_LIGHTS];
+uniform vec4 g_ShadowIndices[NB_LIGHTS];
 uniform int g_LightCount;
 uniform bool g_IsFirstLightPass;
 uniform vec3 g_CameraPosition;
@@ -56,6 +60,7 @@ void main(){
         }
         #endif
         vec4 lightData0 = g_LightData[i];
+        lightData0.rgb *= managedShadow(g_ShadowIndices[i / 3].x, wpos, surface.normal, g_ShadowReceive);
         vec4 lightData1 = g_LightData[i+1];
         vec4 lightData2 = g_LightData[i+2];    
         PBRLightingUtils_computeDirectLightContribution(
@@ -69,14 +74,34 @@ void main(){
 
     prepareDeferredPbrIndirect(surface);
 
+    vec3 volumeIrradiance = vec3(0.0);
+    #ifdef GI_PROBES
+        volumeIrradiance = giSampleIrradiance(wpos, surface.normal);
+    #endif
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);
+    #ifdef ENVIRONMENT_LIGHTING
+        surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, surface.normal),
+                surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight;
+        // Local reflections replace distant sky specular; they do not add energy.
+        if (g_EnvironmentData.z > 0.5) {
+            vec3 reflected = getSpecularDominantDir(surface.normal,
+                    reflect(-surface.viewDir, surface.normal), surface.roughness * surface.roughness);
+            surface.envLightContribution += ApproximateSpecularIBLPolynomial(g_SkyMap,
+                    surface.specularColor, surface.roughness, surface.NdotV, reflected,
+                    g_SkyMipCount) * (1.0 - environmentReflectionCoverage) * computeSpecularAO(clamp(surface.ao.r, 0.0, 1.0),
+                    surface.roughness, surface.NdotV);
+        }
+    #endif
 
     // Put it all together
     gl_FragColor.rgb = surface.directLightContribution;
     // Additional passes accumulate only their batch of direct lights.
     if (g_IsFirstLightPass) {
         gl_FragColor.rgb += surface.bakedLightContribution;
+        #ifdef GI_PROBES
+            gl_FragColor.rgb += shLambertResponse(volumeIrradiance, surface.diffuseColor, surface.ao.r);
+        #endif
         gl_FragColor.rgb += surface.envLightContribution;
         gl_FragColor.rgb += surface.emission;
     }

@@ -89,6 +89,14 @@ varying vec3 lightVec;
     }
 #endif
 
+
+varying vec3 giWorldPosition;
+varying vec3 giWorldNormal;
+#if defined(NORMALMAP) && !defined(VERTEX_LIGHTING)
+varying vec4 giWorldTangent;
+#endif
+varying vec3 giDiffuseReflectance;
+
 void main(){
    vec4 modelSpacePos = vec4(inPosition, 1.0);
    vec3 modelSpaceNorm = inNormal;
@@ -113,7 +121,19 @@ void main(){
         #endif
    #endif
 
-   gl_Position = TransformWorldViewProjection(modelSpacePos);// g_WorldViewProjectionMatrix * modelSpacePos;
+        giWorldPosition = TransformWorld(modelSpacePos).xyz;
+        giWorldNormal = TransformWorldNormal(modelSpaceNorm);
+        #if defined(NORMALMAP) && !defined(VERTEX_LIGHTING)
+            giWorldTangent = vec4(TransformWorld(vec4(modelSpaceTan, 0.0)).xyz, inTangent.w);
+        #endif
+        giDiffuseReflectance = vec3(1.0);
+        #ifdef MATERIAL_COLORS
+            giDiffuseReflectance = m_Diffuse.rgb;
+        #endif
+        #ifdef VERTEX_COLOR
+            giDiffuseReflectance *= inColor.rgb;
+        #endif
+    gl_Position = TransformWorldViewProjection(modelSpacePos);// g_WorldViewProjectionMatrix * modelSpacePos;
    texCoord = inTexCoord;
    #ifdef SEPARATE_TEXCOORD
       texCoord2 = inTexCoord2;

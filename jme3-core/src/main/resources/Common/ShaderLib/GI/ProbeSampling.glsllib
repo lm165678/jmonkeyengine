@@ -1,0 +1,357 @@
+#import "Common/ShaderLib/GI/ProbeMath.glsllib"
+
+// Set once per surface before evaluating environment and material response.
+float giEnvironmentDiffuseWeight = 1.0;
+float giSkyDiffuseWeight = 1.0;
+#ifdef GI_PROBES
+uniform float m_GiEnvironmentMix;
+uniform float m_GiFadeDistance;
+uniform sampler2D m_GiIrradiance;
+uniform sampler2D m_GiMoments;
+uniform sampler2D m_GiSkyVisibility;
+uniform vec3 m_GiOrigin;
+uniform vec3 m_GiSpacing;
+uniform vec3 m_GiCounts;
+uniform vec4 m_GiAtlas;
+uniform float m_GiBias;
+uniform bool m_GiEnabled;
+uniform vec2 m_GiEncoding;
+uniform sampler2D m_GiVolumeData;
+uniform int m_GiVolumeCount;
+uniform vec4 m_GiTextureSize;
+
+vec4 giReadCoefficient(float probe, float coefficient, vec4 atlasInfo, vec4 dimensions) {
+    vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));
+    vec2 pixel = vec2(tile.x * 9.0 + coefficient + 0.5, tile.y + atlasInfo.y + 0.5);
+    return texture2D(m_GiIrradiance, pixel / dimensions.xy);
+}
+
+// Mirror the octahedral edge before accessing a neighboring texel. No samples
+// may bleed into another probe tile; atlases deliberately use nearest filtering.
+vec2 giWrapMomentPixel(vec2 pixel, float size) {
+    if (pixel.x < 0.0) {
+        pixel.x = -pixel.x - 1.0;
+        pixel.y = size - 1.0 - pixel.y;
+    }
+    if (pixel.x >= size) {
+        pixel.x = 2.0 * size - 1.0 - pixel.x;
+        pixel.y = size - 1.0 - pixel.y;
+    }
+    if (pixel.y < 0.0) {
+        pixel.y = -pixel.y - 1.0;
+        pixel.x = size - 1.0 - pixel.x;
+    }
+    if (pixel.y >= size) {
+        pixel.y = 2.0 * size - 1.0 - pixel.y;
+        pixel.x = size - 1.0 - pixel.x;
+    }
+    return pixel;
+}
+
+vec2 giMomentTexel(float probe, vec2 pixel, vec4 atlasInfo, vec4 dimensions) {
+    float size = floor(atlasInfo.w);
+    pixel = giWrapMomentPixel(pixel, size);
+    vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));
+    vec4 stored = texture2D(m_GiMoments,
+            (tile * size + pixel + vec2(0.0, atlasInfo.z) + 0.5) / dimensions.zw);
+    float variance = stored.a > 0.5 ? stored.b * stored.b
+            : max(0.0, stored.g - stored.r * stored.r);
+    return vec2(stored.r, variance);
+}
+
+// Receiver-plane correction: a neighboring direction reaches the same plane
+// at a different distance. Comparing every tap with the central ray distance
+// creates a repeating self-occlusion pattern even on perfectly flat surfaces.
+float giVisibilityTap(float probe, vec2 pixel, vec3 direction, vec3 normal,
+        float distanceToProbe, vec4 atlasInfo, vec4 dimensions) {
+    float size = floor(atlasInfo.w);
+    vec3 tapDirection = giOctDecode((giWrapMomentPixel(pixel, size) + 0.5) * (2.0 / size) - 1.0);
+    float denominator = dot(tapDirection, normal);
+    float numerator = dot(direction, normal);
+    float tapDistance = distanceToProbe;
+    // Project onto the receiver plane even at grazing incidence. Clamping this
+    // ratio produces periodic false occlusion along wall/floor contacts. A tap
+    // across the plane horizon cannot represent this receiver; reject it rather
+    // than comparing its unrelated depth against the central-ray distance.
+    if (abs(denominator) <= 1.0e-6 || numerator * denominator <= 0.0) {
+        return 0.0;
+    }
+    tapDistance *= numerator / denominator;
+    vec2 moments = giMomentTexel(probe, pixel, atlasInfo, dimensions);
+    // Roundoff tolerance only, not a visibility or variance floor.
+    float tolerance = 1.0e-6 * max(abs(tapDistance), abs(moments.x));
+    return giVisibilityFromVariance(moments, max(0.0, tapDistance - tolerance));
+}
+// Filter visibility, not depth distributions. Mixing foreground and background
+// moments first invents variance and lets a blocked foreground tap borrow the
+// background depth. Evaluate each distribution independently, then interpolate
+// the resulting probabilities, like percentage-closer filtering.
+float giReadVisibility(float probe, vec3 direction, vec3 normal, float distanceToProbe,
+        vec4 atlasInfo, vec4 dimensions) {
+    vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * floor(atlasInfo.w) - 0.5;
+    vec2 a = fract(p);
+    vec2 b = floor(p);
+    // Positive cubic B-spline weights: no ringing or negative probabilities.
+    // Four taps per axis overlap continuously across octahedral texel borders.
+    vec2 a2 = a * a;
+    vec2 a3 = a2 * a;
+    vec2 w0 = (1.0 - 3.0 * a + 3.0 * a2 - a3) / 6.0;
+    vec2 w1 = (4.0 - 6.0 * a2 + 3.0 * a3) / 6.0;
+    vec2 w2 = (1.0 + 3.0 * a + 3.0 * a2 - 3.0 * a3) / 6.0;
+    vec2 w3 = a3 / 6.0;
+    float result = 0.0;
+    for (int y = 0; y < 4; y++) {
+        float wy = y == 0 ? w0.y : (y == 1 ? w1.y : (y == 2 ? w2.y : w3.y));
+        for (int x = 0; x < 4; x++) {
+            float wx = x == 0 ? w0.x : (x == 1 ? w1.x : (x == 2 ? w2.x : w3.x));
+            result += wx * wy * giVisibilityTap(probe, b + vec2(float(x), float(y)) - 1.0,
+                    direction, normal, distanceToProbe, atlasInfo, dimensions);
+        }
+    }
+    return result;
+}
+// Separable C2 edge window. A nearest-face minimum creates derivative seams
+// wherever two face distances exchange order (visible diagonal bands in GI).
+// Multiplying smooth axis windows also handles corners without that ridge.
+float giOverlapWindow(vec3 edge, vec3 width) {
+    vec3 t = clamp(edge / max(width, vec3(1.0e-6)), vec3(0.0), vec3(1.0));
+    vec3 w = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    return w.x * w.y * w.z;
+}
+
+// Quadratic B-spline support over three grid positions per axis. Its weight and
+// first derivative reach zero before a probe leaves the stencil, so rejecting
+// back-side/invalid probes cannot expose the old eight-corner cell switch.
+float giSpatialKernel(float distance) {
+    float r = abs(distance);
+    if (r < 0.5) {
+        return 0.75 - r * r;
+    }
+    float edge = max(0.0, 1.5 - r);
+    return 0.5 * edge * edge;
+}
+
+// Returns incident irradiance in linear HDR units. No material response is
+// assumed here. The world-space normal must be normalized by the caller.
+vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
+        vec3 counts, vec2 encoding, vec4 atlasInfo, vec4 dimensions, float fade, bool metadata, out vec2 skyResult) {
+    skyResult = vec2(1.0, 0.0);
+    vec3 coordinate = (worldPosition - origin) / spacing;
+    if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, counts - 1.0))) {
+        return vec4(0.0);
+    }
+    // Use the same biased position for cell selection and visibility. Otherwise
+    // a receiver exactly on a grid plane can give all usable front-side probes
+    // zero trilinear weight. Keep coverage based on the actual surface position.
+    vec3 samplePosition = worldPosition + normal * m_GiBias;
+    vec3 sampleCoordinate = clamp((samplePosition - origin) / spacing, vec3(0.0), counts - 1.0);
+    vec3 base = floor(sampleCoordinate + 0.5);
+
+    vec3 sum = vec3(0.0);
+    float total = 0.0;
+    float skySum = 0.0;
+    float weightScale = 0.0;
+    // Descriptor fractional bits: 1/2 separated sky, 1/8 stabilized mixing.
+    bool separated = fract(atlasInfo.w) > 0.25;
+    bool stabilized = mod(floor(fract(atlasInfo.w) * 8.0 + 0.01), 2.0) > 0.5;
+    bool surfaceLayout = mod(floor(fract(atlasInfo.w) * 16.0 + 0.01), 2.0) > 0.5;
+    float nextProbe = -1.0;
+    // Surface bins have eight entries at most. Compact support has unit radius
+    // in bin coordinates, so exactly 27 bins contain every possible contributor.
+    // Kernel reaches zero before a bin leaves the stencil: no nearest-K jumps.
+    for (int corner = 0; corner < 216; corner++) {
+        if (!surfaceLayout && corner >= 27) {
+            break;
+        }
+        float neighbor = float(corner);
+        vec3 offset = vec3(mod(neighbor, 3.0), mod(floor(neighbor / 3.0), 3.0),
+                floor(neighbor / 9.0)) - 1.0;
+        vec3 cell = base + offset;
+        if (!surfaceLayout && (any(lessThan(cell, vec3(0.0)))
+                || any(greaterThanEqual(cell, counts)))) {
+            continue;
+        }
+        float probe = giProbeIndex(cell, counts);
+        if (surfaceLayout) {
+            float bucket = floor(float(corner) / 8.0);
+            vec3 binCell = floor(sampleCoordinate) + vec3(mod(bucket, 3.0),
+                    mod(floor(bucket / 3.0), 3.0), floor(bucket / 9.0)) - 1.0;
+            if (any(lessThan(binCell, vec3(0.0))) || any(greaterThanEqual(binCell, counts))) {
+                continue;
+            }
+            if (mod(float(corner), 8.0) < 0.5) {
+                nextProbe = giReadCoefficient(giProbeIndex(binCell, counts), 4.0, atlasInfo, dimensions).a;
+            }
+            if (nextProbe < 0.0) {
+                continue;
+            }
+            probe = nextProbe;
+            nextProbe = giReadCoefficient(probe, 5.0, atlasInfo, dimensions).a;
+            cell = vec3(mod(probe, counts.x), mod(floor(probe / counts.x), counts.y),
+                    floor(probe / (counts.x * counts.y)));
+        }
+        vec4 c0 = giReadCoefficient(probe, 0.0, atlasInfo, dimensions);
+        if (metadata && c0.a < 0.5) {
+            continue;
+        }
+        vec4 c1 = giReadCoefficient(probe, 1.0, atlasInfo, dimensions);
+        vec4 c2 = giReadCoefficient(probe, 2.0, atlasInfo, dimensions);
+        vec4 c3 = giReadCoefficient(probe, 3.0, atlasInfo, dimensions);
+        vec3 relocation = metadata ? vec3(c1.a, c2.a, c3.a) * spacing : vec3(0.0);
+        vec3 probePosition = origin + cell * spacing + relocation;
+        float radialWeight = 1.0;
+        if (surfaceLayout) {
+            float radius = length((samplePosition - probePosition) / spacing);
+            if (radius >= 1.0) {
+                continue;
+            }
+            float falloff = 1.0 - radius;
+            radialWeight = falloff * falloff * falloff * falloff * (1.0 + 4.0 * radius);
+        }
+        vec3 delta = samplePosition - probePosition;
+        float distanceToProbe = length(delta);
+        vec3 direction = distanceToProbe > 1.0e-6 ? delta / distanceToProbe : normal;
+        vec3 gridDelta = sampleCoordinate - cell;
+        float spatialWeight = giSpatialKernel(gridDelta.x) * giSpatialKernel(gridDelta.y)
+                * giSpatialKernel(gridDelta.z);
+        float weight = surfaceLayout ? 1.0 : spatialWeight;
+        // Reject probes behind the receiver tangent plane. Wrapped weights let
+        // bright probes on the opposite face leak around depth-map silhouettes.
+        // Use signed plane distance, not a normalized direction cosine: the
+        // latter creates projection-centered hotspots near relocated probes.
+        // A 20%-of-cell transition remains constant along a flat receiver and
+        // approaches zero smoothly without admitting any back-side probes.
+        // Evaluate from the unbiased surface; visibility still uses the bias.
+        vec3 toProbe = probePosition - worldPosition;
+        float frontDistance = dot(toProbe, normal);
+        float hemisphereWidth = 0.2 * min(spacing.x, min(spacing.y, spacing.z));
+        float normalWeight = smoothstep(0.0, hemisphereWidth, frontDistance);
+        float visibility = giReadVisibility(probe, direction, normal, distanceToProbe / encoding.x, atlasInfo, dimensions);
+        // Suppress low-confidence visibility to reduce thin-wall bleeding.
+        float visibilityWeight = visibility * visibility * visibility;
+        if (stabilized) {
+            // Valid probes retain a small fallback contribution. This is an
+            // explicit quality/leakage tradeoff, not a new visibility estimate.
+            float confidence = normalWeight * max(0.05, visibilityWeight);
+            float lowWeight = min(1.0, confidence / 0.2);
+            confidence *= lowWeight * lowWeight;
+            weight *= confidence;
+        } else {
+            weight *= normalWeight * visibilityWeight;
+        }
+        weight *= radialWeight;
+        // Normalize by the largest positive weight while accumulating. An
+        // absolute epsilon on the sum creates black bands as visibility changes,
+        // although the normalized irradiance is invariant to this common scale.
+        // Strict mode excludes exact zero weights; stabilized mode applies the
+        // explicit fallback above. Invalid probes were excluded before either path.
+        if (weight <= 0.0) {
+            continue;
+        }
+        if (weight > weightScale) {
+            float rescale = weightScale / weight;
+            sum *= rescale;
+            total *= rescale;
+            skySum *= rescale;
+            weightScale = weight;
+        }
+        weight /= weightScale;
+        vec3 irradiance = giEvaluateSh9(c0.rgb, c1.rgb, c2.rgb, c3.rgb,
+                giReadCoefficient(probe, 4.0, atlasInfo, dimensions).rgb,
+                giReadCoefficient(probe, 5.0, atlasInfo, dimensions).rgb,
+                giReadCoefficient(probe, 6.0, atlasInfo, dimensions).rgb,
+                giReadCoefficient(probe, 7.0, atlasInfo, dimensions).rgb,
+                giReadCoefficient(probe, 8.0, atlasInfo, dimensions).rgb, normal) * encoding.y;
+        if (separated) {
+            vec3 skyCoefficients[9];
+            vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));
+            for (int c = 0; c < 9; c++) {
+                vec2 pixel = vec2(tile.x * 9.0 + float(c) + 0.5, tile.y + atlasInfo.y + 0.5);
+                skyCoefficients[c] = texture2D(m_GiSkyVisibility, pixel / dimensions.xy).rgb;
+            }
+            float visibility = giEvaluateSh9(skyCoefficients[0], skyCoefficients[1],
+                    skyCoefficients[2], skyCoefficients[3], skyCoefficients[4],
+                    skyCoefficients[5], skyCoefficients[6], skyCoefficients[7], skyCoefficients[8], normal).r;
+            skySum += clamp(visibility / 3.14159265359, 0.0, 1.0) * weight;
+        }
+        // Interpolate nonnegative irradiance in square-root space to reduce
+        // bright-probe dominance, then return to linear HDR before material BRDF.
+        sum += (stabilized ? sqrt(max(irradiance, vec3(0.0))) : irradiance) * weight;
+        total += weight;
+    }
+    // A grid with no usable probes must not darken a valid overlapping coarse
+    // grid or claim sky coverage. This is also the adaptive refinement fallback.
+    if (total <= 0.0) {
+        return vec4(0.0);
+    }
+    vec3 edge = min(coordinate * spacing, (counts - 1.0 - coordinate) * spacing);
+    float blend = fade > 0.0 ? giOverlapWindow(edge, vec3(fade)) : 1.0;
+    skyResult = vec2(separated && total > 0.0 ? skySum / total : 0.0, blend);
+    // Prefer dense volumes, smoothly; keep endpoints defined even at exact borders.
+    // Relative overlap weights must not attenuate the only available volume.
+    // Zero outer fade keeps room boundary surfaces lit while still smoothly
+    // transitioning between overlapping probe grids.
+    float overlap = fade > 0.0 ? blend : giOverlapWindow(edge, spacing);
+    // Hierarchical grids prefer geometric-mean sampling density, not one axis.
+    // Using full volumetric density makes a 2x refinement eight times stronger
+    // and produces an excessively steep transition at its boundary.
+    // The halo smoothly restores coarse data at brick edges; unusable fine
+    // grids returned above never take part in this blend.
+    float weight = max(1.0e-5, overlap)
+            / pow(max(spacing.x * spacing.y * spacing.z, 1.0e-12), 1.0 / 3.0);
+    vec3 result = sum / total;
+    if (stabilized) {
+        result *= result;
+    }
+    return vec4(result, weight);
+}
+
+vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
+    if (!m_GiEnabled) {
+        return vec4(0.0);
+    }
+    if (m_GiVolumeCount == 0) {
+        vec4 atlasInfo = vec4(m_GiAtlas.x, 0.0, 0.0, m_GiAtlas.z);
+        vec4 dimensions = vec4(m_GiAtlas.x * 9.0, m_GiAtlas.y, m_GiAtlas.xy * floor(m_GiAtlas.z));
+        vec2 skyResult;
+        vec4 value = giSampleVolume(worldPosition, normal, m_GiOrigin, m_GiSpacing, m_GiCounts,
+                m_GiEncoding, atlasInfo, dimensions, fract(m_GiAtlas.z) > 0.25 ? max(0.0, m_GiFadeDistance) : 0.0,
+                m_GiAtlas.w > 0.5, skyResult);
+        giSkyDiffuseWeight = mix(1.0, skyResult.x, skyResult.y);
+        return vec4(value.rgb * skyResult.y, skyResult.y);
+    }
+    vec3 sum = vec3(0.0);
+    float total = 0.0;
+    float skySum = 0.0;
+    float coverage = 0.0;
+    for (int volume = 0; volume < 16; volume++) {
+        if (volume >= m_GiVolumeCount) {
+            break;
+        }
+        float y = (float(volume) + 0.5) / float(m_GiVolumeCount);
+        vec4 origin = texture2D(m_GiVolumeData, vec2(0.125, y));
+        vec4 spacing = texture2D(m_GiVolumeData, vec2(0.375, y));
+        vec4 counts = texture2D(m_GiVolumeData, vec2(0.625, y));
+        // Unpublished/free page slots contain zero counts.
+        if (any(lessThan(counts.xyz, vec3(2.0)))) {
+            continue;
+        }
+        vec4 atlasInfo = texture2D(m_GiVolumeData, vec2(0.875, y));
+        vec2 skyResult;
+        vec4 value = giSampleVolume(worldPosition, normal, origin.xyz, spacing.xyz, counts.xyz,
+                vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult);
+        skySum += skyResult.x * value.a;
+        coverage = max(coverage, skyResult.y);
+        sum += value.rgb * value.a;
+        total += value.a;
+    }
+    giSkyDiffuseWeight = mix(1.0, total > 0.0 ? skySum / total : 1.0, coverage);
+    return vec4(total > 0.0 ? sum / total * coverage : vec3(0.0), coverage);
+}
+vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
+    vec4 sampleValue = giSampleIndirect(worldPosition, normal);
+    giEnvironmentDiffuseWeight = 1.0 - sampleValue.a * (1.0 - clamp(m_GiEnvironmentMix, 0.0, 1.0));
+    return sampleValue.rgb;
+}
+#endif
+

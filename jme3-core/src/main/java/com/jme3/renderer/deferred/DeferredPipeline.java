@@ -41,6 +41,7 @@ import com.jme3.light.LightProbe;
 import com.jme3.light.PointLight;
 import com.jme3.light.SpotLight;
 import com.jme3.material.Material;
+import com.jme3.material.MatParamOverride;
 import com.jme3.material.MaterialDef;
 import com.jme3.material.RenderState;
 import com.jme3.material.TechniqueDef;
@@ -247,6 +248,11 @@ public final class DeferredPipeline implements OpaquePipeline {
         // Upstream always supplies BoundDrawBuffer for framebuffer routing.
         // It is also required by the GBuffer techniques and is not a user override.
         int internalOverrides = rm.getPassDrawBufferTargetIdToShaders() ? 1 : 0;
+        for (MatParamOverride override : rm.getForcedMatParams()) {
+            if (rm.getShadowManager(vp).isManagedOverride(override)) {
+                internalOverrides++;
+            }
+        }
         return rm.getForcedMatParams().size() > internalOverrides;
     }
 
@@ -415,6 +421,7 @@ public final class DeferredPipeline implements OpaquePipeline {
             if (ready[0]) {
                 frame.resources.borrowTargets(context.get(surfaces));
                 surfacePass.execute(frame);
+                vp.notifyGBuffer(index, context.get(surfaces));
             }
         }).write(surfaces);
         graph.addPass(name + "Lighting", context -> {

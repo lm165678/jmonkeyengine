@@ -62,6 +62,10 @@ public final class AppSettings extends HashMap<String, Object> {
 
     private static final AppSettings defaults = new AppSettings(false);
 
+    // Runtime-only: preserve the defining loader of a context supplied by an SDK/plugin.
+    // Keeping Class outside the settings map also keeps properties persistence portable.
+    private transient Class<? extends JmeContext> customRendererClass;
+
     /**
      * Do not request display scaling support on platforms where the backend can
      * opt out.
@@ -451,6 +455,9 @@ public final class AppSettings extends HashMap<String, Object> {
      * @param other The AppSettings to copy the settings from
      */
     public void copyFrom(AppSettings other) {
+        if (other.containsKey("Renderer")) {
+            customRendererClass = other.getCustomRendererClass();
+        }
         this.putAll(other);
     }
 
@@ -461,6 +468,9 @@ public final class AppSettings extends HashMap<String, Object> {
      * @param other  The AppSettings to merge the settings from
      */
     public void mergeFrom(AppSettings other) {
+        if (!containsKey("Renderer") && other.containsKey("Renderer")) {
+            customRendererClass = other.getCustomRendererClass();
+        }
         for (String key : other.keySet()) {
             if (!this.containsKey(key)) {
                 put(key, other.get(key));
@@ -955,17 +965,45 @@ public final class AppSettings extends HashMap<String, Object> {
      * (Default: AppSettings.LWJGL_OPENGL32)
      */
     public void setRenderer(String renderer) {
+        customRendererClass = null;
         putString("Renderer", renderer);
     }
 
     /**
-     * Set a custom graphics renderer to use. The class should implement
-     * the {@link JmeContext} interface.
-     * @param clazz The custom context class.
-     * (Default: not set)
+     * Sets a custom context with a public no-argument constructor. Retains its
+     * defining class loader for modular hosts such as the SDK; the engine module
+     * need not have a reverse dependency on the application module.
+     * Configure before application startup. Changing the class requires context
+     * recreation; this does not hot-swap a running renderer. copyFrom/mergeFrom
+     * preserve this runtime reference. Persistence stores only the class name;
+     * register the class again after loading settings in a modular host.
+     * <pre>{@code
+     * // 第一步：在 SDK/插件模块中配置自定义上下文，保留它自己的类加载器。
+     * settings.setCustomRenderer(MyPanelsContext.class);
+     * // 第二步：交给应用；内部复制 AppSettings 不会丢失此运行时注册。
+     * application.setSettings(settings);
+     * application.start();
+     * // 第三步：重启前可恢复内置渲染器；普通 Forward/Deferred 切换无需重建上下文。
+     * settings.setRenderer(AppSettings.LWJGL_OPENGL33);
+     * }</pre>
+     * @param clazz custom context class, not null (default: none)
      */
     public void setCustomRenderer(Class<? extends JmeContext> clazz) {
+        java.util.Objects.requireNonNull(clazz, "clazz");
         put("Renderer", "CUSTOM" + clazz.getName());
+        customRendererClass = clazz;
+    }
+
+    /**
+     * Returns the runtime class registered by setCustomRenderer, or null when
+     * only a persisted class name is available or another renderer was selected.
+     * The desktop context factory uses this before resolving a name by a loader.
+     * @return matching registered context class, otherwise null
+     */
+    public Class<? extends JmeContext> getCustomRendererClass() {
+        return customRendererClass != null
+                && ("CUSTOM" + customRendererClass.getName()).equals(getRenderer())
+                ? customRendererClass : null;
     }
 
     /**

@@ -117,7 +117,9 @@
  *
  * GBuffer techniques use DeferredSurface.glsllib to write five raw records plus
  * depth. Attachment uniforms are gbuffer0..gbuffer4 and gbufferDepth. Only
- * gbuffer0.a (shadingId) and the depth attachment have shared meanings. Other
+ * gbuffer0.a (integer shadingId plus a fractional shadow-receiver flag) and the
+ * depth attachment have shared meanings. Use writeGBuffer()/getShadingId() rather
+ * than interpreting the raw header as a material attribute. Other
  * channels, including opacity, are defined by each model's writer/decoder pair.
  * Main obtains getShadingId() and dispatches through subfaceShading(shadingId).
  * Built-in decoders and their complete channel maps are documented separately in

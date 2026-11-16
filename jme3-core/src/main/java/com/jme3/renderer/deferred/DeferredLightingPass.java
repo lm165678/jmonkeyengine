@@ -76,7 +76,7 @@ final class DeferredLightingPass implements DeferredPass {
         if (!gpu) {
             bindTexture(renderer, 7, frame.resources.tileTexture);
         } else {
-            shader.getBufferBlock("TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
+            shader.getBufferBlock("m_TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
         }
         String[] names = {
             "gbuffer0", "gbuffer1", "gbuffer2", "gbuffer3", "gbuffer4", "gbufferDepth"};
@@ -102,6 +102,7 @@ final class DeferredLightingPass implements DeferredPass {
         resolution.set(camera.getWidth(), camera.getHeight());
         uniform(shader, "Resolution", VarType.Vector2, resolution);
         renderer.applyRenderState(lightingState);
+        rm.bindManagedShadows(shader, 9);
         renderer.setShader(shader);
         renderer.renderMesh(frame.resources.quad, 0, 1, null);
         return true;

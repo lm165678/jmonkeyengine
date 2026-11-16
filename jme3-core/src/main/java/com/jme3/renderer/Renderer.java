@@ -300,12 +300,33 @@ public interface Renderer {
         }
     }
 
-    /** Number of samples in the currently bound framebuffer (one if unknown). */
-    /** @return borrowed currently bound framebuffer, null for default; never dispose the result */
+    /**
+     * Returns the actually bound framebuffer, not the configured presentation
+     * override when a different offscreen target is bound. Call on the render
+     * thread and restore the borrowed target before leaving a nested pass.
+     * Implementations without framebuffer inspection throw an exception.
+     *
+     * <pre>{@code
+     * // 第一步：在渲染线程保存实际绑定的目标。
+     * FrameBuffer previous = renderer.getCurrentFrameBuffer();
+     * try {
+     *     // 第二步：绑定离屏目标并执行采集。
+     *     renderer.setFrameBuffer(captureTarget);
+     *     // Render capture content here.
+     * } finally {
+     *     // 第三步：恢复目标；调用者还需恢复相机、视口等改动的状态。
+     *     renderer.setFrameBuffer(previous);
+     * }
+     * }</pre>
+     *
+     * @return borrowed currently bound framebuffer, or null for the platform
+     * default framebuffer; never dispose the result
+     */
     default com.jme3.texture.FrameBuffer getCurrentFrameBuffer() {
         throw new UnsupportedOperationException("Framebuffer inspection unavailable");
     }
 
+    /** Number of samples in the currently bound framebuffer (one if unknown). */
     default int getCurrentFrameBufferSamples() { return 1; }
 
     /**

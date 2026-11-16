@@ -63,7 +63,7 @@ vec4 shadeLightingSurface() {
     DeferredLightList lights = getLightList();
     vec3 result = surface.indirect;
     for (int entry = 0; entry < lights.count; ++entry) {
-        DeferredLight light = getLight(lights, entry, position);
+        DeferredLight light = getLight(lights, entry, position, surface.normal);
         result += evaluateLightingLight(surface, viewDirection, light);
     }
     return vec4(result, surface.opacity);

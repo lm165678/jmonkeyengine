@@ -244,7 +244,26 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
     /**
      * Sets the filtering mode for shadow edges. This affects the smoothness of
-     * shadow boundaries.
+     * shadow boundaries. Bilinear, PCF4, PCF8 and Poisson share continuous
+     * visibility filtering from ShadowFilter.glsllib with managed shadows.
+     * Hardware comparison uses linear comparison sampling; software comparison
+     * interpolates four depth comparisons, never four raw depths. The latter
+     * costs more texture reads. Nearest and Dither retain their existing behavior.
+     * Change settings on the render thread, before drawing.
+     * <pre>{@code
+     * // 第一步：在初始化时创建并添加旧版阴影渲染器。
+     * DirectionalLightShadowRenderer shadows = new DirectionalLightShadowRenderer(assetManager, 1024, 3);
+     * shadows.setLight(sun);
+     * viewPort.addProcessor(shadows);
+     * // 第二步：切换连续 PCF；默认模式保持原有配置，硬件不支持时自动软件回退。
+     * shadows.setEdgeFilteringMode(EdgeFilteringMode.PCF4);
+     * shadows.setShadowCompareMode(CompareMode.Hardware);
+     * // 第三步：调宽采样范围，或切回 Bilinear 对照。
+     * shadows.setEdgesThickness(0.1f);
+     * shadows.setEdgeFilteringMode(EdgeFilteringMode.Bilinear);
+     * // 第四步：不用时移除；不要同时对同一灯安装旧版渲染器和过滤器。
+     * viewPort.removeProcessor(shadows);
+     * }</pre>
      *
      * @param filterMode The desired filtering mode (cannot be null). See {@link EdgeFilteringMode}
      * for available options.
@@ -259,7 +278,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         postshadowMat.setFloat("PCFEdge", edgesThickness);
         if (shadowCompareMode == CompareMode.Hardware) {
             for (Texture2D shadowMap : shadowMaps) {
-                if (filterMode == EdgeFilteringMode.Bilinear) {
+                if (usesLinearShadowComparison(filterMode)) {
                     shadowMap.setMagFilter(MagFilter.Bilinear);
                     shadowMap.setMinFilter(MinFilter.BilinearNoMipMaps);
                 } else {
@@ -268,6 +287,11 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
                 }
             }
         }
+    }
+
+    private static boolean usesLinearShadowComparison(EdgeFilteringMode mode) {
+        return mode == EdgeFilteringMode.Bilinear || mode == EdgeFilteringMode.PCF4
+                || mode == EdgeFilteringMode.PCF8 || mode == EdgeFilteringMode.PCFPOISSON;
     }
 
     /**
@@ -297,7 +321,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         for (Texture2D shadowMap : shadowMaps) {
             if (compareMode == CompareMode.Hardware) {
                 shadowMap.setShadowCompareMode(ShadowCompareMode.LessOrEqual);
-                if (edgeFilteringMode == EdgeFilteringMode.Bilinear) {
+                if (usesLinearShadowComparison(edgeFilteringMode)) {
                     shadowMap.setMagFilter(MagFilter.Bilinear);
                     shadowMap.setMinFilter(MinFilter.BilinearNoMipMaps);
                 } else {

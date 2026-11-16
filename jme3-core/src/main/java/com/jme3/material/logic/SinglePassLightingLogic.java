@@ -107,11 +107,18 @@ public final class SinglePassLightingLogic extends DefaultTechniqueDefLogic {
      * @return the next starting index in the LightList
      */
     protected int updateLightListUniforms(Shader shader, Geometry g, LightList lightList, int numLights, RenderManager rm, int startIndex) {
+        // Material-owned GI is accumulated exactly once, even with light batching.
+        shader.getUniform("g_IsFirstLightPass").setValue(VarType.Boolean, startIndex == 0);
         if (numLights == 0) { // this shader does not do lighting, ignore.
             return 0;
         }
 
         Uniform lightData = shader.getUniform("g_LightData");
+        Uniform shadowIndices = shader.getUniform("g_ShadowIndices");
+        shadowIndices.setVector4Length(numLights);
+        for (int i = 0; i < numLights; i++) {
+            shadowIndices.setVector4InArray(-1, 0, 0, 0, i);
+        }
         lightData.setVector4Length(numLights * 3);//8 lights * max 3
         Uniform lightCount = shader.getUniform("g_LightCount");
         Uniform ambientColor = shader.getUniform("g_AmbientLightColor");
@@ -137,6 +144,7 @@ public final class SinglePassLightingLogic extends DefaultTechniqueDefLogic {
                 continue;
             }
             ColorRGBA color = l.getColor();
+            shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), 0, 0, 0, lightDataIndex / 3);
             //Color
             lightData.setVector4InArray(color.getRed(),
                     color.getGreen(),
@@ -210,6 +218,7 @@ public final class SinglePassLightingLogic extends DefaultTechniqueDefLogic {
 
     @Override
     public void render(RenderManager renderManager, Shader shader, Geometry geometry, LightList lights, BindUnits lastBindUnits) {
+        renderManager.bindManagedShadows(shader, lastBindUnits.textureUnit);
         int nbRenderedLights = 0;
         Renderer renderer = renderManager.getRenderer();
         int batchSize = renderManager.getSinglePassLightBatchSize();

@@ -66,7 +66,9 @@ public class AwtPanelsContext implements JmeContext {
 
         @Override
         public void reshape(int width, int height) {
-            logger.severe("reshape is not supported.");
+            // The offscreen host can resize at startup. AWT panel sizes, not the
+            // host window, own the embedded cameras and framebuffer dimensions.
+            logger.fine("Ignoring offscreen host reshape; AWT panels manage their own sizes.");
         }
 
         @Override

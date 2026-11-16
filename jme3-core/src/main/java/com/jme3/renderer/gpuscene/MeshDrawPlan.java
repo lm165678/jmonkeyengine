@@ -126,9 +126,18 @@ final class MeshDrawPlan implements AutoCloseable {
             return;
         }
         if (unique.size() == 1) {
-            packed = unique.get(0).getMesh().clone();
-            packed.setLodLevels(null);
-            packed.clearBuffer(VertexBuffer.Type.Index);
+            // Shape clone() implementations may regenerate their base attributes
+            // and lose added tangents/UVs/colors. Borrow the actual source buffers;
+            // only the packed index buffer below is owned by this draw plan.
+            Mesh source = unique.get(0).getMesh();
+            packed = new Mesh();
+            packed.setMode(source.getMode());
+            packed.setLineWidth(source.getLineWidth());
+            for (VertexBuffer buffer : source.getBufferList()) {
+                if (buffer.getBufferType() != VertexBuffer.Type.Index) {
+                    packed.setBuffer(buffer);
+                }
+            }
         } else {
             packed = new Mesh();
             packed.setMode(unique.get(0).getMesh().getMode());

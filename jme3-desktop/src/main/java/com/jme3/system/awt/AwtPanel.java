@@ -43,7 +43,6 @@ import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.geom.AffineTransform;
-import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferStrategy;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
@@ -71,12 +70,13 @@ public class AwtPanel extends Canvas implements SceneProcessor {
 
     // Visibility/drawing vars
     private BufferStrategy strategy;
-    private AffineTransformOp transformOp;
     private final AtomicBoolean hasNativePeer = new AtomicBoolean(false);
     private final AtomicBoolean showing = new AtomicBoolean(false);
     private final AtomicBoolean repaintRequest = new AtomicBoolean(false);
 
     // Reshape vars
+    private volatile int renderedWidth = 1;
+    private volatile int renderedHeight = 1;
     private int newWidth = 1;
     private int newHeight = 1;
     private final AtomicBoolean reshapeNeeded = new AtomicBoolean(false);
@@ -96,22 +96,59 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
-                synchronized (lock) {
-                    int newWidth2 = Math.max(getWidth(), 1);
-                    int newHeight2 = Math.max(getHeight(), 1);
-                    if (newWidth != newWidth2 || newHeight != newHeight2) {
-                        newWidth = newWidth2;
-                        newHeight = newHeight2;
-                        reshapeNeeded.set(true);
-                    }
-                }
+                updateRenderSize();
+            }
+            @Override
+            public void componentMoved(ComponentEvent event) {
+                updateRenderSize();
             }
         });
+        addPropertyChangeListener("graphicsConfiguration", event -> updateRenderSize());
+    }
+
+    /**
+     * Converts logical AWT X units to the current framebuffer's device pixels.
+     * AwtMouseInput uses this automatically; manual picking must scale exactly once.
+     * At 100% the ratio is one. A panel without a display uses logical pixels.
+     * <pre>{@code
+     * // 第一步：AWT 面板按显示器缩放创建物理像素帧缓冲，无需禁用系统 DPI。
+     * // 第二步：手工处理 AWT 点击时转换为与 Camera 相同的像素坐标。
+     * float x = (float) (event.getX() * panel.getFramebufferScaleX());
+     * float y = (float) ((panel.getHeight() - event.getY()) * panel.getFramebufferScaleY());
+     * // 第三步：跨屏移动或调整窗口会自动重建；不要再次缩放引擎鼠标事件。
+     * }</pre>
+     * @return framebuffer pixels per logical X unit
+     */
+    public double getFramebufferScaleX() {
+        return renderedWidth / (double) Math.max(1, getWidth());
+    }
+
+    /**
+     * Y counterpart of getFramebufferScaleX(), for manual AWT picking.
+     * @return framebuffer pixels per logical Y unit
+     */
+    public double getFramebufferScaleY() {
+        return renderedHeight / (double) Math.max(1, getHeight());
+    }
+
+    private void updateRenderSize() {
+        GraphicsConfiguration configuration = getGraphicsConfiguration();
+        AffineTransform scale = configuration == null ? new AffineTransform() : configuration.getDefaultTransform();
+        int width = Math.max(1, (int) Math.round(getWidth() * scale.getScaleX()));
+        int height = Math.max(1, (int) Math.round(getHeight() * scale.getScaleY()));
+        synchronized (lock) {
+            if (width != newWidth || height != newHeight) {
+                newWidth = width;
+                newHeight = height;
+                reshapeNeeded.set(true);
+            }
+        }
     }
 
     @Override
     public void addNotify() {
         super.addNotify();
+        updateRenderSize();
 
         synchronized (lock) {
             hasNativePeer.set(true);
@@ -133,7 +170,10 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     public void paint(Graphics g) {
         Graphics2D g2d = (Graphics2D) g;
         synchronized (lock) {
-            g2d.drawImage(img, transformOp, 0, 0);
+            if (img != null) {
+                g2d.drawImage(img, 0, getHeight(), getWidth(), 0,
+                        0, 0, img.getWidth(), img.getHeight(), null);
+            }
         }
     }
 
@@ -152,6 +192,9 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     }
 
     public void repaintInThread() {
+        if (!isInitialized()) {
+            return;
+        }
         // Convert screenshot.
         byteBuf.clear();
         rm.getRenderer().readFrameBuffer(fb, byteBuf);
@@ -165,6 +208,9 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     }
 
     public void drawFrameInThread() {
+        if (!isInitialized()) {
+            return;
+        }
         // Convert screenshot.
         byteBuf.clear();
         rm.getRenderer().readFrameBuffer(fb, byteBuf);
@@ -198,7 +244,10 @@ public class AwtPanel extends Canvas implements SceneProcessor {
                     g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
                             RenderingHints.VALUE_RENDER_SPEED);
 
-                    g2d.drawImage(img, transformOp, 0, 0);
+                    if (img != null) {
+                g2d.drawImage(img, 0, getHeight(), getWidth(), 0,
+                        0, 0, img.getWidth(), img.getHeight(), null);
+            }
                     g2d.dispose();
                     strategy.show();
                 } while (strategy.contentsRestored());
@@ -210,6 +259,19 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         return paintMode != PaintMode.OnRequest && showing.get();
     }
 
+    /**
+     * Attach on the render thread. A panel may become visible on EDT before the
+     * first viewport render calls initialize; those early frames are skipped and
+     * pending size changes retained. Visibility alone never initializes a panel.
+     * <pre>{@code
+     * // 第一步：EDT 创建并加入 AWT 面板；尚未绑定视口时不会读取帧缓冲。
+     * // 第二步：在渲染线程绑定视口，第一次渲染自动完成初始化。
+     * application.enqueue(() -> panel.attachTo(true, application.getViewPort()));
+     * // 第三步：EDT 调整面板大小；初始化前的尺寸变化也会在就绪后生效。
+     * }</pre>
+     * @param overrideMainFramebuffer whether to replace the default framebuffer
+     * @param vps viewports to display, ending with the viewport receiving this processor
+     */
     public void attachTo(boolean overrideMainFramebuffer, ViewPort... vps) {
         if (!viewPorts.isEmpty()) {
             for (ViewPort vp : viewPorts) {
@@ -255,12 +317,8 @@ public class AwtPanel extends Canvas implements SceneProcessor {
             img = new BufferedImage(width, height, BufferedImage.TYPE_INT_BGR);
         }
 
-//        synchronized (lock){
-//            img = (BufferedImage) getGraphicsConfiguration().createCompatibleImage(width, height);
-//        }
-        AffineTransform tx = AffineTransform.getScaleInstance(1, -1);
-        tx.translate(0, -img.getHeight());
-        transformOp = new AffineTransformOp(tx, AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
+        renderedWidth = width;
+        renderedHeight = height;
 
         for (ViewPort vp : viewPorts) {
             if (!attachAsMain) {
@@ -278,7 +336,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
 
     @Override
     public boolean isInitialized() {
-        return fb != null;
+        return rm != null && fb != null;
     }
 
     @Override
@@ -296,8 +354,22 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     }
 
     void onFrameEnd() {
+        // createPanel publishes to the context before the enqueued attachTo runs.
+        // Never allocate fb early: doing so previously made isInitialized() true
+        // and prevented the viewport from ever supplying the RenderManager.
+        if (!isInitialized()) {
+            return;
+        }
+        // A monitor-scale change may happen without a logical component resize.
+        updateRenderSize();
         if (reshapeNeeded.getAndSet(false)) {
-            reshapeInThread(newWidth, newHeight);
+            int width;
+            int height;
+            synchronized (lock) {
+                width = newWidth;
+                height = newHeight;
+            }
+            reshapeInThread(width, height);
         } else {
             if (!checkVisibilityState()) {
                 return;

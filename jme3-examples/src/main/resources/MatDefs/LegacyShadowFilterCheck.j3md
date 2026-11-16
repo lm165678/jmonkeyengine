@@ -1,0 +1,23 @@
+MaterialDef Legacy shadow filter check {
+    MaterialParameters {
+        Texture2D ShadowMap0
+        Int Mode
+        Boolean Hardware
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL150: MatDefs/LegacyShadowFilterCheck.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+        }
+        Defines {
+            FILTER_MODE : Mode
+            HARDWARE_SHADOWS : Hardware
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

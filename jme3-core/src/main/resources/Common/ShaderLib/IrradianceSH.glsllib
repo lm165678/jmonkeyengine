@@ -1,0 +1,33 @@
+#ifndef JME_IRRADIANCE_SH
+#define JME_IRRADIANCE_SH
+// Linear HDR irradiance E. Native LightProbe arrays encode E/pi as a polynomial.
+// Volume arrays encode E in a positive real SH basis. Storage stays compatible.
+// Evaluate cosine-convolved SH9 from GiProbeBaker. Normal must be normalized.
+// Output is irradiance; the receiving material applies its diffuse BRDF.
+// Clamp only after summing all bands, since individual coefficients are signed.
+vec3 shEvaluatePolynomial(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4,
+        vec3 c5, vec3 c6, vec3 c7, vec3 c8, vec3 n) {
+    vec3 irradiance = c0;
+    irradiance += (c1 * n.y + c2 * n.z + c3 * n.x);
+    irradiance += (c4 * n.x * n.y + c5 * n.y * n.z + c7 * n.x * n.z);
+    irradiance += c6 * (3.0 * n.z * n.z - 1.0);
+    irradiance += c8 * (n.x * n.x - n.y * n.y);
+    return max(irradiance, vec3(0.0));
+}
+
+
+vec3 giEvaluateSh9(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4,
+        vec3 c5, vec3 c6, vec3 c7, vec3 c8, vec3 n) {
+    return shEvaluatePolynomial(c0 * 0.2820947918, c1 * 0.4886025119,
+            c2 * 0.4886025119, c3 * 0.4886025119, c4 * 1.0925484306,
+            c5 * 1.0925484306, c6 * 0.3153915653, c7 * 1.0925484306,
+            c8 * 0.5462742153, n);
+}
+vec3 shNativeIrradiance(vec3 c[9], vec3 n) {
+    return 3.14159265359 * shEvaluatePolynomial(c[0], c[1], c[2], c[3],
+            c[4], c[5], c[6], c[7], c[8], n);
+}
+vec3 shLambertResponse(vec3 irradiance, vec3 reflectance, float occlusion) {
+    return irradiance * reflectance * clamp(occlusion, 0.0, 1.0) / 3.14159265359;
+}
+#endif

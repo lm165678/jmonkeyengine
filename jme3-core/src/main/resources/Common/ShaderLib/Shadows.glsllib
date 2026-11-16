@@ -78,6 +78,8 @@
     #define KERNEL 8.0
 #endif
 
+#import "Common/ShaderLib/ShadowFilter.glsllib"
+
 uniform SHADOWMAP m_ShadowMap0;
 uniform SHADOWMAP m_ShadowMap1;
 uniform SHADOWMAP m_ShadowMap2;
@@ -141,55 +143,23 @@ float Shadow_DoDither_2x2(in SHADOWMAP tex, in vec4 projCoord){
     return shadow;
 }
 
-float Shadow_DoBilinear_2x2(in SHADOWMAP tex, in vec4 projCoord){
-    float border = Shadow_BorderCheck(projCoord.xy);
-    if (border > 0.0){
+float Shadow_DoBilinear_2x2(in SHADOWMAP tex, in vec4 projCoord) {
+    vec3 coordinate = projCoord.xyz / projCoord.w;
+    if (Shadow_BorderCheck(coordinate.xy) > 0.0) {
         return 1.0;
     }
-
-    vec4 gather = vec4(0.0);
-    #if __VERSION__ >= 130
-        #if defined GL_ARB_gpu_shader5 || defined GL_OES_gpu_shader5
-            vec4 coord = vec4(projCoord.xyz / projCoord.www,0.0);
-            gather = SHADOWGATHER(tex, coord);
-        #else
-            gather.x = SHADOWCOMPAREOFFSET(tex, projCoord, ivec2(0, 1));
-            gather.y = SHADOWCOMPAREOFFSET(tex, projCoord, ivec2(1, 1));
-            gather.z = SHADOWCOMPAREOFFSET(tex, projCoord, ivec2(1, 0));
-            gather.w = SHADOWCOMPAREOFFSET(tex, projCoord, ivec2(0, 0));
-        #endif
-    #else
-        gather.x = Shadow_DoShadowCompareOffset(tex, projCoord, vec2(0.0, 0.0));
-        gather.y = Shadow_DoShadowCompareOffset(tex, projCoord, vec2(1.0, 0.0));
-        gather.z = Shadow_DoShadowCompareOffset(tex, projCoord, vec2(0.0, 1.0));
-        gather.w = Shadow_DoShadowCompareOffset(tex, projCoord, vec2(1.0, 1.0));
-    #endif
-
-   vec2 f = fract( projCoord.xy * SHADOWMAP_SIZE );
-   vec2 mx = mix( gather.wx, gather.zy, f.x );
-   return mix( mx.x, mx.y, f.y );
+    return ShadowFilter_Bilinear(tex, coordinate.xy, vec2(SHADOWMAP_SIZE),
+            vec4(0.0, 0.0, 1.0, 1.0), coordinate.z);
 }
 
-float Shadow_DoPCF(in SHADOWMAP tex,in vec4 projCoord){
-
-    float shadow = 0.0;
-    float border = Shadow_BorderCheck(projCoord.xy);
-    if (border > 0.0)
+float Shadow_DoPCF(in SHADOWMAP tex, in vec4 projCoord) {
+    vec3 coordinate = projCoord.xyz / projCoord.w;
+    if (Shadow_BorderCheck(coordinate.xy) > 0.0) {
         return 1.0;
-
-    const float bound = (KERNEL * 0.5 - 0.5 ) * PCFEDGE;
-    for (float y = -bound; y <= bound; y += PCFEDGE){
-        for (float x = -bound; x <= bound; x += PCFEDGE){
-            #if __VERSION__ < 130
-                shadow += clamp(Shadow_DoShadowCompareOffset(tex,projCoord,vec2(x,y)) + border, 0.0, 1.0);
-            #else
-                shadow += Shadow_DoShadowCompareOffset(tex, projCoord, vec2(x,y));
-            #endif
-        }
     }
-
-    shadow = shadow / (KERNEL * KERNEL);
-    return shadow;
+    return ShadowFilter_Box(tex, coordinate.xy, vec2(SHADOWMAP_SIZE),
+            vec4(0.0, 0.0, 1.0, 1.0), coordinate.z, KERNEL,
+            PCFEDGE * shadowBorderScale);
 }
 
 //12 tap poisson disk
@@ -216,18 +186,18 @@ float Shadow_DoPCFPoisson(in SHADOWMAP tex, in vec4 projCoord){
 
     vec2 texelSize = pixSize2 * 4.0 * PCFEDGE * shadowBorderScale;
 
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk0 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk1 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk2 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk3 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk4 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk5 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk6 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk7 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk8 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk9 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk10 * texelSize, projCoord.zw));
-    shadow += SHADOWCOMPARE(tex, vec4(projCoord.xy + poissonDisk11 * texelSize, projCoord.zw));
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk0 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk1 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk2 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk3 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk4 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk5 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk6 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk7 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk8 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk9 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk10 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
+    shadow += ShadowFilter_Bilinear(tex, projCoord.xy / projCoord.w + poissonDisk11 * texelSize, vec2(SHADOWMAP_SIZE), vec4(0.0, 0.0, 1.0, 1.0), projCoord.z / projCoord.w);
 
     //this is divided by 12
     return shadow * 0.08333333333;

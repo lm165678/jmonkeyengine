@@ -11,6 +11,58 @@ plugins {
 }
 
 ext.mainClassName = 'jme3test.TestChooser'
+
+tasks.register('giProbeSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeVolume'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke'
+    systemProperty 'gi.disableGpuScene', project.hasProperty('giNoGpu')
+}
+
+tasks.register('giProbeShadowSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeShadows'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register('giProbeStreamingSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeVolume'
+    classpath = sourceSets.main.runtimeClasspath
+    args '--smoke', '--stream'
+}
+
+tasks.register('managedShadowSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestManagedShadows'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register('giProbeInterpolationSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeInterpolation'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register('giPagedStreamingSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiPagedStreaming'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register('giProbeRegionsSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeRegions'
+    classpath = sourceSets.main.runtimeClasspath
+}
 ext.nativeMainClassName = 'jme3test.TestChooserCli'
 ext.jmeNativeImageAdditionalResourceGlobs = []
 
@@ -894,4 +946,85 @@ renderPathScenes.each { scene ->
         classpath = sourceSets.main.runtimeClasspath
         args(['--smoke'] + extraArgs)
     }
+}
+
+tasks.register('managedShadowFilterSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestManagedShadowFiltering'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+
+['Software', 'Hardware'].each { mode ->
+    tasks.register("legacyShadow${mode}Smoke", JavaExec) {
+        group = 'verification'
+        dependsOn 'classes'
+        mainClass = 'jme3test.light.TestManagedShadowFiltering'
+        classpath = sourceSets.main.runtimeClasspath
+        args "--${mode.toLowerCase()}"
+    }
+}
+
+// HDR sky diffuse/specular and material/path integration verification.
+tasks.register('skyLightSmoke', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.light.TestSkyLight'
+    enableAssertions = true
+}
+
+tasks.register('skyLightPngSmoke', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.light.TestSkyLight'
+    args '--png'
+    enableAssertions = true
+}
+
+// Automatic runtime activation from scene contents (no application GI setup).
+tasks.register('automaticSceneServicesSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestAutomaticSceneServices'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register('giAdaptiveProbesSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiAdaptiveProbes'
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
+}
+
+// Free-position probe layout, four paths and automatic J3O restoration.
+tasks.register('giSurfaceProbesSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiSurfaceProbes'
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
+}
+
+tasks.register('giSmoothBlendingSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiSmoothBlending'
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
+}
+
+tasks.register('giVisibilityFilteringSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiVisibilityFiltering'
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
+}
+
+tasks.register('giProbeCellContinuitySmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiProbeCellContinuity'
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
 }

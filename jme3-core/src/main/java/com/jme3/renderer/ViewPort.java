@@ -306,6 +306,40 @@ public class ViewPort {
         this.clearStencil = stencil;
     }
 
+    private java.util.function.BiConsumer<Integer, com.jme3.renderer.framegraph.RenderTarget> gBufferObserver;
+
+    /**
+     * Installs a render-thread diagnostic observer, null by default. Called once per
+     * deferred batch immediately after its GBuffer pass. Targets are borrowed only
+     * during the callback: copy on GPU into owned targets to display them later.
+     * Forward/capability fallback produces no callback. No channel semantics are
+     * promised beyond each shading model's documented encoding. The observer must
+     * restore any render state it changes and must not modify scene data.
+     * <pre>{@code
+     * // 第一步：在绘制前安装观察器，buffer 仅在回调期间有效。
+     * viewPort.setGBufferObserver((batch, buffer) -> {
+     *     System.out.println("Batch " + batch + ": " + buffer.getColorCount());
+     * });
+     * // 第二步：选择延迟路径；前向渲染没有 GBuffer。
+     * viewPort.setRenderPath(RenderPath.Deferred);
+     * // 第三步：关闭诊断并恢复原先的渲染路径。
+     * viewPort.setGBufferObserver(null);
+     * viewPort.setRenderPath(RenderPath.Forward);
+     * }</pre>
+     * @param observer callback or null to disable
+     */
+    public void setGBufferObserver(java.util.function.BiConsumer<Integer,
+            com.jme3.renderer.framegraph.RenderTarget> observer) {
+        gBufferObserver = observer;
+    }
+
+    /** Internal deferred-pass dispatch; targets must not escape the callback. */
+    public void notifyGBuffer(int batch, com.jme3.renderer.framegraph.RenderTarget target) {
+        if (gBufferObserver != null) {
+            gBufferObserver.accept(batch, target);
+        }
+    }
+
     /**
      * Returns the framebuffer where this ViewPort's scenes are
      * rendered to.

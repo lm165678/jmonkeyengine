@@ -1245,6 +1245,11 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         resetUniformsNotSetByCurrent(shader);
 
         // Delegate rendering to the technique
+        com.jme3.renderer.queue.RenderQueue.ShadowMode shadowMode = geometry.getShadowMode();
+        shader.getUniform("g_ShadowReceive").setValue(VarType.Boolean,
+                shadowMode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Receive
+                || shadowMode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
+        com.jme3.environment.EnvironmentLighting.bind(shader, this, lights, renderer, units);
         technique.render(renderManager, shader, geometry, lights, units);
     }
 

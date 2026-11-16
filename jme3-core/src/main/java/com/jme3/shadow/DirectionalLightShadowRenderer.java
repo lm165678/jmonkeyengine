@@ -317,6 +317,6 @@ public class DirectionalLightShadowRenderer extends AbstractShadowRenderer {
      */
     @Override
     protected boolean checkCulling(Camera viewCam) {
-        return true;
+        return light != null && light.isEnabled() && light.isCastShadow();
     }
 }

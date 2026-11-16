@@ -122,6 +122,11 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
         }
 
         Uniform lightData = shader.getUniform("g_LightData");
+        Uniform shadowIndices = shader.getUniform("g_ShadowIndices");
+        shadowIndices.setVector4Length(numLights);
+        for (int i = 0; i < numLights; i++) {
+            shadowIndices.setVector4InArray(-1, 0, 0, 0, i);
+        }
         lightData.setVector4Length(numLights * 3);//8 lights * max 3
         Uniform lightCount = shader.getUniform("g_LightCount");
         // Emission and indirect lighting belong to the first pass only.
@@ -182,6 +187,7 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             //Color
 
             if(l.getType() != Light.Type.Probe){
+                shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), 0, 0, 0, lightDataIndex / 3);
                 lightData.setVector4InArray(color.getRed(),
                         color.getGreen(),
                         color.getBlue(),
@@ -248,7 +254,8 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             Uniform lightProbePemMap, LightProbe lightProbe) {
         lightProbeData.setValue(VarType.Matrix4, lightProbe.getUniformMatrix());
         //setVector4InArray(lightProbe.getPosition().x, lightProbe.getPosition().y, lightProbe.getPosition().z, 1f / area.getRadius() + lightProbe.getNbMipMaps(), 0);
-        shCoeffs.setValue(VarType.Vector3Array, lightProbe.getShCoeffs());
+        shCoeffs.setValue(VarType.Vector3Array, lightProbe.isDiffuseEnabled()
+                ? lightProbe.getShCoeffs() : com.jme3.environment.EnvironmentLighting.ZERO_SH);
         /*
          * Assign the prefiltered env map to the next available texture unit.
          */
@@ -268,16 +275,17 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
 
     @Override
     public void render(RenderManager renderManager, Shader shader, Geometry geometry, LightList lights, BindUnits lastBindUnits) {
+        int shadowUnits = renderManager.bindManagedShadows(shader, lastBindUnits.textureUnit);
         int nbRenderedLights = 0;
         Renderer renderer = renderManager.getRenderer();
         int batchSize = renderManager.getSinglePassLightBatchSize();
         if (lights.size() == 0) {
-            updateLightListUniforms(shader, geometry, lights, batchSize, renderManager, 0, lastBindUnits.textureUnit);
+            updateLightListUniforms(shader, geometry, lights, batchSize, renderManager, 0, shadowUnits);
             renderer.setShader(shader);
             renderMeshFromGeometry(renderer, geometry);
         } else {
             while (nbRenderedLights < lights.size()) {
-                nbRenderedLights = updateLightListUniforms(shader, geometry, lights, batchSize, renderManager, nbRenderedLights, lastBindUnits.textureUnit);
+                nbRenderedLights = updateLightListUniforms(shader, geometry, lights, batchSize, renderManager, nbRenderedLights, shadowUnits);
                 renderer.setShader(shader);
                 renderMeshFromGeometry(renderer, geometry);
             }
@@ -298,7 +306,9 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
                 }
             }
             if (l instanceof LightProbe) {
-                lightProbes.add((LightProbe) l);
+                if (!(l instanceof com.jme3.light.SkyLight)) {
+                    lightProbes.add((LightProbe) l);
+                }
                 if(removeLights){
                     lightList.remove(l);
                     j--;

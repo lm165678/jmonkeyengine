@@ -1,0 +1,71 @@
+#import "Common/ShaderLib/IrradianceSH.glsllib"
+#ifndef JME_GI_PROBE_MATH
+#define JME_GI_PROBE_MATH
+
+// Algorithm reference: Global-Illuminati/Precomputed-Light-Field-Probes.
+// See LICENSE-Precomputed-Light-Field-Probes.txt in this directory.
+// Shared by precomputed diffuse GI and future dynamic probe implementations.
+// Directions are world-aligned unit vectors; octahedral coordinates are [-1,1].
+vec2 giSignNotZero(vec2 value) {
+    return vec2(value.x >= 0.0 ? 1.0 : -1.0, value.y >= 0.0 ? 1.0 : -1.0);
+}
+
+vec2 giOctEncode(vec3 direction) {
+    float magnitude = abs(direction.x) + abs(direction.y) + abs(direction.z);
+    if (magnitude <= 0.0) {
+        return vec2(0.0);
+    }
+    direction /= magnitude;
+    if (direction.z < 0.0) {
+        direction.xy = (1.0 - abs(direction.yx)) * giSignNotZero(direction.xy);
+    }
+    return direction.xy;
+}
+
+vec3 giOctDecode(vec2 encoded) {
+    vec3 direction = vec3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
+    if (direction.z < 0.0) {
+        direction.xy = (1.0 - abs(direction.yx)) * giSignNotZero(direction.xy);
+    }
+    return normalize(direction);
+}
+
+// Moments are E[d] and E[d*d], in the same distance units as distanceToProbe.
+// Clamp negative variance caused by quantization; do not manufacture visibility
+// with a minimum interpolation weight when every surrounding probe is occluded.
+float giVisibility(vec2 moments, float distanceToProbe, float minimumVariance) {
+    if (distanceToProbe <= moments.x) {
+        return 1.0;
+    }
+    float variance = max(max(0.0, minimumVariance), moments.y - moments.x * moments.x);
+    float delta = distanceToProbe - moments.x;
+    return variance / max(variance + delta * delta, 1.0e-20);
+}
+
+// Stable decoder path: moments contain mean and variance, not second moment.
+// No arbitrary variance floor: a genuinely occluded zero-variance probe stays out.
+float giVisibilityFromVariance(vec2 moments, float distanceToProbe) {
+    if (distanceToProbe <= moments.x) {
+        return 1.0;
+    }
+    float delta = distanceToProbe - moments.x;
+    return moments.y / max(moments.y + delta * delta, 1.0e-20);
+}
+
+// Float coordinates support older shader profiles without integer bit operators.
+// Counts need not be powers of two. Caller checks coverage before sampling.
+vec3 giNeighborOffset(int corner) {
+    float value = float(corner);
+    return mod(floor(vec3(value, value * 0.5, value * 0.25)), 2.0);
+}
+
+float giProbeIndex(vec3 coordinate, vec3 counts) {
+    return coordinate.x + counts.x * (coordinate.y + counts.y * coordinate.z);
+}
+
+float giTrilinearWeight(vec3 alpha, vec3 offset) {
+    vec3 weight = mix(vec3(1.0) - alpha, alpha, offset);
+    return weight.x * weight.y * weight.z;
+}
+
+#endif

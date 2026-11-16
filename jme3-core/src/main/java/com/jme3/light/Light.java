@@ -112,6 +112,9 @@ public abstract class Light implements Savable, Cloneable {
 
     protected boolean enabled = true;
 
+    private boolean castShadow = true;
+    private com.jme3.shadow.LightShadowSettings shadowSettings = new com.jme3.shadow.LightShadowSettings();
+
     /** 
      * The light name. 
      */
@@ -213,6 +216,66 @@ public abstract class Light implements Savable, Cloneable {
         this.enabled = enabled;
     }
 
+    /**
+     * Scene-owned shadow settings, serialized with this light and cloned independently.
+     * Defaults: 512 pixels, three directional cascades and 3x3 PCF. Change on the
+     * render thread before drawing. Viewport overrides take precedence; clearSettings
+     * restores these preferences. Ambient/probe lights do not create shadow maps.
+     * Legacy shadow processors keep their own settings.
+     * <pre>{@code
+     * // 第一步：光源配置随场景保存。
+     * sun.getShadowSettings().setMapSize(1024);
+     * sun.getShadowSettings().setCascadeCount(4);
+     * sun.getShadowSettings().setFilterRadius(2);
+     * // 第二步：临时视口覆盖不会修改场景配置。
+     * renderManager.getShadowManager(viewPort).getSettings(sun).setMapSize(512);
+     * // 第三步：恢复光源自身配置。
+     * renderManager.getShadowManager(viewPort).clearSettings(sun);
+     * }</pre>
+     * @return mutable scene-owned settings
+     */
+    public com.jme3.shadow.LightShadowSettings getShadowSettings() {
+        return shadowSettings;
+    }
+
+    /**
+     * Returns the serialized shadow-casting preference, initially true. Ambient
+     * lights and reflection probes do not produce shadow maps, regardless of this
+     * preference. This flag does not allocate shadow resources by itself.
+     *
+     * @return whether shadow casting is requested
+     */
+    public boolean isCastShadow() {
+        return castShadow;
+    }
+
+    /**
+     * Sets the scene-owned shadow preference without disabling illumination.
+     * Viewport shadow policies may additionally disable shadow casting. Change
+     * this on the application render thread, or through Application.enqueue().
+     * Older assets without this field default to true; cloning preserves it.
+     * Built-in ShadowRenderer and ShadowFilter implementations also honor this
+     * flag, retaining their resources for re-enabling. Custom processors must
+     * explicitly honor it. The built-in viewport pipeline discovers enabled
+     * directional, point and spot lights automatically through ShadowManager;
+     * this setter does not install a legacy processor or allocate GPU resources.
+     *
+     * <pre>{@code
+     * // 第一步：创建光源，默认请求投影。
+     * DirectionalLight sun = new DirectionalLight();
+     * rootNode.addLight(sun);
+     * // 第二步：关闭投影，但保留照明；此设置随场景保存。
+     * sun.setCastShadow(false);
+     * // 第三步：重新允许投影，实际资源由视口阴影路径管理。
+     * sun.setCastShadow(true);
+     * }</pre>
+     *
+     * @param castShadow true to request shadows, false to disable them
+     */
+    public void setCastShadow(boolean castShadow) {
+        this.castShadow = castShadow;
+    }
+
     public boolean isFrustumCheckNeeded() {
       return frustumCheckNeeded;
     }
@@ -275,6 +338,7 @@ public abstract class Light implements Savable, Cloneable {
         try {
             Light l = (Light) super.clone();
             l.color = color.clone();
+            l.shadowSettings = shadowSettings.clone();
             return l;
         } catch (CloneNotSupportedException ex) {
             throw new AssertionError();
@@ -286,6 +350,8 @@ public abstract class Light implements Savable, Cloneable {
         OutputCapsule oc = ex.getCapsule(this);
         oc.write(color, "color", null);
         oc.write(enabled, "enabled", true);
+        oc.write(castShadow, "castShadow", true);
+        oc.write(shadowSettings, "shadowSettings", null);
         oc.write(name, "name", null);
         oc.write(global, "global", false);
     }
@@ -295,6 +361,9 @@ public abstract class Light implements Savable, Cloneable {
         InputCapsule ic = im.getCapsule(this);
         color = (ColorRGBA) ic.readSavable("color", null);
         enabled = ic.readBoolean("enabled", true);
+        castShadow = ic.readBoolean("castShadow", true);
+        shadowSettings = (com.jme3.shadow.LightShadowSettings) ic.readSavable("shadowSettings",
+                new com.jme3.shadow.LightShadowSettings());
         name = ic.readString("name", null);
         global = ic.readBoolean("global", false);
     }

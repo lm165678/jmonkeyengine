@@ -34,7 +34,17 @@ import javax.imageio.ImageIO;
  * Run main or gradlew :jme3-examples:globalDistanceField.
  * Verification: gradlew :jme3-examples:globalDistanceFieldSmoke.
  * Space: models/global field; C: cascade colors; M: animate one rigid instance;
- * R: remove/restore that instance. Drag mouse + WASD/QZ moves the camera.
+ * R: remove/restore that instance. G: freeze/resume field updates (live by default).
+ * Drag mouse + WASD/QZ moves the camera. CPU index/compose/submit timings are
+ * displayed separately; submit is CPU driver submission time, not GPU time.
+ * Freezing retains the last camera clipmaps and ignores subsequent scene changes
+ * until resumed. Space changes visualization only and keeps live updates enabled.
+ * Compare a stationary camera first: moving across a grid cell scrolls CPU grids.
+ * <pre>
+ * 第一步：保持相机和模型静止，查看 CPU index/compose/submit 与整帧耗时。
+ * 第二步：按 G 冻结合成，再按 Space 对比原模型与距离场显示的帧耗时。
+ * 第三步：再次按 G 恢复更新，移动相机，检查 compose/transfer 是否明显增加。
+ * </pre>
  * No baking or asset writes occur. Saved surface attributes stay on CPU and are
  * shared between clones; this example neither uploads them nor calculates GI.
  * The unsigned Tank source and low-resolution clipmaps show a thick approximate
@@ -80,6 +90,8 @@ public final class TestGlobalDistanceField extends SimpleApplication {
     private boolean showField;
     private boolean colors;
     private boolean animate;
+    private boolean updateField = true;
+    private float frameMs;
     private boolean smoke;
     private int frame;
     private float time;
@@ -90,6 +102,7 @@ public final class TestGlobalDistanceField extends SimpleApplication {
         TestGlobalDistanceField app = new TestGlobalDistanceField();
         app.smoke = Arrays.asList(args).contains("--smoke");
         AppSettings settings = new AppSettings(true);
+        settings.setVSync(false);
         settings.setRenderer(AppSettings.LWJGL_OPENGL32);
         settings.setResolution(1100, 720);
         settings.setAudioRenderer(null);
@@ -150,6 +163,7 @@ public final class TestGlobalDistanceField extends SimpleApplication {
         inputManager.addMapping("View", new KeyTrigger(KeyInput.KEY_SPACE));
         inputManager.addMapping("Colors", new KeyTrigger(KeyInput.KEY_C));
         inputManager.addMapping("Motion", new KeyTrigger(KeyInput.KEY_M));
+        inputManager.addMapping("Freeze", new KeyTrigger(KeyInput.KEY_G));
         inputManager.addMapping("Remove", new KeyTrigger(KeyInput.KEY_R));
         inputManager.addListener((ActionListener) (name, pressed, tpf) -> {
             if (!pressed) {
@@ -161,17 +175,20 @@ public final class TestGlobalDistanceField extends SimpleApplication {
                 colors = !colors;
             } else if (name.equals("Motion")) {
                 animate = !animate;
+            } else if (name.equals("Freeze")) {
+                updateField = !updateField;
             } else if (tanks[2].getParent() == null) {
                 models.attachChild(tanks[2]);
             } else {
                 tanks[2].removeFromParent();
             }
-        }, "View", "Colors", "Motion", "Remove");
+        }, "View", "Colors", "Motion", "Remove", "Freeze");
     }
 
     @Override
     public void simpleUpdate(float tpf) {
         frame++;
+        frameMs = frame <= 3 ? tpf * 1000 : frameMs * 0.9f + tpf * 100;
         time += tpf;
         if (animate) {
             tanks[2].setLocalTranslation(7, 1, 1.5f + (float) Math.sin(time) * 3);
@@ -201,7 +218,9 @@ public final class TestGlobalDistanceField extends SimpleApplication {
         }
         // 独立于可见性扫描模型；更新世界变换后再合并，避免使用上一帧姿态。
         rootNode.updateGeometricState();
-        global.update(models, cam.getLocation(), renderer);
+        if (updateField || smoke || frame == 1) {
+            global.update(models, cam.getLocation(), renderer);
+        }
         if (smoke && frame == 3 && global.getUpdatedVoxelCount() != 0) {
             throw new AssertionError("Static frame unexpectedly rebuilt clipmaps");
         }
@@ -220,8 +239,15 @@ public final class TestGlobalDistanceField extends SimpleApplication {
         models.setCullHint(showField ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
         screen.setCullHint(showField ? Spatial.CullHint.Never : Spatial.CullHint.Always);
         label.setText((showField ? "Global distance field" : "Original baked models")
-                + " | instances=" + global.getInstanceCount() + " | CPU resampled=" + global.getUpdatedVoxelCount()
-                + "\nSpace: view | C: cascade colors | M: motion | R: remove/restore | Drag + WASD/QZ"
+                + " | instances=" + global.getInstanceCount() + " | CPU resampled=" + (updateField ? global.getUpdatedVoxelCount() : 0)
+                + String.format(java.util.Locale.ROOT,
+                        " | frame %.2f ms [%s]\nCPU index %.2f / compose %.2f / submit %.2f ms | transfer=%d KiB",
+                        frameMs, updateField ? "live" : "frozen",
+                        updateField ? global.getIndexNanos() / 1e6 : 0,
+                        updateField ? global.getCompositionNanos() / 1e6 : 0,
+                        updateField ? global.getUploadNanos() / 1e6 : 0,
+                        updateField ? global.getUploadedBytes() / 1024 : 0)
+                + "\nSpace: view | G: freeze/resume | C: cascades | M: motion | R: remove | Drag + WASD/QZ"
                 + "\n3 x " + global.getResolution() + "^3 R32F = " + global.getTextureBytes() / (1024 * 1024f)
                 + " MiB | surface attribute textures not uploaded | approximate unsigned envelope");
     }

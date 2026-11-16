@@ -1,4 +1,9 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/ManagedShadows.glsllib"
+uniform float g_ShadowIndex;
+#import "Common/ShaderLib/GI/ProbeSampling.glsllib"
+#import "Common/ShaderLib/EnvironmentLighting.glsllib"
+
 #import "Common/ShaderLib/Parallax.glsllib"
 #import "Common/ShaderLib/Optics.glsllib"
 #ifndef VERTEX_LIGHTING
@@ -86,6 +91,17 @@ uniform float m_AlphaDiscardThreshold;
   #define NORMAL_TYPE -1.0
 #endif
 
+
+varying vec3 giWorldPosition;
+varying vec3 giWorldNormal;
+#if defined(NORMALMAP) && !defined(VERTEX_LIGHTING)
+varying vec4 giWorldTangent;
+#endif
+varying vec3 giDiffuseReflectance;
+
+uniform bool g_IsFirstLightPass;
+uniform vec3 g_CameraPosition;
+
 void main(){
     vec2 newTexCoord;
      
@@ -151,6 +167,17 @@ void main(){
       #endif
     #endif
 
+
+        vec3 giSurfaceNormal = normalize(giWorldNormal);
+        #if defined(NORMALMAP) && !defined(VERTEX_LIGHTING)
+            vec3 giTangent = normalize(giWorldTangent.xyz - giSurfaceNormal * dot(giWorldTangent.xyz, giSurfaceNormal));
+            vec3 giBitangent = cross(giSurfaceNormal, giTangent) * giWorldTangent.w;
+            giSurfaceNormal = normalize(mat3(giTangent, giBitangent, giSurfaceNormal) * normal);
+        #else
+            if (!gl_FrontFacing) {
+                giSurfaceNormal = -giSurfaceNormal;
+            }
+        #endif
     #ifdef SPECULARMAP
       vec4 specularColor = texture2D(m_SpecularMap, newTexCoord);
     #else
@@ -177,8 +204,9 @@ void main(){
        #endif
 
        gl_FragColor.rgb =  AmbientSum     * diffuseColor.rgb + 
-                           DiffuseSum.rgb * diffuseColor.rgb  * vec3(light.x) +
-                           SpecularSum    * specularColor.rgb * vec3(light.y);
+                           (DiffuseSum.rgb * diffuseColor.rgb  * vec3(light.x) +
+                           SpecularSum * specularColor.rgb * vec3(light.y))
+                           * managedShadow(g_ShadowIndex, giWorldPosition, giSurfaceNormal, g_ShadowReceive);
     #else
        vec4 lightDir = vLightDir;
        lightDir.xyz = normalize(lightDir.xyz);
@@ -194,6 +222,22 @@ void main(){
           if(spotFallOff <= 0.0){
               gl_FragColor.rgb = AmbientSum * diffuseColor.rgb;
               gl_FragColor.a   = alpha;
+
+    #ifdef GI_PROBES
+        if (g_IsFirstLightPass) {
+            gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
+                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal) / 3.14159265359;
+        }
+    #endif
+    #ifdef ENVIRONMENT_LIGHTING
+        if (g_IsFirstLightPass) {
+            gl_FragColor.rgb += environmentPhong(giWorldPosition, giSurfaceNormal,
+                    normalize(g_CameraPosition - giWorldPosition),
+                    giDiffuseReflectance * diffuseColor.rgb, SpecularSum * specularColor.rgb,
+                    m_Shininess, giEnvironmentDiffuseWeight);
+        }
+    #endif
+
               return;
           }
          }        
@@ -220,8 +264,25 @@ void main(){
        #endif
 
        gl_FragColor.rgb =  AmbientSum       * diffuseColor.rgb  +
-                           DiffuseSum.rgb   * diffuseColor.rgb  * vec3(light.x) +
-                           SpecularSum2.rgb * specularColor.rgb * vec3(light.y);
+                           (DiffuseSum.rgb * diffuseColor.rgb * vec3(light.x) +
+                           SpecularSum2.rgb * specularColor.rgb * vec3(light.y))
+                           * managedShadow(g_ShadowIndex, giWorldPosition, giSurfaceNormal, g_ShadowReceive);
+    #endif
+
+
+    #ifdef GI_PROBES
+        if (g_IsFirstLightPass) {
+            gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
+                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal) / 3.14159265359;
+        }
+    #endif
+    #ifdef ENVIRONMENT_LIGHTING
+        if (g_IsFirstLightPass) {
+            gl_FragColor.rgb += environmentPhong(giWorldPosition, giSurfaceNormal,
+                    normalize(g_CameraPosition - giWorldPosition),
+                    giDiffuseReflectance * diffuseColor.rgb, SpecularSum * specularColor.rgb,
+                    m_Shininess, giEnvironmentDiffuseWeight);
+        }
     #endif
 
     // add fog after the lighting because shadows will cause the fog to darken

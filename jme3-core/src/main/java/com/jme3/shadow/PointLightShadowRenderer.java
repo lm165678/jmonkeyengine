@@ -107,7 +107,7 @@ public class PointLightShadowRenderer extends AbstractShadowRenderer {
     @Override
     protected void updateShadowCams(Camera viewCam) {
 
-        if (light == null) {
+        if (light == null || !light.isEnabled() || !light.isCastShadow()) {
             logger.warning("The light can't be null for a " + getClass().getName());
             return;
         }

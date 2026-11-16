@@ -80,6 +80,28 @@ public class LightProbe extends Light implements Savable {
     private boolean ready = false;
     private Vector3f position = new Vector3f();
     private int nbMipMaps;
+    private boolean diffuseEnabled = true;
+
+    /**
+     * Enables native diffuse IBL (legacy default true). Reflection-only probes
+     * retain their SH data for conversion/debugging but upload zero diffuse SH.
+     * Change on the render thread before drawing. Existing assets remain unchanged.
+     * <pre>{@code
+     * // 第一步：正常烘焙局部环境探针。
+     * LightProbe probe = LightProbeFactory.makeProbe(environmentCamera, scene);
+     * // 第二步：仅保留局部镜面反射；漫反射交给 SkyLight / GI Volume。
+     * probe.setDiffuseEnabled(false);
+     * scene.addLight(probe);
+     * // 第三步：如需兼容旧式漫反射，可恢复 probe.setDiffuseEnabled(true)。
+     * }</pre>
+     */
+    public void setDiffuseEnabled(boolean enabled) {
+        diffuseEnabled = enabled;
+    }
+
+    public boolean isDiffuseEnabled() {
+        return diffuseEnabled;
+    }
 
     public enum AreaType{
         Spherical,
@@ -166,12 +188,14 @@ public class LightProbe extends Light implements Savable {
         oc.write(area, "area", new SphereProbeArea(Vector3f.ZERO, 1.0f));
         oc.write(ready, "ready", false);
         oc.write(nbMipMaps, "nbMipMaps", 0);
+        oc.write(diffuseEnabled, "diffuseEnabled", true);
     }
 
     @Override
     public void read(JmeImporter im) throws IOException {
         super.read(im);
         InputCapsule ic = im.getCapsule(this);
+        diffuseEnabled = ic.readBoolean("diffuseEnabled", true);
 
         prefilteredEnvMap = (TextureCubeMap) ic.readSavable("prefilteredEnvMap", null);
         position = (Vector3f) ic.readSavable("position", null);

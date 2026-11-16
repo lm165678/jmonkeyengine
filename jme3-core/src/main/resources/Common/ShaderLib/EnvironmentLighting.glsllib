@@ -1,0 +1,64 @@
+#import "Common/ShaderLib/GLSLCompat.glsllib"
+#import "Common/ShaderLib/IrradianceSH.glsllib"
+#ifdef ENVIRONMENT_LIGHTING
+uniform vec3 g_EnvironmentSh[9];
+uniform vec3 g_SkySh[9];
+uniform vec4 g_EnvironmentData;
+uniform samplerCube g_EnvironmentMap;
+uniform samplerCube g_SkyMap;
+uniform float g_SkyMipCount;
+uniform mat4 g_EnvironmentLocalData;
+float environmentReflectionCoverage = 0.0;
+float environmentLocalCoverage(vec3 position) {
+    if (g_EnvironmentLocalData[3].w < 0.0) {
+        return 0.0;
+    }
+    vec3 delta = position - g_EnvironmentLocalData[3].xyz;
+    float distance = length(delta) * fract(g_EnvironmentLocalData[3].w);
+    if (g_EnvironmentLocalData[0][3] != 0.0) {
+        vec3 extents = abs(vec3(g_EnvironmentLocalData[0][3],
+                g_EnvironmentLocalData[1][3], g_EnvironmentLocalData[2][3]));
+        vec3 coordinates = vec3(dot(g_EnvironmentLocalData[0].xyz, delta),
+                dot(g_EnvironmentLocalData[1].xyz, delta), dot(g_EnvironmentLocalData[2].xyz, delta));
+        coordinates = abs(coordinates) / max(extents, vec3(0.0001));
+        distance = max(coordinates.x, max(coordinates.y, coordinates.z));
+    }
+    return smoothstep(0.0, 0.2, 1.0 - distance);
+}
+
+// Sky has no parallax. The legacy Phong path selects the nearest local probe;
+// PBR retains its existing multi-probe blending and uses sky as fallback only.
+vec3 environmentSpecular(vec3 direction, float roughness) {
+    float lod = clamp(roughness, 0.0, 1.0) * max(0.0, g_EnvironmentData.x - 1.0);
+    #if (__VERSION__ >= 130) || (defined(GL_EXT_shader_texture_lod))
+        return textureCubeLod(g_EnvironmentMap, direction, lod).rgb;
+    #else
+        return textureCube(g_EnvironmentMap, direction, lod).rgb;
+    #endif
+}
+vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
+        vec3 diffuseReflectance, vec3 specularReflectance, float shininess,
+        float diffuseWeight) {
+    vec3 diffuse = shLambertResponse(shNativeIrradiance(g_EnvironmentSh, normal),
+            diffuseReflectance, 1.0) * (g_EnvironmentData.w > 0.5 ? diffuseWeight : giSkyDiffuseWeight);
+    // Map Blinn-Phong exponent to a roughness approximation for the GGX-prefiltered
+    // environment. This is not exact convolution of a Blinn-Phong BRDF.
+    float roughness = pow(2.0 / (max(shininess, 0.0) + 2.0), 0.25);
+    vec3 specular = environmentSpecular(reflect(-viewDirection, normal), roughness)
+            * specularReflectance;
+    float coverage = environmentLocalCoverage(position);
+    if (g_EnvironmentData.z > 0.5) {
+        vec3 direction = reflect(-viewDirection, normal);
+        float lod = roughness * max(0.0, g_SkyMipCount - 1.0);
+        #if (__VERSION__ >= 130) || (defined(GL_EXT_shader_texture_lod))
+            vec3 skySpecular = textureCubeLod(g_SkyMap, direction, lod).rgb * specularReflectance;
+        #else
+            vec3 skySpecular = textureCube(g_SkyMap, direction, lod).rgb * specularReflectance;
+        #endif
+        specular = mix(skySpecular, specular, coverage);
+    } else {
+        specular *= coverage;
+    }
+    return diffuse + specular;
+}
+#endif

@@ -1099,6 +1099,10 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     protected void setParent(Node parent) {
         assert SceneGraphThreadWarden.updateRequirement(this, parent);
         this.parent = parent;
+        com.jme3.environment.SkyLightControl sky = getControl(com.jme3.environment.SkyLightControl.class);
+        if (sky != null && sky.getSpatial() == this) {
+            sky.synchronizeParent();
+        }
     }
 
     /**
@@ -1805,6 +1809,12 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * spatial gets re-parented.
      */
     public void setCullHint(CullHint hint) {
+        // Reapplying a preview's visibility policy does not change registration.
+        // Avoid invalidating subtree listeners (including baked-field indexes)
+        // every frame when the local policy is already the requested value.
+        if (cullHint == hint) {
+            return;
+        }
         cullHint = hint;
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
@@ -1863,6 +1873,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setShadowMode(RenderQueue.ShadowMode shadowMode) {
         this.shadowMode = shadowMode;
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
     /**

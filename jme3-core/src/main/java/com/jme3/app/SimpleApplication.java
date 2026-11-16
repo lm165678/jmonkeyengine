@@ -100,6 +100,7 @@ public abstract class SimpleApplication extends LegacyApplication {
     protected BitmapFont guiFont;
     protected FlyByCamera flyCam;
     protected boolean showSettings = true;
+    private final SceneServicesState sceneServices = new SceneServicesState();
     private final AppActionListener actionListener = new AppActionListener();
 
     private class AppActionListener implements ActionListener {
@@ -144,6 +145,25 @@ public abstract class SimpleApplication extends LegacyApplication {
      */
     public SimpleApplication(AppState... initialStates) {
         super(initialStates);
+        stateManager.attach(sceneServices);
+    }
+
+    /**
+     * Automatic services for attached J3O scenes, enabled by default even with
+     * custom initial states. See SceneServicesState for usage, budgets and optional
+     * physics dependencies. Managers are created lazily during application frames;
+     * loading without attaching never starts physics or allocates a GI page pool.
+     * @return the application-owned service state (never null)
+     */
+    public SceneServicesState getSceneServices() {
+        return sceneServices;
+    }
+
+    @Override
+    public void destroy() {
+        // Unregister controls before any Bullet state destroys its PhysicsSpace.
+        sceneServices.setEnabled(false);
+        super.destroy();
     }
 
     @Override
@@ -355,7 +375,12 @@ public abstract class SimpleApplication extends LegacyApplication {
         if (prof != null) {
             prof.appStep(AppStep.RenderFrame);
         }
-        renderManager.render(tpf, context.isRenderable());
+        try {
+            sceneServices.prepareRender();
+            renderManager.render(tpf, context.isRenderable());
+        } finally {
+            sceneServices.finishRender();
+        }
         // Call user's custom render method
         simpleRender(renderManager);
         stateManager.postRender();

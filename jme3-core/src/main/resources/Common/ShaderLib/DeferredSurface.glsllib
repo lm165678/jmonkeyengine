@@ -1,7 +1,11 @@
-// Raw MRT write contract. Only record0.a is reserved for the model ID.
+// Raw MRT write contract. Only record0.a is reserved for the model/receiver header.
 // Model-specific channels must match that model's decoder in the lighting stage.
 #ifdef DEFERRED_GBUFFER
 uniform int m_DeferredShadingId;
+#ifndef JME_SHADOW_RECEIVE
+#define JME_SHADOW_RECEIVE
+uniform bool g_ShadowReceive;
+#endif
 layout(location = 0) out vec4 outGBuffer0;
 layout(location = 1) out vec4 outGBuffer1;
 layout(location = 2) out vec4 outGBuffer2;
@@ -15,7 +19,8 @@ vec4 deferredSurfaceColor;
 // records; the writer supplies the shared ID header and initializes every MRT.
 void writeGBuffer(vec4 record0, vec4 record1, vec4 record2, vec4 record3, vec4 record4,
                   int shadingId) {
-    outGBuffer0 = vec4(record0.rgb, float(shadingId));
+    // Shared header: integer model ID; fractional 0.25 opts out of receiving shadows.
+    outGBuffer0 = vec4(record0.rgb, float(shadingId) + (g_ShadowReceive ? 0.0 : 0.25));
     outGBuffer1 = record1;
     outGBuffer2 = record2;
     outGBuffer3 = record3;

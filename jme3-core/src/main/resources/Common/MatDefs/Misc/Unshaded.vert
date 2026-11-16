@@ -4,6 +4,11 @@
 #import "Common/ShaderLib/MorphAnim.glsllib"
 
 attribute vec3 inPosition;
+#ifdef GI_PROBES
+attribute vec3 inNormal;
+varying vec3 giWorldPosition;
+varying vec3 giWorldNormal;
+#endif
 #ifdef SURFACE_CAPTURE
 varying vec3 capturePosition;
 #endif
@@ -43,16 +48,31 @@ void main(){
 
     vec4 modelSpacePos = vec4(inPosition, 1.0);
 
+    #ifdef GI_PROBES
+        vec3 giModelNormal = inNormal;
+    #endif
     #ifdef NUM_MORPH_TARGETS
-        Morph_Compute(modelSpacePos);
+        #ifdef GI_PROBES
+            Morph_Compute(modelSpacePos, giModelNormal);
+        #else
+            Morph_Compute(modelSpacePos);
+        #endif
     #endif
 
     #ifdef NUM_BONES
-        Skinning_Compute(modelSpacePos);
+        #ifdef GI_PROBES
+            Skinning_Compute(modelSpacePos, giModelNormal);
+        #else
+            Skinning_Compute(modelSpacePos);
+        #endif
     #endif
 
     #ifdef SURFACE_CAPTURE
         capturePosition = TransformWorld(modelSpacePos).xyz;
+    #endif
+    #ifdef GI_PROBES
+        giWorldPosition = TransformWorld(modelSpacePos).xyz;
+        giWorldNormal = TransformWorldNormal(giModelNormal);
     #endif
     gl_Position = TransformWorldViewProjection(modelSpacePos);
 }

@@ -69,6 +69,7 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
 
     @Override
     public void render(RenderManager renderManager, Shader shader, Geometry geometry, LightList lights, BindUnits lastBindUnits) {
+        renderManager.bindManagedShadows(shader, lastBindUnits.textureUnit);
         Renderer r = renderManager.getRenderer();
         Uniform lightDir = shader.getUniform("g_LightDirection");
         Uniform lightColor = shader.getUniform("g_LightColor");
@@ -86,11 +87,13 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
             }
 
             if (isFirstLight) {
+                shader.getUniform("g_IsFirstLightPass").setValue(VarType.Boolean, true);
                 // set ambient color for first light only
                 ambientColor.setValue(VarType.Vector4, ambientLightColor);
                 isFirstLight = false;
                 isSecondLight = true;
             } else if (isSecondLight) {
+                shader.getUniform("g_IsFirstLightPass").setValue(VarType.Boolean, false);
                 ambientColor.setValue(VarType.Vector4, ColorRGBA.Black);
                 // apply additive blending for 2nd and future lights
                 r.applyRenderState(ADDITIVE_LIGHT);
@@ -104,6 +107,7 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
             Vector4f tmpVec = vars.vect4f1;
 
             ColorRGBA color = l.getColor();
+            shader.getUniform("g_ShadowIndex").setValue(VarType.Float, (float) renderManager.getShadowLightIndex(l));
             tmpLightColor.set(color);
             tmpLightColor.a = l.getType().getId();
             lightColor.setValue(VarType.Vector4, tmpLightColor);
@@ -161,6 +165,7 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
         }
 
         if (isFirstLight) {
+            shader.getUniform("g_IsFirstLightPass").setValue(VarType.Boolean, true);
             // Either there are no lights at all, or only ambient lights.
             // Render a dummy "normal light" so we can see the ambient color.
             ambientColor.setValue(VarType.Vector4, getAmbientColor(lights, false, ambientLightColor));

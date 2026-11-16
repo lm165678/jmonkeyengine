@@ -442,8 +442,8 @@ public class SdsmDirectionalLightShadowRenderer extends AbstractShadowRenderer {
 
     @Override
     protected boolean checkCulling(Camera viewCam) {
-        // Directional lights are always visible
-        return true;
+        // Directional lights have no spatial culling, but honor scene preferences.
+        return light != null && light.isEnabled() && light.isCastShadow();
     }
 
     /**

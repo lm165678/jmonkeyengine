@@ -2,6 +2,27 @@ MaterialDef Phong Lighting {
     ShadingId 1
 
     MaterialParameters {
+        // Opt-in diffuse GI chunk. Unbound materials retain their original lighting.
+        // GiProbeData.bind()/Binding.close() install/restore all parameters together.
+        Texture2D GiIrradiance -LINEAR
+        Texture2D GiMoments -LINEAR
+        Texture2D GiSkyVisibility -LINEAR
+        // Single-volume boundary transition in world units; 0 disables fading.
+        Float GiFadeDistance : 1.0
+        Vector3 GiOrigin
+        Vector3 GiSpacing
+        Vector3 GiCounts
+        Vector4 GiAtlas
+        Float GiBias : 0.05
+        Boolean GiEnabled : false
+        // 0 replaces environment diffuse inside GI coverage; 1 explicitly adds it.
+        Float GiEnvironmentMix : 0.0
+        Boolean EnvironmentLighting : true
+        Vector2 GiEncoding : 1.0 1.0
+        Texture2D GiVolumeData -LINEAR
+        Int GiVolumeCount : 0
+        Vector4 GiTextureSize
+
         Int BoundDrawBuffer
         Texture2D DeferredLightData -LINEAR
         Int DeferredLightCount
@@ -155,9 +176,12 @@ MaterialDef Phong Lighting {
             CameraPosition
             WorldMatrix
             ViewProjectionMatrix            
+            WorldNormalMatrix
         }
 
-        Defines {  
+        Defines {
+            GI_PROBES : GiIrradiance
+            ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer         
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting           
@@ -206,9 +230,12 @@ MaterialDef Phong Lighting {
             CameraPosition
             WorldMatrix
             ViewProjectionMatrix            
+            WorldNormalMatrix
         }
 
         Defines {
+            GI_PROBES : GiIrradiance
+            ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting            
@@ -380,9 +407,12 @@ MaterialDef Phong Lighting {
             CameraPosition
             WorldMatrix
             ViewProjectionMatrix
+            WorldNormalMatrix
         }
 
         Defines {
+            GI_PROBES : GiIrradiance
+            ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting

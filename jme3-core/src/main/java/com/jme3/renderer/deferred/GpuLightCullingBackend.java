@@ -63,7 +63,7 @@ final class GpuLightCullingBackend implements LightCullingBackend {
         List<Light> lights = frame.lights;
         frame.resources.ensureGpuIndices((int) records(columns, rows, tileCapacity));
         Shader computeShader = frame.resources.computeShader();
-        computeShader.getBufferBlock("TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
+        computeShader.getBufferBlock("m_TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
         bindTexture(renderer, 6, frame.resources.lightTexture);
         uniform(computeShader, "Lights", VarType.Int, 6);
         uniform(computeShader, "View", VarType.Matrix4, camera.getViewMatrix());

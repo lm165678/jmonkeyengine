@@ -1,5 +1,5 @@
 layout(local_size_x = 64) in;
-layout(std430) buffer TileIndices {
+layout(std430) buffer m_TileIndices {
     int tileRecords[];
 };
 uniform sampler2D Lights;

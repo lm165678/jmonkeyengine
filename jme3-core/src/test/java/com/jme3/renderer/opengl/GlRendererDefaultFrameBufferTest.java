@@ -33,12 +33,36 @@ package com.jme3.renderer.opengl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.jme3.texture.FrameBuffer;
 import org.junit.jupiter.api.Test;
 
 /** Tests the platform presentation framebuffer when its name is nonzero. */
 public class GlRendererDefaultFrameBufferTest extends FrameBufferTestSupport {
+    @Test
+    void nestedShadowCaptureRestoresOffscreenTargetWithPresentationOverride() {
+        FrameBuffer presentation = framebuffer(texture());
+        FrameBuffer capture = framebuffer(texture());
+        FrameBuffer shadowAtlas = framebuffer(texture());
+        renderer.setMainFrameBufferOverride(presentation);
+        assertSame(presentation, renderer.getCurrentFrameBuffer());
+
+        renderer.setFrameBuffer(capture);
+        FrameBuffer previous = renderer.getCurrentFrameBuffer();
+        assertSame(capture, previous);
+        renderer.setFrameBuffer(shadowAtlas);
+        renderer.setFrameBuffer(previous);
+        assertEquals(capture.getId(), driver.drawFramebuffer);
+        assertSame(capture, renderer.getCurrentFrameBuffer());
+
+        renderer.setFrameBuffer(null);
+        assertSame(presentation, renderer.getCurrentFrameBuffer());
+        renderer.setMainFrameBufferOverride(null);
+        renderer.setFrameBuffer(null);
+        assertNull(renderer.getCurrentFrameBuffer());
+    }
+
     @Test
     void copyingToScreenUsesDiscoveredFramebuffer() {
         initializeRenderer(77);

@@ -2740,9 +2740,10 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public FrameBuffer getCurrentFrameBuffer() {
-        if(mainFbOverride!=null){
-            return mainFbOverride;
-        }
+        // The presentation override only substitutes setFrameBuffer(null).
+        // Offscreen captures may currently bind a different target; returning
+        // the override here sends nested shadow-pass restoration to the SDK
+        // display instead of back to the probe capture framebuffer.
         return context.boundFB;
     }
 

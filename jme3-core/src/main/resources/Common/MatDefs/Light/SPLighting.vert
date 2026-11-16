@@ -97,6 +97,11 @@ attribute vec3 inNormal;
     }
 #endif
 
+
+varying vec3 giWorldPosition;
+varying vec3 giWorldNormal;
+varying vec3 giDiffuseReflectance;
+
 void main(){
    vec4 modelSpacePos = vec4(inPosition, 1.0);
    vec3 modelSpaceNorm = inNormal;
@@ -121,7 +126,16 @@ void main(){
         #endif
    #endif
 
-   gl_Position = TransformWorldViewProjection(modelSpacePos);
+        giWorldPosition = TransformWorld(modelSpacePos).xyz;
+        giWorldNormal = TransformWorldNormal(modelSpaceNorm);
+        giDiffuseReflectance = vec3(1.0);
+        #ifdef MATERIAL_COLORS
+            giDiffuseReflectance = m_Diffuse.rgb;
+        #endif
+        #ifdef VERTEX_COLOR
+            giDiffuseReflectance *= inColor.rgb;
+        #endif
+    gl_Position = TransformWorldViewProjection(modelSpacePos);
    texCoord = inTexCoord;
    #ifdef SEPARATE_TEXCOORD
       texCoord2 = inTexCoord2;

@@ -109,8 +109,8 @@ final class LightCullingPass implements DeferredPass {
     private void uploadLights(DeferredRenderContext frame) {
         DeferredResources r = frame.resources;
         List<Light> lights = frame.lights;
-        r.lightTexture = r.storage(r.lightTexture, 3, Math.max(1, lights.size()),
-            Image.Format.RGBA32F, 48 * Math.max(1, lights.size()));
+        r.lightTexture = r.storage(r.lightTexture, 4, Math.max(1, lights.size()),
+            Image.Format.RGBA32F, 64 * Math.max(1, lights.size()));
         ByteBuffer data = r.lightTexture.getImage().getData(0);
         for (Light light : lights) {
             ColorRGBA c = light.getColor();
@@ -138,8 +138,10 @@ final class LightCullingPass implements DeferredPass {
                 SpotLight l = (SpotLight) light;
                 p = l.getDirection();
                 data.putFloat(p.x).putFloat(p.y).putFloat(p.z).putFloat(l.getPackedAngleCos());
-            } else
+            } else {
                 data.putFloat(0).putFloat(0).putFloat(0).putFloat(0);
+            }
+            data.putFloat(frame.manager.getShadowLightIndex(light)).putFloat(0).putFloat(0).putFloat(0);
         }
         data.clear();
         r.lightTexture.getImage().setUpdateNeeded();

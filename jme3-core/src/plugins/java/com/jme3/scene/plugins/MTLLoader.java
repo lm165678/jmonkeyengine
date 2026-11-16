@@ -231,7 +231,7 @@ public class MTLLoader implements AssetLoader {
         }else if (cmd.equals("map_kd")){
             String path = nextStatement();
             diffuseMap = loadTexture(path);
-        }else if (cmd.equals("map_bump") || cmd.equals("bump")){
+        }else if (cmd.equals("map_bump") || cmd.equals("bump") || cmd.equals("map_norm")){
             if (normalMap == null){
                 String path = nextStatement();
                 normalMap = loadTexture(path);

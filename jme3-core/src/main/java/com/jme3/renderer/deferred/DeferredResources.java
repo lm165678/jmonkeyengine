@@ -111,7 +111,7 @@ final class DeferredResources {
         if (computeShader == null) {
             computeShader = new Shader();
             computeShader.addSource(Shader.ShaderType.Compute, ROOT + "Cull.comp",
-                (String) assets.loadAsset(ROOT + "Cull.comp"), "", "GLSL430");
+                (String) assets.loadAsset(ROOT + "Cull.comp"), DeferredRenderContext.uniformDefines(), "GLSL430");
         }
         return computeShader;
     }
@@ -131,7 +131,7 @@ final class DeferredResources {
             shader.addSource(Shader.ShaderType.Vertex, ROOT + "Fullscreen.vert",
                 (String) assets.loadAsset(ROOT + "Fullscreen.vert"), "", language);
             shader.addSource(Shader.ShaderType.Fragment, ROOT + "Lighting.frag", source,
-                gpu ? "#define GPU_TILES\n" : "", language);
+                DeferredRenderContext.uniformDefines() + (gpu ? "#define GPU_TILES\n" : ""), language);
             if (gpu) {
                 gpuShader = shader;
             } else {

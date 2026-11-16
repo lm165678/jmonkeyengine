@@ -79,7 +79,22 @@ final class DeferredRenderContext {
         physicalCamera.resize(width, height, false);
         return physicalCamera;
     }
+    // Keep the model-facing GLSL names stable while native uniforms follow
+    // Shader's m_/g_ naming contract, including when assertions are enabled.
+    static String uniformDefines() {
+        StringBuilder defines = new StringBuilder();
+        for (String name : new String[]{"gbuffer0", "gbuffer1", "gbuffer2",
+                "gbuffer3", "gbuffer4", "gbufferDepth", "Lights", "Tiles",
+                "ColorRamp", "Untiled", "Columns", "TileSize", "LightCount",
+                "TileCapacity", "TileTextureWidth", "InverseViewProjection",
+                "CameraPosition", "AmbientColor", "Resolution", "View",
+                "Projection", "Near", "Far", "ConservativeBounds"}) {
+            defines.append("#define ").append(name).append(" m_").append(name).append('\n');
+        }
+        return defines.toString();
+    }
+
     static void uniform(Shader shader, String name, VarType type, Object value) {
-        shader.getUniform(name).setValue(type, value);
+        shader.getUniform("m_" + name).setValue(type, value);
     }
 }

@@ -190,13 +190,22 @@ public class JmeDesktopSystem extends JmeSystemDelegate {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
     private JmeContext newContextCustom(AppSettings settings, JmeContext.Type type) {
         try {
             String className = settings.getRenderer().substring("CUSTOM".length());
 
-            Class ctxClazz = Class.forName(className);
-            return (JmeContext) ctxClazz.getDeclaredConstructor().newInstance();
+            Class<? extends JmeContext> contextClass = settings.getCustomRendererClass();
+            if (contextClass == null) {
+                // Saved settings contain only a name. Prefer the host loader,
+                // then preserve the original engine-loader fallback.
+                try {
+                    contextClass = Class.forName(className, true,
+                            Thread.currentThread().getContextClassLoader()).asSubclass(JmeContext.class);
+                } catch (ClassNotFoundException missingFromHost) {
+                    contextClass = Class.forName(className).asSubclass(JmeContext.class);
+                }
+            }
+            return contextClass.getDeclaredConstructor().newInstance();
         } catch (InstantiationException | IllegalAccessException
                 | IllegalArgumentException | InvocationTargetException
                 | NoSuchMethodException | SecurityException ex) {

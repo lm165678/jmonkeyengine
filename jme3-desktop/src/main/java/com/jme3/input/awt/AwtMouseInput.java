@@ -181,9 +181,9 @@ public class AwtMouseInput implements MouseInput, MouseListener, MouseWheelListe
             // invert actual Y and DY for motion events
             int actualX = lastKnownLocation.x;
             int actualY = component.getHeight() - lastKnownLocation.y;
-            MouseMotionEvent evt = new MouseMotionEvent(actualX, actualY,
-                                                        newX - lastEventX,
-                                                        lastEventY - newY,
+            MouseMotionEvent evt = new MouseMotionEvent(pixelX(actualX), pixelY(actualY),
+                                                        pixelX(newX) - pixelX(lastEventX),
+                                                        pixelY(lastEventY) - pixelY(newY),
                                                         wheelPos, lastEventWheel - wheelPos);
             listener.onMouseMotionEvent(evt);
 
@@ -230,6 +230,18 @@ public class AwtMouseInput implements MouseInput, MouseListener, MouseWheelListe
         return 3;
     }
 
+    private int pixelX(int logical) {
+        double scale = component instanceof com.jme3.system.awt.AwtPanel
+                ? ((com.jme3.system.awt.AwtPanel) component).getFramebufferScaleX() : 1;
+        return (int) Math.round(logical * scale);
+    }
+
+    private int pixelY(int logical) {
+        double scale = component instanceof com.jme3.system.awt.AwtPanel
+                ? ((com.jme3.system.awt.AwtPanel) component).getFramebufferScaleY() : 1;
+        return (int) Math.round(logical * scale);
+    }
+
     @Override
     public void mouseClicked(MouseEvent awtEvt) {
 //        MouseButtonEvent evt = new MouseButtonEvent(getJMEButtonIndex(arg0), false);
@@ -240,7 +252,7 @@ public class AwtMouseInput implements MouseInput, MouseListener, MouseWheelListe
     public void mousePressed(MouseEvent awtEvt) {
         // Must flip Y!
         int y = component.getHeight() - awtEvt.getY();
-        MouseButtonEvent evt = new MouseButtonEvent(getJMEButtonIndex(awtEvt), true, awtEvt.getX(), y);
+        MouseButtonEvent evt = new MouseButtonEvent(getJMEButtonIndex(awtEvt), true, pixelX(awtEvt.getX()), pixelY(y));
         evt.setTime(awtEvt.getWhen());
         synchronized (eventQueue) {
             eventQueue.add(evt);
@@ -250,7 +262,7 @@ public class AwtMouseInput implements MouseInput, MouseListener, MouseWheelListe
     @Override
     public void mouseReleased(MouseEvent awtEvt) {
         int y = component.getHeight() - awtEvt.getY();
-        MouseButtonEvent evt = new MouseButtonEvent(getJMEButtonIndex(awtEvt), false, awtEvt.getX(), y);
+        MouseButtonEvent evt = new MouseButtonEvent(getJMEButtonIndex(awtEvt), false, pixelX(awtEvt.getX()), pixelY(y));
         evt.setTime(awtEvt.getWhen());
         synchronized (eventQueue) {
             eventQueue.add(evt);

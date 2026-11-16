@@ -124,6 +124,10 @@ public abstract class AbstractShadowFilter<T extends AbstractShadowRenderer> ext
     protected void postFrame(RenderManager renderManager, ViewPort viewPort, FrameBuffer prevFilterBuffer, FrameBuffer sceneBuffer) {
         if (!shadowRenderer.skipPostPass) {
             shadowRenderer.setPostShadowParams();
+        } else {
+            // FrameGraph submission does not call the legacy postQueue hook.
+            // Remove the previous frame's map when the light stops casting.
+            material.setTexture("ShadowMap0", null);
         }
     }
 

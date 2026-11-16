@@ -150,6 +150,10 @@ public final class Technique {
             applyOverrides(dynamicDefines, forcedOverrides);
         }
 
+        Integer environmentDefine = def.getShaderParamDefineId("EnvironmentLighting");
+        if (environmentDefine != null && !com.jme3.environment.EnvironmentLighting.available(lights)) {
+            dynamicDefines.set(environmentDefine, false);
+        }
         return logic.makeCurrent(assetManager, renderManager, rendererCaps, lights, dynamicDefines);
     }
     

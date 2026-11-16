@@ -1,0 +1,20 @@
+MaterialDef Shadow filter check {
+    MaterialParameters {
+        Texture2D Atlas
+        Vector2 AtlasSize
+        Vector4 Rect
+        Float Radius
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL150: MatDefs/ShadowFilterCheck.frag
+        WorldParameters {
+            WorldViewProjectionMatrix
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

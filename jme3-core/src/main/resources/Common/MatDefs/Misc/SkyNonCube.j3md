@@ -1,5 +1,8 @@
 MaterialDef Sky Plane {
     MaterialParameters {
+        // Internal linear HDR capture: explicit decoding when a borrowed sRGB
+        // source is uploaded as linear. Ordinary sky display keeps its defaults.
+        Boolean CaptureDecodeSrgb : false
         Int BoundDrawBuffer
         Texture2D Texture
         Boolean SphereMap
@@ -17,6 +20,7 @@ MaterialDef Sky Plane {
         }
 
         Defines {
+            CAPTURE_DECODE_SRGB : CaptureDecodeSrgb
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             SPHERE_MAP : SphereMap
             EQUIRECT_MAP : EquirectMap

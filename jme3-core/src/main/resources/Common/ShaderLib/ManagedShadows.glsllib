@@ -1,0 +1,78 @@
+#ifndef JME_MANAGED_SHADOWS
+#define JME_MANAGED_SHADOWS
+uniform bool g_ManagedShadows;
+#ifndef JME_SHADOW_RECEIVE
+#define JME_SHADOW_RECEIVE
+uniform bool g_ShadowReceive;
+#endif
+uniform sampler2D g_ShadowAtlas;
+uniform sampler2D g_ShadowRecords;
+uniform vec2 g_ShadowAtlasSize;
+uniform float g_ShadowRecordCount;
+uniform vec4 g_ShadowViewRow;
+
+vec4 managedShadowRecord(float light, float texel) {
+    return texture2D(g_ShadowRecords, vec2((texel + 0.5) / 36.0,
+            (light + 0.5) / g_ShadowRecordCount));
+}
+
+#import "Common/ShaderLib/ShadowFilter.glsllib"
+
+float managedShadowPcf(vec2 uv, vec4 rect, float referenceDepth, float radius) {
+    return ShadowFilter_Tent(g_ShadowAtlas, uv, g_ShadowAtlasSize, rect, referenceDepth, radius);
+}
+
+// Visibility modulates one light's direct contribution, never a composed color.
+float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) {
+    if (!g_ManagedShadows || !receive || light < 0.0) {
+        return 1.0;
+    }
+    vec4 header = managedShadowRecord(light, 0.0);
+    if (header.y < 0.5) {
+        return 1.0;
+    }
+    float face = 0.0;
+    if (header.x < 0.5) {
+        float depth = dot(g_ShadowViewRow, vec4(worldPosition, 1.0));
+        vec4 splits = managedShadowRecord(light, 2.0);
+        if (depth >= splits.x) {
+            face = 1.0;
+        }
+        if (header.y > 1.5 && depth >= splits.y) {
+            face = 2.0;
+        }
+        if (header.y > 2.5 && depth >= splits.z) {
+            face = 3.0;
+        }
+        if (face >= header.y || (header.y > 3.5 && depth >= splits.w)) {
+            return 1.0;
+        }
+    } else if (header.x < 1.5) {
+        vec3 delta = worldPosition - managedShadowRecord(light, 1.0).xyz;
+        vec3 magnitude = abs(delta);
+        if (magnitude.y >= max(magnitude.x, magnitude.z)) {
+            face = delta.y < 0.0 ? 0.0 : 1.0;
+        } else if (magnitude.z >= magnitude.x) {
+            face = delta.z < 0.0 ? 2.0 : 3.0;
+        } else {
+            face = delta.x < 0.0 ? 4.0 : 5.0;
+        }
+    }
+    float offset = 3.0 + face * 4.0;
+    mat4 matrix = mat4(managedShadowRecord(light, offset), managedShadowRecord(light, offset + 1.0),
+            managedShadowRecord(light, offset + 2.0), managedShadowRecord(light, offset + 3.0));
+    vec4 clip = matrix * vec4(worldPosition + normal * header.z, 1.0);
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    vec3 coordinate = clip.xyz / clip.w * 0.5 + 0.5;
+    if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, vec3(1.0)))) {
+        return 1.0;
+    }
+    vec4 rect = managedShadowRecord(light, 27.0 + face);
+    vec2 texel = 1.0 / g_ShadowAtlasSize;
+    vec2 uv = rect.xy + coordinate.xy * rect.zw;
+    return managedShadowPcf(uv, rect, coordinate.z - header.w,
+            managedShadowRecord(light, 33.0).x);
+}
+#endif

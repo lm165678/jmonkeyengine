@@ -1,5 +1,6 @@
 // Light storage is independent of any surface model/GBuffer attribute layout.
 #import "Common/ShaderLib/Lighting.glsllib"
+#import "Common/ShaderLib/ManagedShadows.glsllib"
 uniform sampler2D Lights;
 uniform sampler2D Tiles;
 uniform vec3 AmbientColor;
@@ -11,7 +12,7 @@ uniform int TileTextureWidth;
 uniform int TileCapacity;
 
 #ifdef GPU_TILES
-layout(std430) buffer TileIndices {
+layout(std430) buffer m_TileIndices {
     int tileRecords[];
 };
 #endif
@@ -59,7 +60,7 @@ DeferredLightList getLightList() {
 #endif
     return list;
 }
-DeferredLight getLight(DeferredLightList list, int entry, vec3 worldPosition) {
+DeferredLight getLight(DeferredLightList list, int entry, vec3 worldPosition, vec3 normal) {
     int index = list.allLights ? entry : readLightIndex(list.offset + entry);
     vec4 colorAndType = texelFetch(Lights, ivec2(0, index), 0);
     vec4 positionAndRadius = texelFetch(Lights, ivec2(1, index), 0);
@@ -70,11 +71,16 @@ DeferredLight getLight(DeferredLightList list, int entry, vec3 worldPosition) {
                     lightVector);
 
     DeferredLight light;
-    light.color = colorAndType.rgb;
+    light.color = colorAndType.rgb * managedShadow(texelFetch(Lights, ivec2(3, index), 0).x,
+            worldPosition, normal, getReceivesShadow());
     light.direction = directionAndAttenuation.xyz;
     light.attenuation = directionAndAttenuation.w;
     if (colorAndType.w > 1.5) {
         light.attenuation *= computeSpotFalloff(spotDirection, lightVector);
     }
     return light;
+}
+// Custom models may omit a normal; this disables only the normal bias.
+DeferredLight getLight(DeferredLightList list, int entry, vec3 worldPosition) {
+    return getLight(list, entry, worldPosition, vec3(0.0));
 }

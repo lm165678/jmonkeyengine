@@ -1294,6 +1294,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
                             || (multiDrawIndirect && meshMerging && MeshDrawPlan.compatible(batch.source.getMesh(), geometry.getMesh())))
                         && batch.occluder == writesOcclusion
                         && batch.queryOcclusion == queriesOcclusion
+                        && batch.source.getShadowMode() == geometry.getShadowMode()
                         && sameLights(batch.source, geometry)) {
                     found = batch;
                     break;

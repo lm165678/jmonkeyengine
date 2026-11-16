@@ -45,6 +45,7 @@ import com.jme3.scene.mesh.IndexIntBuffer;
 import com.jme3.scene.mesh.IndexShortBuffer;
 import com.jme3.util.BufferUtils;
 import com.jme3.util.IntMap;
+import com.jme3.util.mikktspace.MikktspaceTangentGenerator;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,7 +58,23 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Reads OBJ format models.
+ * Reads OBJ format models. Missing normals are generated using area-weighted
+ * smoothing groups; absent smoothing or {@code s off} produces flat normals.
+ * Explicit normals and UVs are preserved. Missing UVs receive dominant-axis
+ * planar projection per face, followed by automatic MikkTSpace tangents.
+ * Generated UVs may overlap and cannot reconstruct an authored texture atlas. Object names
+ * are accepted as metadata without changing the existing group hierarchy.
+ * Source OBJ/MTL files are never rewritten. Generation runs during asset loading,
+ * requires no rendering context, and is cached with the loaded model.
+ * <pre>
+ * // 第一步：正常加载 OBJ，导入器自动补全缺失法线、平面投影 UV 和切线。
+ * Spatial model = assetManager.loadModel("Models/example.obj");
+ * // 第二步：更新导入器后，清除旧缓存再重新导入（已有 J3O 不会自动重建）。
+ * assetManager.deleteFromCache(new ModelKey("Models/example.obj"));
+ * model = assetManager.loadModel("Models/example.obj");
+ * // 第三步：在应用更新线程中将模型加入场景。
+ * rootNode.attachChild(model);
+ * </pre>
  */
 public final class OBJLoader implements AssetLoader {
 
@@ -68,6 +85,9 @@ public final class OBJLoader implements AssetLoader {
     protected final ArrayList<Vector3f> norms = new ArrayList<>();
 
     private final ArrayList<Group> groups = new ArrayList<>();
+    private final ArrayList<Face> sourceFaces = new ArrayList<>();
+    private String smoothingGroup;
+    private int objectSerial;
 
     protected String currentMatName;
     protected String currentObjectName;
@@ -102,6 +122,7 @@ public final class OBJLoader implements AssetLoader {
         Vector2f vt;
         Vector3f vn;
         int index;
+        int positionIndex;
 
         @Override
         public boolean equals(Object obj) {
@@ -136,6 +157,7 @@ public final class OBJLoader implements AssetLoader {
     
     protected static class Face {
         Vertex[] verticies;
+        String smoothingKey;
     }
     
     protected class ObjectGroup {
@@ -174,6 +196,10 @@ public final class OBJLoader implements AssetLoader {
         texCoords.clear();
         norms.clear();
         groups.clear();
+        sourceFaces.clear();
+        smoothingGroup = null;
+        currentObjectName = null;
+        objectSerial = 0;
 
         vertIndexMap.clear();
         indexVertMap.clear();
@@ -277,6 +303,7 @@ public final class OBJLoader implements AssetLoader {
 
             Vertex vx = new Vertex();
             vx.v = verts.get(v - 1);
+            vx.positionIndex = v - 1;
 
             if (vt > 0)
                 vx.vt = texCoords.get(vt - 1);
@@ -297,6 +324,8 @@ public final class OBJLoader implements AssetLoader {
             f.verticies[i] = vertList.get(i);
         }
 
+        f.smoothingKey = smoothingGroup == null ? null : objectSerial + ":" + smoothingGroup;
+        sourceFaces.add(f);
         Group group = groups.get(groups.size() - 1);
 
         if (currentMatName != null && matList != null && matList.containsKey(currentMatName)){
@@ -396,8 +425,12 @@ public final class OBJLoader implements AssetLoader {
             String mtllib = scan.nextLine().trim();
             loadMtlLib(mtllib);
         }else if (cmd.equals("s")) {
-            logger.log(Level.WARNING, "smoothing groups are not supported, statement ignored: {0}", cmd);
-            return nextStatement();
+            String value = scan.nextLine().trim().split("\\s+")[0];
+            smoothingGroup = value.equals("0") || value.equalsIgnoreCase("off")
+                    ? null : (value.equalsIgnoreCase("on") ? "1" : value);
+        }else if (cmd.equals("o")) {
+            currentObjectName = scan.nextLine().trim();
+            objectSerial++;
         }else if (cmd.equals("mg")) {
             logger.log(Level.WARNING, "merge groups are not supported, statement ignored: {0}", cmd);
             return nextStatement();
@@ -437,12 +470,6 @@ public final class OBJLoader implements AssetLoader {
         else
             geom.setQueueBucket(Bucket.Opaque);
         
-        if (material.getMaterialDef().getName().contains("Lighting")
-          && mesh.getFloatBuffer(Type.Normal) == null){
-            logger.log(Level.WARNING, "OBJ mesh {0} doesn't contain normals! "
-                                    + "It might not display correctly", geom.getName());
-        }
-        
         return geom;
     }
 
@@ -450,7 +477,7 @@ public final class OBJLoader implements AssetLoader {
         Mesh m = new Mesh();
         m.setMode(Mode.Triangles);
 
-        boolean hasTexCoord = false;
+        boolean hasTexCoord = true;
         boolean hasNormals  = false;
 
         ArrayList<Face> newFaces = new ArrayList<>(faceList.size());
@@ -460,8 +487,9 @@ public final class OBJLoader implements AssetLoader {
             for (Vertex v : f.verticies){
                 findVertexIndex(v);
 
-                if (!hasTexCoord && v.vt != null)
-                    hasTexCoord = true;
+                if (v.vt == null) {
+                    hasTexCoord = false;
+                }
                 if (!hasNormals && v.vn != null)
                     hasNormals = true;
             }
@@ -551,7 +579,9 @@ public final class OBJLoader implements AssetLoader {
         m.setStatic();
         m.updateBound();
         m.updateCounts();
-        //m.setInterleaved();
+        if (hasTexCoord) {
+            MikktspaceTangentGenerator.generate(m);
+        }
 
         // clear data generated face statements
         // to prepare for next mesh
@@ -600,6 +630,8 @@ public final class OBJLoader implements AssetLoader {
             }
         }
         
+        generateMissingNormals();
+        generateMissingTexCoords();
         for (Group group : groups) {
             if (group == defaultGroupStub) {
                 materializeGroup(group, objNode);
@@ -623,6 +655,63 @@ public final class OBJLoader implements AssetLoader {
             return objNode;
     }
     
+    private void generateMissingTexCoords() {
+        for (Face face : sourceFaces) {
+            Vector3f normal = new Vector3f();
+            Vector3f origin = face.verticies[0].v;
+            for (int i = 1; i + 1 < face.verticies.length; i++) {
+                normal.addLocal(face.verticies[i].v.subtract(origin)
+                        .cross(face.verticies[i + 1].v.subtract(origin)));
+            }
+            float x = Math.abs(normal.x);
+            float y = Math.abs(normal.y);
+            float z = Math.abs(normal.z);
+            for (Vertex vertex : face.verticies) {
+                if (vertex.vt == null) {
+                    // One repeat per model unit; shared projections remain continuous.
+                    if (x >= y && x >= z) {
+                        vertex.vt = new Vector2f(vertex.v.z, vertex.v.y);
+                    } else if (y >= z) {
+                        vertex.vt = new Vector2f(vertex.v.x, vertex.v.z);
+                    } else {
+                        vertex.vt = new Vector2f(vertex.v.x, vertex.v.y);
+                    }
+                }
+            }
+        }
+    }
+
+    private void generateMissingNormals() {
+        Map<String, Map<Integer, Vector3f>> smoothNormals = new HashMap<>();
+        Map<Face, Vector3f> faceNormals = new IdentityHashMap<>();
+        for (Face face : sourceFaces) {
+            Vector3f normal = new Vector3f();
+            Vector3f origin = face.verticies[0].v;
+            for (int i = 1; i + 1 < face.verticies.length; i++) {
+                normal.addLocal(face.verticies[i].v.subtract(origin)
+                        .cross(face.verticies[i + 1].v.subtract(origin)));
+            }
+            faceNormals.put(face, normal);
+            if (face.smoothingKey != null) {
+                Map<Integer, Vector3f> sums = smoothNormals.computeIfAbsent(
+                        face.smoothingKey, key -> new HashMap<>());
+                for (Vertex vertex : face.verticies) {
+                    sums.computeIfAbsent(vertex.positionIndex, key -> new Vector3f()).addLocal(normal);
+                }
+            }
+        }
+        for (Face face : sourceFaces) {
+            for (Vertex vertex : face.verticies) {
+                if (vertex.vn == null) {
+                    Vector3f normal = face.smoothingKey == null ? faceNormals.get(face)
+                            : smoothNormals.get(face.smoothingKey).get(vertex.positionIndex);
+                    // Degenerate faces have no unique normal; keep the buffer finite.
+                    vertex.vn = normal.lengthSquared() > 0f ? normal.normalize() : Vector3f.UNIT_Y.clone();
+                }
+            }
+        }
+    }
+
     private void materializeGroup(Group group, Node container) throws IOException {
         if (group.matFaces.size() > 0) {
             for (Entry<String, ArrayList<Face>> entry : group.matFaces.entrySet()){

@@ -51,6 +51,10 @@ import java.nio.ByteBuffer;
  * <code>SkyFactory</code> is used to create jME {@link Spatial}s that can
  * be attached to the scene to display a sky image in the background.
  *
+ * <p>Created skies include {@link com.jme3.environment.SkyLightControl} for
+ * one-time HDR sky lighting. Attach to the scene root for global scope. Disable
+ * that control for background-only usage. Texture changes require requestRebake
+ * on the render thread and a separate rebake of any static GI volumes.</p>
  * @author Kirill Vainer
  */
 public class SkyFactory {
@@ -229,6 +233,7 @@ public class SkyFactory {
         texture.setWrap(Texture.WrapMode.EdgeClamp);
         skyMat.setTexture("Texture", texture);
         sky.setMaterial(skyMat);
+        sky.addControl(new com.jme3.environment.SkyLightControl(assetManager));
 
         return sky;
     }
@@ -344,6 +349,9 @@ public class SkyFactory {
         for (int i = 1; i < images.length; i++) {
             Image image = images[i];
             checkImage(images[i]);
+            if (image.getColorSpace() != images[0].getColorSpace()) {
+                throw new IllegalArgumentException("Sky faces must use the same color space");
+            }
             if (image.getFormat() != fmt) {
                 throw new IllegalArgumentException("Images must have same format");
             }
