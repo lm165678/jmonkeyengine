@@ -1,6 +1,8 @@
 package com.jme3.environment.gi;
 
 import com.jme3.material.MatParamOverride;
+import com.jme3.material.Material;
+import com.jme3.scene.Geometry;
 import com.jme3.math.Vector3f;
 import com.jme3.math.Quaternion;
 import com.jme3.renderer.*;
@@ -10,6 +12,11 @@ import com.jme3.texture.FrameBuffer;
 import com.jme3.util.BufferUtils;
 import java.io.*;
 import java.util.BitSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.*;
 import java.util.zip.*;
@@ -41,6 +48,16 @@ import java.util.zip.*;
  * on a worker. invalidate() supports targeted rebaking before publication; callers
  * must include every probe whose captured radiance could change, not only probes
  * inside edited geometry. No automatic dependency analysis is claimed.
+ * With bounceCount greater than one, publication waits for all passes and
+ * progress counts probe-pass work units. invalidate restarts every pass because
+ * indirect changes propagate beyond the selected probes. Checkpoint methods
+ * explicitly reject multi-bounce jobs; the single-bounce format is unchanged.
+ * <pre>{@code
+ * // 第一步：多次反射需显式设置；默认仍为一次。
+ * quality.bounceCount = 3;
+ * // 第二步：使用上面的 start/step 流程；不要在反射轮次之间发布中间结果。
+ * // 第三步：多次反射任务取消后从头重启；一次反射仍支持原断点恢复流程。
+ * }</pre>
  */
 public final class GiBakeJob implements AutoCloseable {
     private final RenderManager manager;
@@ -66,6 +83,9 @@ public final class GiBakeJob implements AutoCloseable {
     private int stage;
     private boolean closed;
     private GiProbeData result;
+    private GiProbeData previousBounce;
+    private int bounce;
+    private final Set<Material> bounceMaterials = Collections.newSetFromMap(new IdentityHashMap<>());
 
     GiBakeJob(RenderManager manager, Spatial scene, GiProbeVolume volume, GiSceneBaker.Settings settings,
             Consumer<ViewPort> configure, BooleanSupplier cancelled, IntConsumer progress) {
@@ -75,6 +95,20 @@ public final class GiBakeJob implements AutoCloseable {
         this.settings = settings;
         this.cancelled = cancelled;
         this.progress = progress;
+        if (settings.bounceCount > 1) {
+            scene.depthFirstTraversal(spatial -> {
+                if (spatial instanceof Geometry) {
+                    Material material = ((Geometry) spatial).getMaterial();
+                    if (material.getMaterialDef().getMaterialParam("GiEnabled") != null) {
+                        if (material.getMaterialDef().getMaterialParam("GiBakeBounce") == null) {
+                            throw new IllegalArgumentException("Multi-bounce GI requires GiBakeBounce support: "
+                                    + material.getMaterialDef().getName());
+                        }
+                        bounceMaterials.add(material);
+                    }
+                }
+            });
+        }
         grid = volume.getBakeGrid();
         worldOffset = volume.getWorldTranslation().clone();
         worldScale = volume.getWorldScale().clone();
@@ -127,6 +161,17 @@ public final class GiBakeJob implements AutoCloseable {
                     if (surfacePositions != null) {
                         ready.enableSurfaceLayout();
                     }
+                    if (bounce + 1 < settings.bounceCount) {
+                        if (previousBounce != null) {
+                            previousBounce.dispose();
+                        }
+                        previousBounce = ready;
+                        bounce++;
+                        completed.clear();
+                        probe = 0;
+                        stage = 0;
+                        continue;
+                    }
                     close();
                     volume.publish(ready);
                     result = ready;
@@ -142,7 +187,13 @@ public final class GiBakeJob implements AutoCloseable {
     }
 
     private void unit() {
-        if (stage == 0) {
+        if (stage == 0 && bounce > 0) {
+            position.set(grid.position(probe, new Vector3f()).addLocal(worldOffset).addLocal(offsets[probe]));
+            if (!valid[probe]) {
+                finishProbe();
+                return;
+            }
+        } else if (stage == 0) {
             Vector3f base = grid.position(probe, new Vector3f()).addLocal(worldOffset);
             position.set(base);
             // A valid probe must not capture a nearby wall inside the camera's
@@ -180,12 +231,30 @@ public final class GiBakeJob implements AutoCloseable {
         if (stage < 6) {
             Camera previousCamera = manager.getCurrentCamera();
             FrameBuffer previousBuffer = manager.getRenderer().getCurrentFrameBuffer();
-            MatParamOverride disable = new MatParamOverride(VarType.Boolean, "GiEnabled", false);
-            manager.addForcedMatParam(disable);
+            MatParamOverride enabled = new MatParamOverride(VarType.Boolean, "GiEnabled", previousBounce != null);
+            MatParamOverride captureBounce = new MatParamOverride(VarType.Boolean, "GiBakeBounce", previousBounce != null);
+            // Runtime edge fading must not attenuate transport between bake passes.
+            MatParamOverride fade = new MatParamOverride(VarType.Float, "GiFadeDistance", 0f);
+            List<GiProbeData.Binding> bindings = new ArrayList<>();
             try {
+                if (previousBounce != null) {
+                    for (Material material : bounceMaterials) {
+                        bindings.add(previousBounce.bind(material, worldOffset, 0.05f));
+                    }
+                }
+                manager.addForcedMatParam(enabled);
+                manager.addForcedMatParam(captureBounce);
+                if (previousBounce != null) {
+                    manager.addForcedMatParam(fade);
+                }
                 capture.renderFace(manager, position, stage);
             } finally {
-                manager.removeForcedMatParam(disable);
+                manager.removeForcedMatParam(fade);
+                manager.removeForcedMatParam(captureBounce);
+                manager.removeForcedMatParam(enabled);
+                for (int i = bindings.size() - 1; i >= 0; i--) {
+                    bindings.get(i).close();
+                }
                 manager.getRenderer().setFrameBuffer(previousBuffer);
                 if (previousCamera != null) {
                     manager.setCamera(previousCamera, false);
@@ -194,12 +263,16 @@ public final class GiBakeJob implements AutoCloseable {
         } else if (stage == 6) {
             sh[probe] = GiProbeBaker.project(position, settings.radianceSamples,
                     (p, direction, color) -> capture.color(direction, color), cancelled);
-            if (skyVisibility != null) {
+            if (skyVisibility != null && bounce == 0) {
                 skyVisibility[probe] = GiProbeBaker.project(position, settings.radianceSamples,
                         (p, direction, color) -> {
                             float visibility = capture.skyVisibility(direction);
                             color.set(visibility, visibility, visibility);
                         }, cancelled);
+            }
+            if (bounce > 0) {
+                finishProbe();
+                return;
             }
         } else {
             capture.momentsRow(stage - 7, moments[probe]);
@@ -213,12 +286,13 @@ public final class GiBakeJob implements AutoCloseable {
     private void finishProbe() {
         completed.set(probe);
         stage = 0;
-        progress.accept(completed.cardinality());
+        progress.accept(getCompletedProbeCount());
         probe = completed.nextClearBit(0);
     }
 
+    /** Completed probe-pass work units; includes previous complete bounce passes. */
     public int getCompletedProbeCount() {
-        return completed.cardinality();
+        return bounce * grid.getProbeCount() + completed.cardinality();
     }
 
     public GiProbeData getResult() {
@@ -233,7 +307,17 @@ public final class GiBakeJob implements AutoCloseable {
         if (closed || probes.length() > grid.getProbeCount()) {
             throw new IllegalStateException("Invalid probe selection or closed job");
         }
-        completed.andNot(probes);
+        if (settings.bounceCount > 1) {
+            // Changed incoming radiance can affect every probe in later passes.
+            completed.clear();
+            bounce = 0;
+            if (previousBounce != null) {
+                previousBounce.dispose();
+                previousBounce = null;
+            }
+        } else {
+            completed.andNot(probes);
+        }
         stage = 0;
         probe = completed.nextClearBit(0);
     }
@@ -249,8 +333,11 @@ public final class GiBakeJob implements AutoCloseable {
                 + ":" + settings.separateSky + ":" + settings.background + ":" + settings.captureShadows + ":" + settings.shadowMapSize;
     }
 
-    /** Saves complete probes only; does not close the caller's output. */
+    /** Saves complete probes only; does not close the caller's output.
+     * @throws UnsupportedOperationException if bounceCount is greater than one
+     */
     public void saveCheckpoint(OutputStream output) throws IOException {
+        requireSingleBounceCheckpoint();
         String identity = identity();
         GZIPOutputStream gzip = new GZIPOutputStream(output);
         DataOutputStream out = new DataOutputStream(gzip);
@@ -281,8 +368,11 @@ public final class GiBakeJob implements AutoCloseable {
         gzip.finish();
     }
 
-    /** Restores matching data into a fresh job. sceneRevision/settings must match exactly. */
+    /** Restores matching data into a fresh job. sceneRevision/settings must match exactly.
+     * @throws UnsupportedOperationException if bounceCount is greater than one
+     */
     public void restoreCheckpoint(InputStream input) throws IOException {
+        requireSingleBounceCheckpoint();
         if (closed || stage != 0 || !completed.isEmpty()) {
             throw new IllegalStateException("Restore into a fresh job");
         }
@@ -333,12 +423,22 @@ public final class GiBakeJob implements AutoCloseable {
         return value;
     }
 
+    private void requireSingleBounceCheckpoint() {
+        if (settings.bounceCount != 1) {
+            throw new UnsupportedOperationException("Checkpoints currently require bounceCount=1");
+        }
+    }
+
     @Override
     public void close() {
         if (closed) {
             return;
         }
         closed = true;
+        if (previousBounce != null) {
+            previousBounce.dispose();
+            previousBounce = null;
+        }
         try {
             for (com.jme3.post.SceneProcessor processor : capture.viewport.getProcessors()) {
                 processor.cleanup();

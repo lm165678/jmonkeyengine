@@ -46,7 +46,10 @@ import java.util.function.IntConsumer;
  * the aggregate staged payload estimate; capture work is still per volume.
  * Adaptive baking always enables classification, and planning uses the same
  * validator and effective clearance as capture. maxRefinements=0 restores the
- * caller's ordinary classification choice.
+ * caller's ordinary classification choice. Multi-bounce capture currently requires
+ * maxRefinements=0: separate bricks do not share a previous-pass irradiance field.
+ * Set quality.bounceCount=1 to restore adaptive baking. Progress counts completed
+ * probe-pass work units, including all requested diffuse passes.
  */
 public final class GiAdaptiveBakeJob implements AutoCloseable {
     private final RenderManager manager;
@@ -95,6 +98,9 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
         if (target.isSurfaceLayout()) {
             layout.maxRefinements = 0;
         }
+        if (quality.bounceCount > 1 && layout.maxRefinements > 0) {
+            throw new IllegalArgumentException("Multi-bounce baking requires maxRefinements=0");
+        }
         staging.setIntensity(target.getIntensity());
         pending.add(staging);
         // Adaptive coverage is meaningful only if capture uses the same safe
@@ -120,6 +126,9 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
         }
         long estimate = probes * (768L + 32L * quality.visibilityResolution * quality.visibilityResolution)
                 + 6L * quality.captureSize * quality.captureSize * 20;
+        if (quality.bounceCount > 1) {
+            estimate *= 2;
+        }
         if (estimate > quality.maxWorkingBytes) {
             throw new IllegalArgumentException("Adaptive bake staging exceeds working memory budget");
         }

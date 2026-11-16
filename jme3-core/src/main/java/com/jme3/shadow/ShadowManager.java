@@ -480,7 +480,7 @@ public final class ShadowManager implements AutoCloseable {
                 Vector3f position = slot.light instanceof PointLight ? ((PointLight) slot.light).getPosition()
                         : slot.light instanceof SpotLight ? ((SpotLight) slot.light).getPosition() : Vector3f.ZERO;
                 put(bytes, row, 1, position.x, position.y, position.z, slot.settings.getShadowDistance());
-                put(bytes, row, 33, slot.settings.getFilterRadius(), 0, 0, 0);
+                put(bytes, row, 33, slot.settings.getFilterRadius(), slot.settings.getStrength(), 0, 0);
                 if (slot.renderer instanceof DirectionalLightShadowRenderer) {
                     float[] worldSplits = ((DirectionalLightShadowRenderer) slot.renderer).splitsArray;
                     Matrix4f projection = viewport.getCamera().getProjectionMatrix();

@@ -15,8 +15,9 @@ import java.util.function.IntConsumer;
  * HDR color and hardware depth through six 90-degree cameras per probe. The
  * material's actual alpha discard, skinning, instancing and emission participate.
  * Existing GI bindings are disabled only in the private capture, preventing
- * accidental feedback. This is a single-bounce capture; rebaking does not iterate
- * indirect bounces. Dynamic geometry is captured at its current pose.
+ * accidental feedback. Capture defaults to one diffuse bounce. Optional bounded
+ * iterations use only the previous completed pass, never previously saved GI.
+ * Dynamic geometry is captured at its current pose.
  *
  * <pre>{@code
  * // 第一步：在渲染线程、主视口绘制之前更新场景变换。
@@ -78,6 +79,31 @@ public final class GiSceneBaker {
     public static final class Settings {
         public int captureSize = 64;
         public int radianceSamples = 1024;
+        /** Total diffuse bounce passes, 1..8; default 1 preserves legacy baking.
+         * Each additional pass captures direct lighting plus the previous pass's
+         * diffuse irradiance at unit strength. Runtime volume intensity is not
+         * fed back. More passes cost bake time and one extra temporary atlas;
+         * runtime sampling and the saved payload format remain unchanged.
+         * Multi-bounce checkpoints are not supported. Keep the scene fixed and
+         * run/close the job on its render thread; cancellation preserves old data.
+         * Custom GI materials must implement the GiBakeBounce capture contract.
+         * Unshaded materials remain emission sources, not reflective surfaces.
+         * The volume must cover receiving surfaces; transport outside its bounds
+         * is not extrapolated. Runtime edge fading is disabled during capture.
+         * Adaptive refinement bricks currently require bounceCount=1.
+         * <pre>{@code
+         * // 第一步：创建烘焙设置；默认一次反射，已有场景行为不变。
+         * GiSceneBaker.Settings quality = new GiSceneBaker.Settings();
+         * // 第二步：选择三次漫反射；运行时仍为默认八探针。
+         * quality.bounceCount = 3;
+         * // 第三步：渲染线程启动任务，每帧推进；完成后再保存 J3O。
+         * GiBakeJob job = GiSceneBaker.start(renderManager, rootNode, volume,
+         *         quality, view -> { }, () -> false, count -> { });
+         * // 在后续帧调用 job.step(2_000_000L)，完成后 job.close()。
+         * // 第四步：取消调用 close；恢复一次反射需设为 1 后重新烘焙。
+         * }</pre>
+         */
+        public int bounceCount = 1;
         /** Octahedral distance resolution, default 16 (four times the storage of
          * 8). Use 32 for difficult thin/concave surfaces; requires rebaking and
          * more memory, and does not replace adequate spatial probe coverage.
@@ -130,6 +156,7 @@ public final class GiSceneBaker {
             Settings copy = new Settings();
             copy.captureSize = captureSize;
             copy.radianceSamples = radianceSamples;
+            copy.bounceCount = bounceCount;
             copy.visibilityResolution = visibilityResolution;
             copy.visibilitySamples = visibilitySamples;
             copy.maxProbes = maxProbes;
@@ -154,6 +181,7 @@ public final class GiSceneBaker {
 
         private void validate() {
             if (captureSize < 4 || captureSize > 2048 || radianceSamples < 32
+                    || bounceCount < 1 || bounceCount > 8
                     || visibilityResolution < 2 || visibilityResolution > 64
                     || visibilitySamples < 1 || visibilitySamples > 4096
                     || maxProbes < 8 || maxProbes > 65536 || maxWorkingBytes < 1
@@ -207,6 +235,9 @@ public final class GiSceneBaker {
         int limit = renderer.getLimits().get(Limits.TextureSize);
         long workingBytes = 6L * settings.captureSize * settings.captureSize * 20
                 + (long) columns * rows * (512L + (settings.separateSky ? 256L : 0L) + 32L * settings.visibilityResolution * settings.visibilityResolution);
+        if (settings.bounceCount > 1) {
+            workingBytes *= 2;
+        }
         if (count > settings.maxProbes || columns * Math.max(9, settings.visibilityResolution) > limit
                 || rows * settings.visibilityResolution > limit || settings.captureSize > limit
                 || workingBytes > settings.maxWorkingBytes) {

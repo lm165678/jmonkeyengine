@@ -94,12 +94,15 @@ float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) 
     }
     vec4 rect = managedShadowRecord(light, 27.0 + face);
     vec2 uv = rect.xy + coordinate.xy * rect.zw;
-    float radius = managedShadowRecord(light, 33.0).x;
+    vec4 filterSettings = managedShadowRecord(light, 33.0);
+    float radius = filterSettings.x;
     vec2 gradient = vec2(0.0);
     if (radius >= 0.5) {
         gradient = managedShadowDepthGradient(matrix, clip, normal, rect);
     }
-    return ShadowFilter_TentPlane(g_ShadowAtlas, uv, g_ShadowAtlasSize, rect,
+    float visibility = ShadowFilter_TentPlane(g_ShadowAtlas, uv, g_ShadowAtlasSize, rect,
             coordinate.z - header.w, radius, gradient);
+    // Per-light artistic attenuation; never multiply the composed scene color.
+    return mix(1.0, visibility, clamp(filterSettings.y, 0.0, 1.0));
 }
 #endif

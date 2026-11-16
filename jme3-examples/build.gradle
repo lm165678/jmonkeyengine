@@ -1037,3 +1037,12 @@ tasks.register('giProbeCellContinuitySmoke', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     enableAssertions = true
 }
+
+tasks.register('giMultipleBouncesSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiMultipleBounces'
+    systemProperty 'gi.test.pbr', project.hasProperty('giPbr')
+    classpath = sourceSets.main.runtimeClasspath
+    enableAssertions = true
+}

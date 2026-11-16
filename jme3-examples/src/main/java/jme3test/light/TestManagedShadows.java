@@ -27,6 +27,9 @@ import java.nio.ByteBuffer;
  * receiver depth/normal bias through LightShadowSettings on the render thread.
  * Material PreShadow polygon offsets remain effective for legacy processors.
  * No scene rebake or additional shadow samples are needed for this policy.
+ * Also checks strength 1, 0.5 and 0 on four paths and both materials, preserving
+ * other lights and ambient/emissive channels. Default 1 preserves old scenes.
+ * See LightShadowSettings.setStrength for render-thread usage and restoration.
  * Soft managed shadows correct each PCF comparison using the receiver tangent
  * plane, analytically projected for directional, point and spot shadow maps.
  * Degenerate projections fall back to ordinary biased PCF. Hard shadows and
@@ -41,6 +44,8 @@ public final class TestManagedShadows extends SimpleApplication {
     private int frame;
     private int[] reference;
     private int observedGbuffers;
+    private int[] strengthDark;
+    private int[] strengthHalf;
 
     public static void main(String[] arguments) {
         TestManagedShadows app = new TestManagedShadows();
@@ -117,6 +122,19 @@ public final class TestManagedShadows extends SimpleApplication {
     @Override
     public void simpleUpdate(float tpf) {
         observedGbuffers = 0;
+        if (frame >= 152) {
+            int strengthPhase = (frame - 152) / 8;
+            int step = strengthPhase % 3;
+            viewPort.setRenderPath(PATHS[(strengthPhase / 3) % 4]);
+            renderManager.getShadowManager(viewPort).setEnabled(true);
+            sun.setCastShadow(true);
+            renderManager.getShadowManager(viewPort).getSettings(sun).setEnabled(true);
+            renderManager.getShadowManager(viewPort).getSettings(sun).setStrength(1f - step * 0.5f);
+            if (frame == 152 || frame == 248) {
+                setStrengthMaterial(frame == 248);
+            }
+            return;
+        }
         int phase = frame / 8 % 8;
         if (frame == 64) {
             // 第四步：同样验证 PBR，蓝色自发光不应被红色灯的阴影压暗。
@@ -158,6 +176,37 @@ public final class TestManagedShadows extends SimpleApplication {
             Vector3f projected = cam.getScreenCoordinates(Vector3f.ZERO);
             int pixel = ((int) projected.y * 160 + (int) projected.x) * 4;
             int[] color = {pixels.get(pixel) & 255, pixels.get(pixel + 1) & 255, pixels.get(pixel + 2) & 255};
+            if (frame >= 152) {
+                int strengthPhase = (frame - 152) / 8;
+                int step = strengthPhase % 3;
+                if (step == 0) {
+                    strengthDark = color;
+                } else if (step == 1) {
+                    strengthHalf = color;
+                } else {
+                    if (strengthDark[0] > 12 || color[0] < 80
+                            || Math.abs(strengthHalf[0] * 2 - strengthDark[0] - color[0]) > 6) {
+                        throw new AssertionError("Shadow strength does not interpolate direct light");
+                    }
+                    for (int channel = 1; channel < 3; channel++) {
+                        if (Math.abs(color[channel] - strengthDark[channel]) > 3
+                                || Math.abs(strengthHalf[channel] - strengthDark[channel]) > 3) {
+                            throw new AssertionError("Strength changed another light or indirect/emissive color");
+                        }
+                    }
+                }
+                if ((strengthPhase / 3) % 4 != 0 && observedGbuffers == 0) {
+                    throw new AssertionError("Strength test silently fell back to Forward");
+                }
+                System.out.println("SHADOW_STRENGTH phase=" + strengthPhase
+                        + " RGB=" + java.util.Arrays.toString(color));
+                if (frame == 343) {
+                    System.out.println("MANAGED SHADOW STRENGTH PASS");
+                    stop();
+                }
+                frame++;
+                return;
+            }
             int phase = frame / 8 % 8;
             System.out.println("MANAGED SHADOW phase=" + phase + " RGB=" + java.util.Arrays.toString(color));
             if (phase == 0) {
@@ -182,10 +231,33 @@ public final class TestManagedShadows extends SimpleApplication {
             }
             if (frame == 151) {
                 System.out.println("MANAGED SHADOW SMOKE PASS");
-                stop();
             }
         }
         frame++;
+    }
+
+    private void setStrengthMaterial(boolean pbr) {
+        // 第一步：保留红色遮挡灯与绿色补光；蓝色来自环境项或自发光。
+        Material material = new Material(assetManager, pbr
+                ? "Common/MatDefs/Light/PBRLighting.j3md" : "Common/MatDefs/Light/Lighting.j3md");
+        if (pbr) {
+            material.setColor("BaseColor", ColorRGBA.White);
+            material.setFloat("Metallic", 0);
+            material.setFloat("Roughness", 1);
+            material.setColor("Emissive", new ColorRGBA(0, 0, 0.2f, 1));
+        } else {
+            material.setBoolean("UseMaterialColors", true);
+            material.setColor("Diffuse", ColorRGBA.White);
+            material.setColor("Ambient", ColorRGBA.White);
+            material.setColor("Specular", ColorRGBA.Black);
+        }
+        // 第二步：运行时依次设为 1、0.5、0；仅红色直射光应改变。
+        // 第三步：恢复 1 即完整阴影，不修改材质或 GI 数据。
+        rootNode.depthFirstTraversal(spatial -> {
+            if (spatial instanceof Geometry) {
+                ((Geometry) spatial).setMaterial(material);
+            }
+        });
     }
 
     @Override

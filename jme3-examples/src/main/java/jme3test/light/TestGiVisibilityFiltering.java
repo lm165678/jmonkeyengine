@@ -34,9 +34,10 @@ import java.nio.ByteBuffer;
  * the same four paths and two materials. The compact moment filter can still
  * merge foreground/background distributions; it does not claim the strict
  * checkerboard occlusion guarantee of the wide reference mode.
- * Receiver-plane correction uses triangle geometry, while normal maps continue
- * to affect irradiance. Existing bakes and the default eight-probe mode remain
- * usable without new application setup or changes to saved intensity.
+ * These synthetic cases do not validate curved receivers or a full scene's
+ * indirect-light energy. Compare actual scene captures with matching shadow,
+ * stable-blending and post-processing settings before accepting shader changes.
+ * Existing bakes and the default eight-probe mode remain usable.
  * <pre>
  * 第一步：普通应用加载包含 GI 的 J3O，自动场景服务会接入可见性过滤。
  * 第二步：无需平滑开关，也无需重烘焙；关闭 GI 则恢复没有体积间接光的结果。

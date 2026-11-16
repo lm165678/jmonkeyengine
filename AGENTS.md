@@ -2,6 +2,14 @@
 
 ## Cross-machine handoff
 
+- Startup reading order, including after switching machines: this file ->
+  `DEV_HANDOFF.md` -> `RENDERING_QUALITY_ROADMAP.md`. The roadmap contains
+  pending rendering and large-world surface-card streaming/performance work.
+- For SDK work, also read the sibling SDK files below. Its `DEV_HANDOFF.md`
+  contains the Lemur/dual-GUI and coding/scene Agent backlog. Remind the user of
+  relevant pending items when resuming that area. Plans are not implemented
+  features, and a backlog entry alone does not authorize implementation.
+
 - Read `DEV_HANDOFF.md` before continuing development, and read the sibling
   `../jmesdk/AGENTS.md` and `../jmesdk/DEV_HANDOFF.md` for SDK integration work.
 - Keep this file for long-lived rules. Update `DEV_HANDOFF.md` when work changes

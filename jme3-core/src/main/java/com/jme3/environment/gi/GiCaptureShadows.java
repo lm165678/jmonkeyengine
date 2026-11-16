@@ -32,6 +32,8 @@ final class GiCaptureShadows {
             throw new IllegalArgumentException("Capture shadow-light budget exceeded");
         }
         for (Light light : lights) {
+            // Runtime shadow-strength diagnostics must not feed unoccluded light into GI.
+            shadows.getSettings(light).setStrength(1f);
             shadows.getSettings(light).setMapSize(settings.shadowMapSize);
             shadows.getSettings(light).setShadowDistance(settings.far);
         }

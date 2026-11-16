@@ -82,7 +82,9 @@ void main(){
     #endif
     #ifdef GI_PROBES
         // Explicit additive receiver mode preserves the original unlit base.
-        color.rgb += color.rgb * giSampleIrradiance(giWorldPosition, normalize(giWorldNormal)) / 3.14159265359;
+        if (!m_GiBakeBounce) {
+            color.rgb += color.rgb * giSampleIrradiance(giWorldPosition, normalize(giWorldNormal)) / 3.14159265359;
+        }
     #endif
     gl_FragColor = color;
     #ifdef DEFERRED_GBUFFER
