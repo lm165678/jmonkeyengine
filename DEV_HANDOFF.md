@@ -1,5 +1,11 @@
 # Development handoff — 2026-11-16
 
+## 渲染质量升级：下一阶段入口
+- 已将用户讨论的画质升级计划写入 [RENDERING_QUALITY_ROADMAP.md](RENDERING_QUALITY_ROADMAP.md)。另一台电脑先读本文、AGENTS.md 和该路线图。
+- 建议顺序：统一 HDR/曝光/Tonemap → 公共时序基础 → Bloom/AO/阴影/IBL → 间接光与反射/SDF DDGI → 摄影效果。当前只新增方案文档，尚未实现这些升级。
+- 引擎性能修复提交 `42353672aa5f2b3d64b021c56426afbcc1aed068` 已推送且远程核实；下文当时的“local only/preparing”记录是历史状态。SDK 未修改，gradle.properties 中本机代理未提交。
+- 当前仍需关注 Probe Volume 区域混合断言失败和结构变更触发全量服务发现的限制。路线图包含复现命令、验收要求和跨机器接续步骤。
+
 ## 2026-11-16 review and engine submission
 - Fixed review finding: disabling SceneServicesState now closes its discovery catalog, releasing detached volumes/materials/controls and removing the listener. Re-enabling rediscovers the current scene. Added lifecycle regression; all 6 targeted catalog/shadow tests passed (`.gradle/scene-cache-commit-check.log`).
 - Preparing this engine change for `origin/dev_feature_lightprobe` at the user's request. SDK is excluded. Project-local proxy values in `gradle.properties` remain uncommitted. Earlier "local only" notes below describe the state at validation time; verify remote commit before claiming delivery.

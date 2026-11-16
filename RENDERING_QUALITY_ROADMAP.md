@@ -1,0 +1,129 @@
+# 渲染质量升级路线与跨机器开发交接
+
+更新日期：2026-11-16。本文是开发方案，不是已完成功能列表。
+
+## 目标与当前状态
+
+用户希望将当前 JME 分支的渲染质量提升到适合商业游戏的水平，重点改善光照、Bloom、AO、Tonemap 和运动时的画面稳定性。参考 UE5 的整体渲染设计，但保持 JME 材质系统、Forward/Deferred 路径和旧项目兼容。不要将通用引擎功能写成仅适用于一个示例的实现。
+
+当前只完成方案整理，本文中的画质升级尚未开始实现。下一步建议从统一 HDR、曝光和 Tonemap 管线开始，不直接同时重写所有效果，也不把加入更多效果当作质量验收。
+
+引擎基线：`42353672aa5f2b3d64b021c56426afbcc1aed068`，分支 `dev_feature_lightprobe`，已核实推送到 `https://github.com/lm165678/jmonkeyengine`。该提交修复自动 GI/物理发现与无投影物体时阴影遍历的性能回退，包含服务禁用时释放缓存的修复。SDK 本轮不涉及。
+
+已观察到的源码情况：
+
+- `jme3-effects/src/main/resources/Common/MatDefs/Post/bloomExtract.frag`：传统 Bloom 提取使用亮度硬阈值和幂运算，存在阈值附近不连续的风险；具体视觉瑕疵需要固定场景复现。
+- `jme3-effects/src/main/resources/Common/MatDefs/Post/ToneMap.frag`：现有 ToneMapFilter 使用固定 Filmic 曲线。
+- 已有 `SoftBloomFilter`、`KHRToneMapFilter`，应先审查、比较和复用可用部分，不假设仓库只有最旧算法。
+- 已有 FrameGraph、GPU Scene、模型 SDF/表面缓存与 Probe Volume 等基础；具体接口和完整度应读取当前源码确认，不从历史聊天推断。
+- `automaticSceneServicesSmoke` 存在区域混合断言失败：`[102,0] / [1,101] / [0,102]`。修改前后均复现，属于已有问题，不能宣称 GI 回归全部通过。详见 `DEV_HANDOFF.md`。
+
+## 总体设计原则
+
+1. 先统一颜色和亮度的数据约定，再替换算法。Forward、Deferred、场景捕获和最终显示必须保持一致。
+2. GPU Scene 负责剔除和提交，不决定材质光照模型、GI 或后处理算法。
+3. 公共效果通过 FrameGraph 声明资源、依赖和生命周期，各渲染路径提供所需输入。沿用主视口图，避免效果各自维护不可观察的执行图。
+4. 材质拥有 shader 声明；GBuffer 名称保持中性，各光照模型负责自己的编码和解码。
+5. 新质量管线提供整体预设和独立开关，保留旧项目的原有画面。默认值调整必须明确迁移影响，不直接覆盖旧 Filter 行为。
+6. 新 API/配置必须在源码注释中包含完整、分步骤的中文用法，说明默认值、能力回退、运行时切换、恢复、线程和释放要求；不能只写 API 描述或测试。
+7. 每个 feature 都有独立、可运行的 jme3-examples 示例和自动验证入口，按功能分类目录，不把所有案例堆到 renderpath。
+8. 普通场景不得因启用新服务恢复为每帧整树发现；记录 CPU、GPU、内存和上传量，特别检查十万对象场景。
+
+## 分阶段实施
+
+### 阶段一：HDR、曝光、Tonemap 和显示输出
+
+这是推荐的首个开发阶段，先做审计和基准，再确定具体公共 API。
+
+- 审计颜色贴图 sRGB 解码，法线/粗糙度/金属度等数据贴图的线性读取，以及渲染目标格式。
+- 光照、发光和 Bloom 保持在线性 HDR 空间；避免提前钳制高亮值。
+- 明确 Tonemap 与显示编码的边界，各执行一次；检查重复 Gamma、场景捕获被二次处理等问题。
+- 先提供可重复的手动曝光，再加入亮度直方图、自动曝光上下限、曝光补偿、测光与适应速度。
+- 将 Tonemap 曲线选择、曝光和艺术调色分开。仅替换为一个 ACES 近似公式不等于完整的 UE 色彩管线。
+- 先确保 SDR 输出可靠，HDR 显示输出作为后续明确目标，不默认宣称已经支持。
+- 预曝光不是简单乘一个系数：若采用，必须统一历史帧、Bloom、反射、GI 和捕获的数据尺度，并提供调试视图。
+
+验收：相同材质、光照和曝光下，对比 Forward/Deferred 与场景捕获；检查灰阶、饱和高亮、黑位、亮部渐变、亮度连续性和重复编码。原有低质量/兼容路径应可恢复。
+
+### 阶段二：公共时序能力
+
+- 运动矢量：相机运动、刚体运动，以及不走 GPU Scene 的骨骼/Morph 等渲染路径都要有正确策略。
+- 相机抖动、上一帧矩阵、每视口历史资源、重投影、深度/法线有效性与遮挡显露检测。
+- 相机切换、瞬移、分辨率变化、视口变化、渲染路径切换时正确重置历史。
+- 实现可用的 TAA，后续再考虑时序升采样；不能把简单历史混合称为成熟 TAA。
+- 透明物体需要明确的时序处理/回退策略，不因它不走 GPU Scene 而忽略。
+- 公共历史管理服务于 AO、反射、后续 DDGI，而非每个效果重复一套不同的历史规则。
+
+验收：静止细线、高光闪烁、镜头平移、快速移动、遮挡显露、动画、透明物体、相机切换。静态截图通过不能替代运动测试。
+
+### 阶段三：基础画质效果
+
+**Bloom**：先评估 SoftBloomFilter；完善 HDR 精度、多尺度降采样/上采样、合成、亮点稳定性和可选平滑阈值。测试小亮点闪烁、边界漏光和不同分辨率的一致性。昂贵的卷积 Bloom 不必作为首版目标。
+
+**AO**：评估 GTAO 路线，结合深度/法线引导滤波与时序稳定。明确它影响哪些间接光分量，避免把最终颜色整体乘黑；与 GI 遮蔽避免重复计暗。Forward 需要适当输入路径，不能只支持某一种 Deferred 材质。
+
+**阴影**：完善级联稳定、偏移策略、接触细节和过滤。保留阴影灯数量/显存预算，提供调试信息。无投影物体时跳过工作，有投影物体时保持正确性。
+
+**IBL**：核对环境贴图预滤波、BRDF 积分、粗糙度、材质能量与曝光约定；用统一测试材质球验证，而非通过 Bloom 掩盖错误。
+
+验收：逐效果开关 A/B、Forward/Deferred 组合、动态稳定性、GPU Pass 耗时与资源占用。不得仅以“看起来更亮、更柔和”作为质量结论。
+
+### 阶段四：间接光与反射
+
+- 优先修复现有 Probe Volume 区域混合回归，验证漏光、边界、流送、运行时强度变化和资源释放。
+- 漫反射 GI 和镜面反射分开规划。Probe Volume 不能替代金属、光滑表面需要的反射系统。
+- 完善反射探针、视差修正/混合，再评估 SSR 与屏幕外回退；检查切换边界与时序稳定性。
+- SDF DDGI 继续作为后续大功能：验证距离场命中、表面属性查询、直接光注入、更新预算与历史稳定性，再推进探针实时更新。
+- SDF 和表面缓存只是基础，不等同于 Lumen。需对动态物体、缺失数据、超出驻留范围和不支持几何体定义明确行为。
+
+验收：室内外过渡、遮挡物变化、动态灯、金属/粗糙表面、无缓存/缺失页、流送和多视口。不得以已有 SDF 可视化代替 GI 正确性验证。
+
+### 阶段五：摄影效果
+
+在前述基础正确且稳定后，再开发景深、运动模糊、体积雾、局部曝光等。每项单独定义质量档位、适用范围和性能预算，避免用摄影效果遮盖材质或光照错误。
+
+## 画质基准与性能验收
+
+建立三个固定基准场景：
+
+1. 室内：窄窗、暗部、亮部、材质球、接触阴影，观察 GI 与曝光。
+2. 室外：地形、植被或复杂模型、天空和远景，观察阴影、IBL、AO 与时序。
+3. 强发光体：不同大小/颜色/亮度的发光物、细高光、移动相机，观察 Bloom、Tonemap 和闪烁。
+
+使用真实模型资产，附固定相机、灯光、分辨率、曝光和运动轨迹。保存参数与可复现实验命令；画质对比先固定手动曝光，再单独测试自动曝光。使用的资源应能在另一台电脑获得，不依赖本机绝对路径。
+
+分别记录 CPU 帧阶段、GPU 各 Pass 毫秒、显存/资源大小、历史重置和上传量。性能统计不通过每帧同步 GPU 回读制造额外瓶颈。不同效果不能只比较 FPS 而忽略分辨率、对象可见数、画质档位和采样设置。
+
+参考 UE 时尽可能统一资产、相机、光照、曝光和分辨率；允许离线参考用于判断光照误差。UE 的默认成片效果不是单个算法的输出。
+
+## 下一台电脑的接续步骤
+
+```powershell
+# 在引擎仓库执行；先确认并处理当地未提交修改。
+git status
+git switch dev_feature_lightprobe
+git pull --ff-only origin dev_feature_lightprobe
+```
+
+1. 先读 `AGENTS.md`、`DEV_HANDOFF.md`、本文，再检查实际源码。
+2. 使用当地有效的 JDK 25/Gradle 环境；不要改 UE Android 使用的系统 JDK。代理地址属于本机配置，不照抄开发机端口。
+3. 先跑现有基准确认环境，记录 GPU/驱动、分辨率、配置和结果：
+
+```powershell
+./gradlew.bat :jme3-examples:gpuDrivenPerformanceCheck -PgpuInstances=100000 -PgpuMoving=1000
+./gradlew.bat :jme3-examples:renderPathSmoke -PrenderPathExample=TestPBRTerrainRenderPath
+./gradlew.bat :jme3-core:test --tests com.jme3.app.SceneServiceCatalogTest --tests com.jme3.shadow.ShadowManagerTest
+```
+
+4. `automaticSceneServicesSmoke` 当前有上述已知失败，可用于复现，不能列为已通过检查。
+5. 从阶段一的源码审计和三类画质基准开始；先确认色彩/HDR 合同，再设计实现，不直接将所有旧 Filter 替换。
+6. 每阶段更新本文的进度与 DEV_HANDOFF，区分完成、测试、已知缺陷和计划。需要 SDK 配合时再读 SDK 自己的交接文件，本轮不修改 SDK。
+
+## 官方参考
+
+- [UE 色彩管理与 Filmic Tonemapper](https://dev.epicgames.com/documentation/en-us/unreal-engine/color-grading-and-the-filmic-tonemapper-in-unreal-engine)：理解曝光、Bloom、调色与输出的协作，而非只复制曲线。
+- [UE Temporal Upscalers](https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-upscalers-in-unreal-engine)：时序输入、曝光和调试约定。
+- [UE Temporal Super Resolution](https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-super-resolution-in-unreal-engine)：理解时序质量与渲染分辨率、效果顺序之间的关系。
+- [UE Lumen 技术细节](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-technical-details-in-unreal-engine)：屏幕追踪、场景追踪和表面缓存是组合系统。
+
+这些文档用作架构与算法参考，不表示 JME 已实现对应能力或保证达到相同性能。
