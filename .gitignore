@@ -57,3 +57,5 @@ joysticks-*.txt
 /jme3-screenshot-tests/jme3-screenshot-tests-shared/bin/
 /jme3-screenshot-tests/jme3-screenshot-tests-proto-report/bin/
 hs_err_pid*.log
+# Local Gradle cache used by IDEA on this workstation.
+/.gradle-user-home/

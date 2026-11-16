@@ -59,6 +59,10 @@ import java.util.Random;
  * control run. CPU_PHASE reports application-update and scene-update wall time;
  * it is separate from GPU timing. -PgpuMeasureFrames=120 changes each interval
  * (minimum 120). The index does not reorganize children or reduce mover count.
+ * Automatic scene services remain enabled: a world without GI/physics objects
+ * must not incur a full discovery traversal every frame. Managed shadows also
+ * remain enabled, but a scene without casting geometry schedules no shadow maps.
+ * The benchmark does not disable engine services to hide their CPU overhead.
  *
  * <pre>{@code
  * // 第一步：加载真实资产，clone(false) 共享网格/材质，避免复制纹理和网格。
@@ -78,6 +82,8 @@ import java.util.Random;
  * gpu.setMinPixels(2);
  * // 第三步：先固定相机测静态场景，再仅改变运动开关比较，不同时改变剔除设置。
  * // HUD 读取 getInstanceCount/getBatchCount 不会等待 GPU。
+ * // GI/物理自动发现只在挂载、卸载、材质或 Control 变更后刷新缓存。
+ * // 仅旋转运动对象不应重新扫描全场景；无投影物体时不生成阴影 Pass。
  * // readVisibleCount 是阻塞诊断接口，不要放到性能测试每帧循环中。
  * // 第四步：需要遮挡测试时开启 Hi-Z，它会增加当前帧深度预绘制的成本。
  * gpu.setOcclusionCulling(true);

@@ -63,6 +63,9 @@ import java.util.*;
  * automatic management even when that filter is disabled. Reinstalling it restores
  * the legacy path without changing Light.castShadow. Spatial's default ShadowMode
  * is unchanged: enable Cast/Receive on the scene or appropriate geometries.
+ * Scenes without any casting geometry skip managed shadow allocation and passes.
+ * Normal attachment and ShadowMode setters invalidate this cached eligibility;
+ * transform changes alone do not require rediscovering shadow casters.
  */
 public final class ShadowManager implements AutoCloseable {
     private static final int RECORD_WIDTH = 36;
@@ -76,6 +79,7 @@ public final class ShadowManager implements AutoCloseable {
     private List<Spatial> observedRoots = Collections.emptyList();
     private AssetManager assets;
     private boolean catalogDirty = true;
+    private boolean hasCasters;
     private final SceneChangeListener catalogListener = (spatial, change) -> {
         if (change == SceneChangeListener.Change.ATTACHED || change == SceneChangeListener.Change.DETACHING
                 || change == SceneChangeListener.Change.RENDERING) {
@@ -192,11 +196,17 @@ public final class ShadowManager implements AutoCloseable {
         }
         catalog.clear();
         assets = null;
+        hasCasters = false;
         for (Spatial scene : catalogScenes) {
             for (Light light : scene.getWorldLightList()) {
                 catalog.add(light);
             }
             scene.depthFirstTraversal(spatial -> {
+                if (spatial instanceof Geometry) {
+                    com.jme3.renderer.queue.RenderQueue.ShadowMode mode = spatial.getShadowMode();
+                    hasCasters |= mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Cast
+                            || mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive;
+                }
                 for (Light light : spatial.getLocalLightList()) {
                     catalog.add(light);
                 }
@@ -254,7 +264,7 @@ public final class ShadowManager implements AutoCloseable {
         Set<Light> found = Collections.newSetFromMap(new IdentityHashMap<Light, Boolean>());
         refreshCatalog();
         for (Light light : catalog) {
-            if (light.isEnabled() && light.isCastShadow()
+            if (hasCasters && light.isEnabled() && light.isCastShadow()
                     && (light instanceof DirectionalLight || light instanceof PointLight || light instanceof SpotLight)) {
                 found.add(light);
             }

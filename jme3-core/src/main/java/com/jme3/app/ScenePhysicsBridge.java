@@ -41,21 +41,18 @@ final class ScenePhysicsBridge implements AutoCloseable {
         }
     }
 
-    void update(SimpleApplication application) {
+    void update(SimpleApplication application, Collection<Control> controls) {
         app = application;
         resolve();
         if (controlType == null) {
             return;
         }
         Set<Control> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        app.getRootNode().depthFirstTraversal(spatial -> {
-            for (int i = 0; i < spatial.getNumControls(); i++) {
-                Control control = spatial.getControl(i);
-                if (controlType.isInstance(control)) {
-                    seen.add(control);
-                }
+        for (Control control : controls) {
+            if (controlType.isInstance(control)) {
+                seen.add(control);
             }
-        });
+        }
         try {
             Iterator<Map.Entry<Control, Object>> iterator = registered.entrySet().iterator();
             while (iterator.hasNext()) {

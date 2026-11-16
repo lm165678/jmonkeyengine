@@ -24,6 +24,12 @@ import java.util.concurrent.*;
  * Adaptive refinement children are ordinary serialized GiProbeVolume nodes:
  * discovery, external payload loading and shader binding are automatic too.
  * Ship every referenced .giprobe asset with the J3O. Loading never rebakes GI.
+ * Service membership is cached and refreshed after attachment, detachment,
+ * material or control changes through normal scene APIs. Moving objects does not
+ * rescan the world. Existing GI volumes still update their world positions and
+ * payload preferences each frame, including volumes populated after attachment.
+ * Disabling services releases discovery references and listeners; re-enabling
+ * discovers the currently attached scene again on the next update.
  *
  * <p>Default GI budget is 256 MiB (including page CPU mirrors), preload distance
  * 200 world units, unload multiplier 1.3, upload budget 1 MiB / 2 ms (soft).
@@ -36,6 +42,8 @@ import java.util.concurrent.*;
  * <pre>{@code
  * // 第一步：普通加载并挂载即可；不创建 GI 或物理管理器。
  * rootNode.attachChild(assetManager.loadModel("Scenes/World.j3o"));
+ * // 挂载/移除、setMaterial、addControl/removeControl 自动刷新发现缓存。
+ * // 仅移动模型不会扫描整棵场景树；已有 GI 体积的运行时属性仍逐帧检查。
  * // 第二步：下一帧服务按需创建后，可以读取并调整现有管理对象。
  * SceneServicesState services = getSceneServices();
  * GiProbeStreamer gi = services.getGiStreamer(); // 尚未出现 GI 时返回 null
@@ -55,6 +63,7 @@ import java.util.concurrent.*;
 public final class SceneServicesState extends AbstractAppState {
     private SimpleApplication app;
     private final ScenePhysicsBridge physics = new ScenePhysicsBridge();
+    private final SceneServiceCatalog catalog = new SceneServiceCatalog();
     private final Map<GiProbeVolume, Source> sources = new IdentityHashMap<>();
     private final Set<Material> bound = Collections.newSetFromMap(new IdentityHashMap<>());
     private GiProbeStreamer gi;
@@ -81,7 +90,8 @@ public final class SceneServicesState extends AbstractAppState {
 
     @Override
     public void update(float tpf) {
-        physics.update(app);
+        catalog.refresh(app.getRootNode());
+        physics.update(app, catalog.controls);
     }
 
     /** Internal SimpleApplication render hook, after geometric updates. */
@@ -94,22 +104,13 @@ public final class SceneServicesState extends AbstractAppState {
             closeGi();
             return;
         }
+        catalog.refresh(app.getRootNode());
         Set<GiProbeVolume> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        Set<Material> materials = Collections.newSetFromMap(new IdentityHashMap<>());
-        app.getRootNode().depthFirstTraversal(spatial -> {
-            if (spatial instanceof GiProbeVolume) {
-                GiProbeVolume volume = (GiProbeVolume) spatial;
-                if (volume.getData() != null || volume.getStreamAsset() != null) {
-                    seen.add(volume);
-                }
+        for (GiProbeVolume volume : catalog.volumes) {
+            if (volume.getData() != null || volume.getStreamAsset() != null) {
+                seen.add(volume);
             }
-            if (spatial instanceof Geometry) {
-                Material material = ((Geometry) spatial).getMaterial();
-                if (material != null) {
-                    materials.add(material);
-                }
-            }
-        });
+        }
         if (seen.isEmpty()) {
             closeGi();
             return;
@@ -172,7 +173,7 @@ public final class SceneServicesState extends AbstractAppState {
             gi.setAppearance(source.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending());
         }
         gi.update(app.getCamera().getLocation(), 0, 0, 0);
-        for (Material material : materials) {
+        for (Material material : catalog.materials) {
             if (supportsGi(material)) {
                 gi.addMaterial(material);
                 bound.add(material);
@@ -217,6 +218,7 @@ public final class SceneServicesState extends AbstractAppState {
         if (!enabled) {
             closeGi();
             physics.close();
+            catalog.close();
         }
         super.setEnabled(enabled);
     }
@@ -225,6 +227,7 @@ public final class SceneServicesState extends AbstractAppState {
     public void cleanup() {
         closeGi();
         physics.close();
+        catalog.close();
         app = null;
         super.cleanup();
     }

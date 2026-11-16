@@ -1,5 +1,24 @@
 # Development handoff — 2026-11-16
 
+## 2026-11-16 review and engine submission
+- Fixed review finding: disabling SceneServicesState now closes its discovery catalog, releasing detached volumes/materials/controls and removing the listener. Re-enabling rediscovers the current scene. Added lifecycle regression; all 6 targeted catalog/shadow tests passed (`.gradle/scene-cache-commit-check.log`).
+- Preparing this engine change for `origin/dev_feature_lightprobe` at the user's request. SDK is excluded. Project-local proxy values in `gradle.properties` remain uncommitted. Earlier "local only" notes below describe the state at validation time; verify remote commit before claiming delivery.
+
+## 2026-11-16 GPU benchmark automatic-service CPU regression
+- Reproduced `TestGpuDrivenPerformance` with 100,000 models / 266,665 geometries / 1,000 movers on RTX 5060 Ti. JFR samples identified repeated directional-shadow traversal plus per-frame GI/physics discovery. These costs occur even without GI payloads or shadow casters.
+- Engine fix: `ShadowManager` caches caster eligibility alongside its light catalog and schedules no maps when no geometry casts. Attachment/detachment/rendering changes (including inherited ShadowMode changes) invalidate it; existing budgets remain enforced when casters exist.
+- Engine fix: internal `SceneServiceCatalog` shares cached GI-volume/material/control membership between automatic GI and physics services. Normal scene structural/rendering changes trigger discovery; transforms do not. Existing volumes' payloads/positions/preferences and registered physics ownership remain checked each frame. Structural mutations currently trigger a full rediscovery, not subtree-only streaming updates.
+- No benchmark object counts, culling settings, material paths or service enable switches were reduced. Added caller-facing usage comments. Unit tests cover no-rescan movement, attachment/detachment, control removal, material replacement and inherited shadow-mode invalidation (5 tests passed).
+- Same 120-frame/JFR configuration: before static/moving means 105.684/108.741 ms; after 1.054/4.939 ms. Final longer run (600 frames per interval, no JFR) measured 1.056/4.569 ms; `GPU_PERFORMANCE_PASS`, triangle statistics check and PBR terrain Forward/Deferred/CPU/GPU round-trip checks passed. Logs: `.gradle/gpu-performance-before.log`, `gpu-performance-after.log`, `gpu-performance-final.log` (local only). Timings are machine/run dependent.
+- Existing issue isolated: `automaticSceneServicesSmoke` fails regional blending with [102,0] / [1,101] / [0,102]. Re-ran with the three changed existing engine classes temporarily restored to HEAD: identical failure (`.gradle/gi-services-baseline.log`). Restored optimized sources and rebuilt afterward. Do not claim the GI smoke passed; investigate its regional blending expectation/implementation separately.
+- Local only, no commit/push. Unrelated proxy/IDE changes preserved.
+
+## 2026-11-16 PBR terrain render-path example shadow fix
+- `TestPBRTerrainRenderPath` creates 1,000 point lights for lighting throughput. Since `Light.castShadow` defaults to true, these unintentionally requested managed shadows and triggered the 64-active-light guard.
+- The example now explicitly calls `setCastShadow(false)` on its benchmark point lights; illumination, light-count controls and directional-light preferences remain unchanged. Added step-by-step shadow opt-in/restoration comments. Engine shadow budget/error policy is unchanged.
+- Verified on this machine: `gradlew :jme3-examples:renderPathSmoke -PrenderPathExample=TestPBRTerrainRenderPath` completed with `RENDERPATH PASS` and `BUILD SUCCESSFUL`; real offscreen GL checks cover Forward, Deferred, CPU/GPU tiled paths and Forward round trips. This does not validate 1,000 simultaneous shadow-casting lights.
+- Changes are local, not committed or pushed. Existing unrelated local configuration changes are preserved.
+
 这是开发状态摘要，不是完整聊天记录。以源码、测试和实际运行结果为准。
 
 ## 配套仓库与恢复
@@ -77,3 +96,11 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - 临时 MinGit 2.47.1 尝试过，未做充分重复对比。凭据管理器读取失败可能是 Git 崩溃后果，不可直接认定没有账户权限。
 - 未清理注册表、关闭安全软件或重装系统。下一步是稳定新版对比或捕获崩溃转储。新电脑可能不存在此问题。
 
+
+## 2026-11-16 IDEA 2026 导入配置修复
+- 本机未跟踪的 .idea/gradle.xml 原先指定 gradleJvm=11，与 Gradle 9.8 不兼容；已改为 #JAVA_HOME，本机 JAVA_HOME=D:/MyInstalls/JDK17。
+- IDEA Gradle 缓存改为工程下 .gradle-user-home（已加入 .gitignore），避免当前进程默认 C:/.gradle 不可写。其他电脑可使用正常的用户缓存路径。
+- 保留 Gradle 9.8 和 Adoptium JDK 25 编译工具链；后者由 Foojay 自动下载，主引擎仍生成 Java 11 字节码。
+- 恢复步骤：重新打开工程，Gradle 设置选择 Wrapper、Gradle JVM 选择 JAVA_HOME（JDK 17 或更高），然后 Reload All Gradle Projects；不要再选择 JDK 11。首次同步需要下载 Gradle、插件、依赖和 JDK 25。
+- 验证：命令行 help 已进入 Gradle 9.8 下载阶段，但解除执行沙箱限制后仍发生网络读取超时（services.gradle.org，10 秒）；尚未完成 Gradle 配置或 IDEA 同步验证。
+- 本次仅本机 IDE 配置和交接/忽略规则调整，engine/SDK 配套实现基线不变；未提交或推送。

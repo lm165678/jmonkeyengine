@@ -117,6 +117,23 @@ import com.jme3.texture.Texture.WrapMode;
  * <p>Automated check: gradlew :jme3-examples:renderPathSmoke
  * -PrenderPathExample=TestPBRTerrainRenderPath. Checks CPU/GPU pixels and Forward round trips;
  * renderPipelineSuite additionally checks direct Pipeline installation.</p>
+ * <p>The 1,000 point lights test lighting throughput, not shadow-map throughput.
+ * Light.castShadow defaults to true, so this example explicitly disables shadows
+ * on these lights. Their illumination and enable/disable controls are unchanged
+ * in Forward and Deferred. The directional light retains its default preference.
+ * Managed shadows allow at most 64 active lights and also enforce an independent
+ * memory budget; enabling shadows on all benchmark lights is not supported.</p>
+ * <pre>{@code
+ * // 第一步：在初始化或渲染线程回调中创建测试灯，只关闭投影，保留照明。
+ * PointLight light = new PointLight();
+ * light.setCastShadow(false);
+ * rootNode.addLight(light);
+ * // 第二步：确实需要阴影时，仅对预算内的少量灯恢复投影。
+ * // 接收/投射阴影的几何体还需要设置相应的 ShadowMode。
+ * light.setCastShadow(true);
+ * // 第三步：返回多光源性能测试时，再关闭该灯的投影。
+ * light.setCastShadow(false);
+ * }</pre>
  * @author yaRnMcDonuts,johnKkk
 
  */
@@ -485,6 +502,9 @@ public class TestPBRTerrainRenderPath extends RenderPathExample {
         float xHalf = 200, yHalf = 100, zHalf = 200;
         for (int i = 0; i < currentPointLightNum; i++) {
             pointLights[i] = new PointLight();
+            // 多光源照明测试：不为每盏点光源分配六张阴影贴图。
+            // 开关照明使用 setEnabled；切换渲染路径不会改变此投影设置。
+            pointLights[i].setCastShadow(false);
             pointLights[i].setColor(colors[FastMath.nextRandomInt(0, colors.length - 1)]);
             pointLights[i].setRadius(RenderPathHelper.randomFloat(10.0f, 20.0f));
             pointLights[i].setPosition(new Vector3f(RenderPathHelper.randomFloat(-xHalf, xHalf),
