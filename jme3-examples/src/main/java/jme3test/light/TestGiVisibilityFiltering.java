@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
  * Run {@code gradlew :jme3-examples:giVisibilityFilteringSmoke}; GI_VISIBILITY_PASS
  * indicates completion. Uses material declarations; synthetic data binding below
  * is a low-level test fixture, not normal application setup.
+ * This strict visibility regression explicitly selects the optional wide mode.
  * Visibility is filtered with sixteen positive cubic taps. The checkerboard
  * depth case verifies that filtering retains partial visibility without letting
  * foreground/background moments manufacture variance; fully blocked probes
@@ -129,7 +130,7 @@ import java.nio.ByteBuffer;
         sh.put(source.getData(0).duplicate().clear()).clear();
         int columns = source.getWidth() / 9;
         int resolution = variant == 4 ? 8 : 4;
-        atlas.z = resolution + (variant >= 2 ? 0.03125f : 0f) + (variant == 6 || (planeSweep && planeCase >= 8) ? 0.125f : 0f);
+        atlas.z = 0.015625f + resolution + (variant >= 2 ? 0.03125f : 0f) + (variant == 6 || (planeSweep && planeCase >= 8) ? 0.125f : 0f);
         material.setVector4("GiAtlas", atlas);
         int width = columns * resolution;
         int height = source.getHeight() * resolution;

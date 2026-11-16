@@ -22,11 +22,12 @@ import java.nio.ByteBuffer;
 
 /**
  * A planar receiver crosses two grid cells at their shared corner. Front-side
- * probes have different irradiance on either side. An eight-corner stencil loses
- * support there and jumps between colors despite constant receiver normals.
+ * probes have different irradiance on either side. A hard half-space gate on an eight-corner stencil loses
+ * support there. Wrapped weights must stay continuous without a wide stencil.
  * Requires OpenGL 4.3 and float targets; entry main, no input controls.
  * Run {@code gradlew :jme3-examples:giProbeCellContinuitySmoke}; completion prints
  * GI_CELL_CONTINUITY_PASS. Exercises Lighting/PBR on four rendering paths.
+ * Set -Dgi.test.wide=true to verify the optional 27-probe reference mode.
  * <pre>
  * 第一步：普通应用加载烘焙 J3O，自动使用连续网格支持域，不需要新的管理器。
  * 第二步：原烘焙数据继续有效；本例仅为回归构造低层合成材质绑定。
@@ -35,7 +36,7 @@ import java.nio.ByteBuffer;
  * </pre>
  */
 public final class TestGiProbeCellContinuity extends SimpleApplication {
-    private static final int STEPS = 33;
+    private static final int STEPS = 65;
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
         RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
     private final Vector3f normal = new Vector3f(1, 1, 0).normalizeLocal();
@@ -115,11 +116,14 @@ public final class TestGiProbeCellContinuity extends SimpleApplication {
         }
         receiver.setMaterial(material);
         binding = data.bind(material, new Vector3f(-2, -2, -2), 0);
+        com.jme3.math.Vector4f atlas = ((com.jme3.math.Vector4f) material.getParam("GiAtlas").getValue()).clone();
         if (testCase >= 8) {
-            com.jme3.math.Vector4f atlas = ((com.jme3.math.Vector4f) material.getParam("GiAtlas").getValue()).clone();
             atlas.z += 0.125f;
-            material.setVector4("GiAtlas", atlas);
         }
+        if (Boolean.getBoolean("gi.test.wide")) {
+            atlas.z += 0.015625f;
+        }
+        material.setVector4("GiAtlas", atlas);
         Image image = material.getTextureParam("GiIrradiance").getTextureValue().getImage();
         ByteBuffer coefficients = BufferUtils.createByteBuffer(image.getData(0).capacity());
         coefficients.put(image.getData(0).duplicate().clear()).clear();

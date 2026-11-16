@@ -98,6 +98,7 @@ public final class GiProbeStreamer implements AutoCloseable {
         float intensity = 1;
         float fadeDistance = -1;
         boolean stabilized;
+        boolean wide;
         boolean smooth;
 
         public Chunk(String id, double x, double y, double z, Vector3f coverage,
@@ -273,6 +274,13 @@ public final class GiProbeStreamer implements AutoCloseable {
 
     /** Compatibility overload: smooth is ignored. Render-thread only, with the same lifecycle as the four-argument overload. */
     public void setAppearance(String id, float intensity, float fadeDistance, boolean stabilized, boolean smooth) {
+        setAppearance(id, intensity, fadeDistance, stabilized, smooth, false);
+    }
+
+    /** Render-thread stencil selection; wide defaults false in other overloads.
+     * See GiProbeVolume.setWideProbeSampling for application usage. */
+    public void setAppearance(String id, float intensity, float fadeDistance,
+            boolean stabilized, boolean smooth, boolean wide) {
         requireOpen();
         if (!Float.isFinite(intensity) || intensity < 0
                 || !Float.isFinite(fadeDistance) || fadeDistance < 0) {
@@ -282,7 +290,8 @@ public final class GiProbeStreamer implements AutoCloseable {
         if (chunk == null) {
             throw new IllegalArgumentException("Unknown GI chunk " + id);
         }
-        if (chunk.intensity != intensity || chunk.fadeDistance != fadeDistance || chunk.stabilized != stabilized || chunk.smooth) {
+        if (chunk.intensity != intensity || chunk.fadeDistance != fadeDistance || chunk.stabilized != stabilized || chunk.wide != wide || chunk.smooth) {
+            chunk.wide = wide;
             chunk.smooth = false;
             chunk.stabilized = stabilized;
             chunk.intensity = intensity;
@@ -474,7 +483,7 @@ public final class GiProbeStreamer implements AutoCloseable {
                 if (!pages.offer(chunk.id, resident.get(chunk), offset, fade)) {
                     pageAdmissionFailures.add(chunk.id);
                 }
-                pages.appearance(chunk.id, chunk.intensity, fade, chunk.stabilized, chunk.smooth);
+                pages.appearance(chunk.id, chunk.intensity, fade, chunk.stabilized, chunk.smooth, chunk.wide);
                 pages.relocate(chunk.id, offset);
             }
             pages.upload(uploadByteBudget, uploadNanos);
@@ -493,7 +502,7 @@ public final class GiProbeStreamer implements AutoCloseable {
                     entries.add(new GiProbeSet.Entry(resident.get(chunk), new Vector3f((float) (chunk.x - worldOriginX),
                             (float) (chunk.y - worldOriginY), (float) (chunk.z - worldOriginZ)),
                             chunk.fadeDistance >= 0 ? chunk.fadeDistance
-                                    : Math.min(chunk.size.x, Math.min(chunk.size.y, chunk.size.z)) * 0.2f, chunk.intensity, chunk.stabilized, chunk.smooth));
+                                    : Math.min(chunk.size.x, Math.min(chunk.size.y, chunk.size.z)) * 0.2f, chunk.intensity, chunk.stabilized, chunk.smooth, chunk.wide));
                 }
                 try {
                     replacement = new GiProbeSet(entries, textureLimit,

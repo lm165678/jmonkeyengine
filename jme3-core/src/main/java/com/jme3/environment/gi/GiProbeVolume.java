@@ -16,26 +16,15 @@ import java.io.IOException;
  * changing coverage/counts; either change invalidates this node's data reference.
  * Editing, baking and binding are render-thread operations. Rebasing the world
  * requires closing old material bindings and rebaking at the new placement.
- * Runtime interpolation excludes probes behind the receiver normal hemisphere,
- * including in stabilized mode. This avoids opposite-face irradiance leaking at
- * visibility silhouettes. A smooth signed-plane-distance gate spans 20 percent
- * of the minimum probe spacing, rather than weighting by direction cosine.
- * Its weight stays constant along flat receivers, avoiding near-probe hotspots;
- * a volume with no usable front-side probes falls back to overlapping volumes.
- * Regular grids use a normalized quadratic B-spline stencil (up to 27 probes),
- * rather than eight cell corners, so front-side support overlaps cell boundaries.
- * This costs additional shader samples but does not change the baked payload or
- * paging layout. Free surface layouts retain their radial neighborhood kernel.
- * Visibility taps use receiver-plane projection at grazing angles as well as
- * normal incidence. Taps across the tangent-plane horizon are excluded instead
- * of borrowing an unrelated depth. This avoids artificial contact darkening
- * from a clamped projection without adding a visibility floor.
- * Angular visibility uses a positive 4-by-4 cubic B-spline filter on independently
- * evaluated probabilities. This removes bilinear texel-boundary creases near
- * contacts without mixing foreground/background depth moments or introducing
- * a minimum visibility. It uses sixteen distance-map taps per contributing
- * probe; finite angular filtering can still soften visibility boundaries.
- * This filtering is automatic and does not require rebaking or an editor toggle.
+ * Regular grids default to eight-corner interpolation with wrapped normal weights
+ * with a continuous signed-plane attenuation and four-tap filtered distance moments. Variance merging preserves differences
+ * between tap means; standard deviations must not be averaged as second moments.
+ * Strict mixing has no minimum visibility; stabilized mixing remains optional.
+ * setWideProbeSampling(true) selects the expensive 27-probe B-spline stencil,
+ * strict front-plane gate and sixteen-tap visibility filtering. Free surface
+ * layouts keep their existing radial stencil and ignore this quality option.
+ * Old scenes without the new field use eight probes. Switching requires no
+ * rebake and is published by automatic scene services on the next frame.
  *
  * <pre>{@code
  * // 第一步：添加可保存到场景的 GI 探针体积。
@@ -64,6 +53,7 @@ public final class GiProbeVolume extends Node {
     private long streamBytes;
     private float intensity = 1;
     private boolean stabilizedBlending;
+    private boolean wideProbeSampling;
     private boolean smoothBlending;
     private boolean surfaceLayout;
     private float fadeDistance;
@@ -192,6 +182,33 @@ public final class GiProbeVolume extends Node {
 
     public boolean isSmoothBlending() {
         return false;
+    }
+
+    /** Returns whether the optional 27-probe regular-grid stencil is enabled. */
+    public boolean isWideProbeSampling() {
+        return wideProbeSampling;
+    }
+
+    /** Selects the costly 27-probe stencil; default false uses eight probes.
+     * Free surface layouts ignore this option. No rebake is needed. Change on
+     * the owning scene thread; automatic services publish it at the next update.
+     * The setting is saved in J3O and inherited by existing refinement children.
+     * <pre>{@code
+     * // 第一步：默认使用八探针，加载 J3O 后由内置服务自动接入。
+     * volume.setWideProbeSampling(false);
+     * // 第二步：需要宽邻域质量模式时开启，无需重新烘焙。
+     * volume.setWideProbeSampling(true);
+     * // 第三步：恢复低成本模式并保存场景，重新加载保留此设置。
+     * volume.setWideProbeSampling(false);
+     * }</pre>
+     */
+    public void setWideProbeSampling(boolean enabled) {
+        wideProbeSampling = enabled;
+        for (com.jme3.scene.Spatial child : getChildren()) {
+            if (child instanceof GiProbeVolume) {
+                ((GiProbeVolume) child).setWideProbeSampling(enabled);
+            }
+        }
     }
 
     public boolean isStabilizedBlending() {
@@ -351,6 +368,7 @@ public final class GiProbeVolume extends Node {
         out.write(intensity, "giIntensity", 1f);
         out.write(smoothBlending, "giSmoothBlending", false);
         out.write(stabilizedBlending, "giStabilizedBlending", false);
+        out.write(wideProbeSampling, "giWideProbeSampling", false);
         out.write(surfaceLayout, "giSurfaceLayout", false);
         out.write(fadeDistance, "giFadeDistance", 0f);
         out.write(bakedTransform, "giBakeTransform", null);
@@ -369,6 +387,7 @@ public final class GiProbeVolume extends Node {
         surfaceLayout = in.readBoolean("giSurfaceLayout", false);
         setSmoothBlending(in.readBoolean("giSmoothBlending", false));
         setStabilizedBlending(in.readBoolean("giStabilizedBlending", false));
+        setWideProbeSampling(in.readBoolean("giWideProbeSampling", false));
         setFadeDistance(in.readFloat("giFadeDistance", 0f));
         bakedTransform = (Transform) in.readSavable("giBakeTransform", null);
         getGrid();

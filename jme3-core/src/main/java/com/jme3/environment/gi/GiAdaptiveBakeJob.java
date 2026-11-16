@@ -173,6 +173,7 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
                 GiProbeVolume refinement = pending.get(i);
                 refinement.setIntensity(target.getIntensity());
                 refinement.setStabilizedBlending(target.isStabilizedBlending());
+                refinement.setWideProbeSampling(target.isWideProbeSampling());
                 refinement.setSmoothBlending(target.isSmoothBlending());
                 target.attachChild(refinement);
                 ready.add(refinement);

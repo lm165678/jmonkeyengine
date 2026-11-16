@@ -51,6 +51,7 @@ public final class GiProbeSet implements AutoCloseable {
         final float fade;
         final float intensity;
         final boolean stabilized;
+        final boolean wide;
         final boolean smooth;
 
         public Entry(GiProbeData data, Vector3f worldOffset, float fadeDistance) {
@@ -77,6 +78,13 @@ public final class GiProbeSet implements AutoCloseable {
         /** Compatibility overload. The removed smooth argument is ignored; use the five-argument constructor. */
         public Entry(GiProbeData data, Vector3f worldOffset, float fadeDistance,
                 float intensity, boolean stabilized, boolean smooth) {
+            this(data, worldOffset, fadeDistance, intensity, stabilized, smooth, false);
+        }
+
+        /** Low-level explicit stencil selection; see GiProbeVolume.setWideProbeSampling. */
+        public Entry(GiProbeData data, Vector3f worldOffset, float fadeDistance,
+                float intensity, boolean stabilized, boolean smooth, boolean wide) {
+            this.wide = wide;
             this.smooth = false;
             this.stabilized = stabilized;
             this.data = Objects.requireNonNull(data);
@@ -137,7 +145,7 @@ public final class GiProbeSet implements AutoCloseable {
             float[] descriptor = {origin.x, origin.y, origin.z, entry.fade,
                 spacing.x, spacing.y, spacing.z, data.distanceScale(),
                 counts.x, counts.y, counts.z, data.irradianceScale() * entry.intensity,
-                data.columns(), shRow, visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0f) + (entry.stabilized ? 0.125f : 0f) + (entry.smooth ? 0.03125f : 0f)};
+                data.columns(), shRow, visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0f) + (entry.stabilized ? 0.125f : 0f) + (entry.wide ? 0.015625f : 0f)};
             for (int c = 0; c < 16; c++) {
                 descriptors.putFloat((i * 16 + c) * 4, descriptor[c]);
             }
