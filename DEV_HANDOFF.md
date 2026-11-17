@@ -1,3 +1,8 @@
+## 2026-11-18 temporary GI compromise clarification
+- User accepts 02847aef1 as an interim fallback, not proof that fixed angular smoothing is the best/final fix. Keep it for now; smooth transitions, not blanket brightening, remain the acceptance criterion.
+- Added root-cause and direction-preservation backlog to RENDERING_QUALITY_ROADMAP.md: independent reference, neighbor/SH diagnostics, coordinate/energy audit, targeted alternatives, eight-neighbor constraint and joint Sponza/TestScene3 regression. Alternatives are unverified plans. Remind on next GI-quality continuation.
+- Documentation only; engine implementation remains 02847aef1, SDK unchanged, no deployment or push.
+
 ## 2026-11-18 accepted diffuse GI angular smoothing
 - User clarified acceptance means smooth transitions, not globally brighter GI, and accepted the TestScene3 filtered wall result. Implemented runtime diffuse-volume SH heat-kernel window: L0 unchanged, L1*0.5, L2*0.125. Preserve existing eight-neighbor stencil, visibility/normal weights, metadata, stored data and raw CPU evaluator. Sky-visibility SH and native environment SH remain unfiltered. GiBakeBounce bypasses smoothing to avoid accumulating it across bounces. No new control, no rebake required; angular contrast changes intentionally. This is an accepted quality tradeoff, not proof the original bake is physically wrong.
 - Shader changes IrradianceSH.glsllib and GI/ProbeSampling.glsllib; runnable TestGiVisibilityFiltering Javadoc updated with behavior/usage. No SDK code or original model/stream modifications. Do not use build/Sponza-GI-smooth-candidate.j3o with the new shader: that earlier data-filter trial would apply smoothing twice.
