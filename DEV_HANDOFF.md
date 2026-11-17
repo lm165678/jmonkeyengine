@@ -1,3 +1,20 @@
+## 2026-11-17 user verification and fork handoff
+- User reports the SDK/model preview and performance are now normal after local rebuilding/testing. This is user verification; no new SDK build was run during the commit/push task.
+- Include all pending source fixes and other agents' code_buddy_agents*.md context files. Keep workstation proxy settings and generated engine exports/templates/packaging outputs local. The updated versioned Nifty editor dependency is part of its source integration fix.
+- Earlier entries describing uncommitted changes or unverified Sponza behavior are historical checkpoints; this entry records the subsequent user result. Remaining unrelated roadmap and RenderDoc replay/shutdown caveats are not claimed resolved.
+
+## 2026-11-17 SDK GI preview / GPUScene batch rebuild performance repair
+- Live SDK PID 38720 had no renderdoc.dll loaded. GPU process counters showed about 14 GiB dedicated usage; two thread dumps stopped in GPUScene mesh glBufferData. A 20s JFR captured 276 render-thread samples, including 90 glBufferData and 51 glGenBuffers samples plus MeshDrawPlan construction. Logs are local .gradle/sdk-slow*.
+- Trigger: SDK GiPreview intentionally binds GI only while drawing and restores original material parameters afterward to protect save/undo. These setters advance Material.contentRevision every frame. GPUScene previously treated any revision change as a structural change, rebuilding packed meshes even when effective draw parameters were unchanged. NativeObjectManager limits deletion to 100 objects/frame, so sustained churn can create resource retirement pressure; no independent leak was proven.
+- Fixed GpuScenePipeline.MaterialWatch: keep a parameter snapshot, compare only when revision changes; unchanged effective values advance the observed revision without structural invalidation. True value/texture identity/render-state/flag changes still refresh batches. Snapshot mutable math/array values to detect reuse-and-edit. No GI setter suppression, no serialization change, no GPUScene disabling or quality reduction. Existing SDK frame-scoped restore behavior retained.
+- Validation: :jme3-core:test --tests '*GpuSceneMaterialWatchTest' --tests '*GpuSceneEligibilityTest' --offline passed (11 tests). Includes 1000 restore/rebind cycles, GI disabling, atlas replacement, mutable color/array edits and render-state/transparent edits.
+- Native RTX 5060 Ti OpenGL 4.3 offscreen Tank regression passed 240 frames: initial batch builds=1, unchanged repeated bindings remain 1, real Shininess edit increments to 2, then remains 2. Local source/log .gradle/GpuMaterialNativeSmoke.java and .gradle/gpu-material-native-smoke.log; used newly compiled core ahead of SDK JARs. Not a full Sponza FPS/VRAM soak test.
+- Existing running SDK has not been replaced/restarted. Export rebuilt engine JARs and rebuild SDK before repeating Sponza; verify FPS and GPU memory stabilize. Compatible baseline engine 2bba6193b / SDK a0ff9c98 plus local changes. No commit/push.
+
+## 2026-11-17 debug group exception cleanup
+- SDK preview reported GL_STACK_OVERFLOW (1283) at glPushDebugGroup. Found missing finally cleanup in RenderQueue ordinary/shadow buckets and RenderManager geometry drawing; nested material failures could leak groups across frames. Both layers now close groups in finally. FrameGraph already uses finally. RenderDoc names remain enabled; this does not prove RenderDoc caused the original failure.
+- Added DebugGroupBalanceTest: repeatedly throws the same material exception across ordinary/shadow queues and checks group depth returns to zero. SDK rebuild/export and actual preview/RenderDoc verification are still required; no SDK build or deployment performed. Restart SDK to discard any already corrupted GL context and inspect earlier logs for the original material error.
+
 ## 2026-11-17 managed shadow strength (separate from unresolved GI dark patches)
 - User requested shadow darkness control only if comparable engines expose it. Verified Unity Light.shadowStrength and UE5 UDirectionalLightComponent.ShadowAmount in official docs; no blanket claim for every UE4 light/render path.
 - Added serialized LightShadowSettings.strength in [0,1], default/missing-field fallback 1. ShadowManager uploads texel33.y; shared managed shader blends 1 with filtered visibility, only for that light's direct contribution. Existing scene defaults and eight-probe GI are unchanged. Strength0 does not disable atlas allocation; use castShadow=false to disable work. Legacy shadow processors retain their own ShadowIntensity API.
@@ -192,3 +209,15 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 
 ## 2026-11-17 paired implementation snapshot
 - Engine implementation: 4ee85daa4; SDK implementation: e38d71c5. These identify the paired source snapshots, not a newly validated binary release. No additional build/runtime checks for this Git request. Earlier test results and unresolved issues remain as documented.
+- Validation: targeted Gradle DebugGroupBalanceTest passed (1 test, 100 simulated failures); BUILD SUCCESSFUL. Local changes only, not committed/pushed.
+
+## 2026-11-17 core-profile line widths and missing preview overlays
+- GLRenderer now applies cached supported-width clamping for both RenderState and legacy Mesh line widths, retaining requested values in scene data. Core-profile wide-line requests fall back to one pixel; invalid serialized values fall back to one. Public RenderState rejects non-finite widths. No per-frame GL capability readback; cache resets on renderer initialize.
+- SDK gizmos request widths 2/4 while SDL requests forward-compatible GL. An exception during editor-tool rendering aborts later GUI/GBuffer overlay work and discards RenderDoc capture; hiding tools avoids that path. This explains the observed G dependence, but the actual running SDK after rebuild is not yet verified.
+- Core regression passed: GlRendererLineWidthTest and DebugGroupBalanceTest. SDK capture-discard branch now reports preview failure instead of silently returning. Existing FG/debug groups retained.
+- Isolated SDK capture classes compiled. Original RenderDocSmoke stopped at unrelated non-runtime annotation reflection; temporary ignored test copy bypassed only that check and added a width-4 wireframe. Settings/native API passed, GL4.3 initialized on RTX5060Ti, then the process exited unsuccessfully without a capture or Java stack in verification.log. Native capture and group replay are NOT verified; no complete SDK build/deployment was done. Preserve concurrent SDK icon/UI/GI edits.
+
+## 2026-11-17 CodeBuddy nested debug-group repair
+- RenderManager.renderGeometry and RenderQueue.renderQueue/renderShadowQueue now pop OpenGL debug groups in finally blocks. A material/geometry failure no longer leaves nested groups that later cause Internal stack overflow (1283) at glPushDebugGroup and hide the original failure.
+- Added RenderDebugGroupTest for opaque and shadow failure paths. JUnit XML confirms RenderDebugGroupTest 2/2 and FrameGraphTest 22/22 with zero failures/errors. Gradle subsequently reported a problems-report TimeoutException, so this is not recorded as an overall BUILD SUCCESSFUL.
+- Copied the tested core JAR into the SDK release and build/cluster runtime directories. Actual SDK J3O opening still needs native verification. No commit/push.

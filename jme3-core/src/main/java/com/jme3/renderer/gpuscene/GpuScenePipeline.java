@@ -30,6 +30,17 @@ import java.util.*;
  * batches remain GPU-resident during attach/detach/reparent. Material setters and
  * geometry mesh/material/queue/cull setters are tracked. Use refreshSubtree after
  * in-place mesh edits. Light-list and control setters invalidate registration too.
+ * Reapplying identical material parameters between frames does not rebuild packed
+ * meshes. Temporary preview bindings must be in place before queue preparation;
+ * restoring them after drawing remains safe for saving the original materials.
+ * <pre>{@code
+ * // 第一步：在渲染线程、队列准备之前设置本帧的实际材质参数。
+ * material.setFloat("Shininess", 16f);
+ * // 第二步：后续帧重复设置相同值，不会重新打包或上传静态网格。
+ * material.setFloat("Shininess", 16f);
+ * // 第三步：真正修改参数仍会刷新受影响的批次，确保代理材质同步。
+ * material.setFloat("Shininess", 32f);
+ * }</pre>
  * Static instance records stay resident; moving objects invalidate their records.
  * Changed records are scattered by compute into resident storage, without a full
  * static-batch upload. Use normal Spatial setters; directly mutated transforms
@@ -74,14 +85,68 @@ public final class GpuScenePipeline implements OpaquePipeline {
     private final Map<Material, MaterialWatch> materialWatches = new IdentityHashMap<>();
     private final Map<Geometry, Material> watchedGeometries = new IdentityHashMap<>();
 
-    private static final class MaterialWatch {
+    static final class MaterialWatch {
         long revision;
         int state;
+        final Material snapshot;
+        final int parameterHash;
         final Set<Geometry> users = Collections.newSetFromMap(new IdentityHashMap<>());
 
         MaterialWatch(Material material) {
             revision = material.getContentRevision();
             state = material.getAdditionalRenderState().contentHashCode();
+            snapshot = material.clone();
+            com.jme3.util.clone.Cloner cloner = new com.jme3.util.clone.Cloner();
+            for (com.jme3.material.MatParam parameter : snapshot.getParams()) {
+                Object value = parameter.getValue();
+                if (value != null && (value.getClass().isArray()
+                        || value.getClass().getPackageName().equals("com.jme3.math"))) {
+                    parameter.setValue(cloner.clone(value));
+                }
+            }
+            parameterHash = parameterHash(material);
+        }
+
+        boolean changed(Material material) {
+            if (state != material.getAdditionalRenderState().contentHashCode()) {
+                return true;
+            }
+            if (revision == material.getContentRevision()) {
+                return false;
+            }
+            // Temporary editor bindings are restored and reapplied between frames.
+            // Compare effective parameters before rebuilding packed mesh buffers.
+            // Active techniques are selected internally by individual render passes.
+            if (snapshot.isTransparent() != material.isTransparent()
+                    || snapshot.isReceivesShadows() != material.isReceivesShadows()
+                    || snapshot.isBindlessTextures() != material.isBindlessTextures()
+                    || parameterHash != parameterHash(material)
+                    || snapshot.getParams().size() != material.getParams().size()) {
+                return true;
+            }
+            for (com.jme3.material.MatParam parameter : snapshot.getParams()) {
+                com.jme3.material.MatParam current = material.getParam(parameter.getName());
+                if (current == null || parameter.getVarType() != current.getVarType()
+                        || !Objects.deepEquals(parameter.getValue(), current.getValue())) {
+                    return true;
+                }
+                if (parameter.getValue() instanceof com.jme3.texture.Texture
+                        || parameter.getValue() instanceof BufferObject) {
+                    if (parameter.getValue() != current.getValue() || !parameter.equals(current)) {
+                        return true;
+                    }
+                }
+            }
+            revision = material.getContentRevision();
+            return false;
+        }
+
+        private static int parameterHash(Material material) {
+            int hash = 0;
+            for (com.jme3.material.MatParam parameter : material.getParams()) {
+                hash += parameter.hashCode();
+            }
+            return hash;
         }
     }
 
@@ -91,8 +156,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         for (Map.Entry<Material, MaterialWatch> entry : materialWatches.entrySet()) {
             Material material = entry.getKey();
             MaterialWatch watch = entry.getValue();
-            if (watch.revision != material.getContentRevision()
-                    || watch.state != material.getAdditionalRenderState().contentHashCode()) {
+            if (watch.changed(material)) {
                 for (Geometry geometry : watch.users) {
                     refreshSubtree(geometry);
                 }

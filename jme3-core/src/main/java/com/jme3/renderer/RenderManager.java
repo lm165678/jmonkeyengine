@@ -1145,6 +1145,8 @@ public class RenderManager {
      * Renders a single {@link Geometry} with a specific list of lights.
      * This method applies the world transform, handles forced materials and techniques,
      * and manages the `BoundDrawBuffer` parameter for multi-target frame buffers.
+     * Debug groups are closed even when material rendering fails; the original
+     * rendering exception still propagates to the caller.
      *
      * @param geom The {@link Geometry} to render.
      * @param lightList The {@link LightList} containing the lights that affect this geometry.
@@ -1156,71 +1158,74 @@ public class RenderManager {
         }
 
         this.renderer.pushDebugGroup(geom.getName());
-        if (geom.isIgnoreTransform()) {
-            setWorldMatrix(Matrix4f.IDENTITY);
-        } else {
-            setWorldMatrix(geom.getWorldMatrix());
-        }
+        try {
+            if (geom.isIgnoreTransform()) {
+                setWorldMatrix(Matrix4f.IDENTITY);
+            } else {
+                setWorldMatrix(geom.getWorldMatrix());
+            }
 
-        // Use material override to pass the current target index (used in api such as GL ES
-        // that do not support glDrawBuffer)
-        FrameBuffer currentFb = this.renderer.getCurrentFrameBuffer();
-        if (currentFb != null && !currentFb.isMultiTarget()) {
-            this.boundDrawBufferId.setValue(currentFb.getTargetIndex());
-        }
+            // Use material override to pass the current target index (used in api such as GL ES
+            // that do not support glDrawBuffer)
+            FrameBuffer currentFb = this.renderer.getCurrentFrameBuffer();
+            if (currentFb != null && !currentFb.isMultiTarget()) {
+                this.boundDrawBufferId.setValue(currentFb.getTargetIndex());
+            }
 
-        Material material = geom.getMaterial();
+            Material material = geom.getMaterial();
 
-        // If forcedTechnique exists, we try to force it for the render.
-        // If it does not exist in the mat def, we check for forcedMaterial and render the geom if not null.
-        // Otherwise, the geometry is not rendered.
-        if (forcedTechnique != null) {
-            MaterialDef matDef = material.getMaterialDef();
-            if (matDef.getTechniqueDefs(forcedTechnique) != null) {
+            // If forcedTechnique exists, we try to force it for the render.
+            // If it does not exist in the mat def, we check for forcedMaterial and render the geom if not null.
+            // Otherwise, the geometry is not rendered.
+            if (forcedTechnique != null) {
+                MaterialDef matDef = material.getMaterialDef();
+                if (matDef.getTechniqueDefs(forcedTechnique) != null) {
 
-                Technique activeTechnique = material.getActiveTechnique();
+                    Technique activeTechnique = material.getActiveTechnique();
 
-                String previousTechniqueName = activeTechnique != null
-                        ? activeTechnique.getDef().getName()
-                        : TechniqueDef.DEFAULT_TECHNIQUE_NAME;
+                    String previousTechniqueName = activeTechnique != null
+                            ? activeTechnique.getDef().getName()
+                            : TechniqueDef.DEFAULT_TECHNIQUE_NAME;
 
-                geom.getMaterial().selectTechnique(forcedTechnique, this);
-                //saving forcedRenderState for future calls
-                RenderState tmpRs = forcedRenderState;
-                if ((!forcedRenderStateOverridesTechnique || forcedRenderState == null)
-                        && geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState() != null) {
-                    //forcing forced technique renderState
-                    forcedRenderState = geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState();
+                    geom.getMaterial().selectTechnique(forcedTechnique, this);
+                    //saving forcedRenderState for future calls
+                    RenderState tmpRs = forcedRenderState;
+                    if ((!forcedRenderStateOverridesTechnique || forcedRenderState == null)
+                            && geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState() != null) {
+                        //forcing forced technique renderState
+                        forcedRenderState = geom.getMaterial().getActiveTechnique().getDef().getForcedRenderState();
+                    }
+                    try {
+                        material.render(geom, lightList, this);
+                        maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
+                    } finally {
+                        forcedRenderState = tmpRs;
+                        material.selectTechnique(previousTechniqueName, this);
+                    }
+
+                    //Reverted this part from revision 6197
+                    // If forcedTechnique does not exist and forcedMaterial is not set,
+                    // the geometry MUST NOT be rendered.
+                } else if (forcedMaterial != null) {
+                    // use forced material
+                    forcedMaterial.render(geom, lightList, this);
+
+                    // resize light batch if needed before rendering
+                    maybeResizeLightBatch(forcedMaterial.getActiveTechnique().getDef(), lightList.size());
                 }
-                try {
-                    material.render(geom, lightList, this);
-                    maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
-                } finally {
-                    forcedRenderState = tmpRs;
-                    material.selectTechnique(previousTechniqueName, this);
-                }
-
-                //Reverted this part from revision 6197
-                // If forcedTechnique does not exist and forcedMaterial is not set,
-                // the geometry MUST NOT be rendered.
             } else if (forcedMaterial != null) {
                 // use forced material
                 forcedMaterial.render(geom, lightList, this);
-
                 // resize light batch if needed before rendering
                 maybeResizeLightBatch(forcedMaterial.getActiveTechnique().getDef(), lightList.size());
+            } else {
+                material.render(geom, lightList, this);
+                // resize light batch if needed before rendering
+                maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
             }
-        } else if (forcedMaterial != null) {
-            // use forced material
-            forcedMaterial.render(geom, lightList, this);
-            // resize light batch if needed before rendering
-            maybeResizeLightBatch(forcedMaterial.getActiveTechnique().getDef(), lightList.size());
-        } else {
-            material.render(geom, lightList, this);
-            // resize light batch if needed before rendering
-            maybeResizeLightBatch(geom.getMaterial().getActiveTechnique().getDef(), lightList.size());
+        } finally {
+            this.renderer.popDebugGroup();
         }
-        this.renderer.popDebugGroup();
     }
 
     /**

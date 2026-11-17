@@ -983,13 +983,20 @@ public class RenderState implements Cloneable, Savable {
      * Sets the mesh line width.
      * Use this in conjunction with {@link #setWireframe(boolean)} or with a mesh in
      * {@link com.jme3.scene.Mesh.Mode#Lines} mode.
-     * Note: this does not work in OpenGL core profile. It only works in
-     * compatibility profile.
+     * The OpenGL renderer clamps the submitted width to its supported maximum
+     * (one pixel on its core-profile path), without changing this stored value.
+     * Configure on the render thread before drawing. Default width is one pixel.
+     * <pre>{@code
+     * // 第一步：设置期望线宽；不支持宽线时渲染器自动退回可用宽度。
+     * material.getAdditionalRenderState().setLineWidth(2f);
+     * // 第二步：恢复默认线宽，不改变模型或材质的其他设置。
+     * material.getAdditionalRenderState().setLineWidth(1f);
+     * }</pre>
      *
      * @param lineWidth the line width.
      */
     public void setLineWidth(float lineWidth) {
-        if (lineWidth < 1f) {
+        if (!Float.isFinite(lineWidth) || lineWidth < 1f) {
             throw new IllegalArgumentException("lineWidth must be greater than or equal to 1.0");
         }
         this.lineWidth = lineWidth;

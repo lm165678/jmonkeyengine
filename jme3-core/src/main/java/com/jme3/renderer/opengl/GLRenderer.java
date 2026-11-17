@@ -1004,6 +1004,7 @@ public final class GLRenderer implements Renderer {
     @Override
     public void initialize() {
         loadCapabilities();
+        supportedLineWidth = Float.NaN;
 
         // Initialize default state..
         gl.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1);
@@ -1407,10 +1408,7 @@ public final class GLRenderer implements Renderer {
                 gl.glDisable(GL.GL_STENCIL_TEST);
             }
         }
-        if (context.lineWidth != state.getLineWidth()) {
-            gl.glLineWidth(state.getLineWidth());
-            context.lineWidth = state.getLineWidth();
-        }
+        applyLineWidth(state.getLineWidth());
     }
 
     private void changeBlendMode(RenderState.BlendMode blendMode) {
@@ -4527,9 +4525,8 @@ public final class GLRenderer implements Renderer {
             throw new RendererException("Mesh instancing is not supported by the video hardware");
         }
 
-        if (mesh.getLineWidth() != 1f && context.lineWidth != mesh.getLineWidth()) {
-            gl.glLineWidth(mesh.getLineWidth());
-            context.lineWidth = mesh.getLineWidth();
+        if (mesh.getLineWidth() != 1f) {
+            applyLineWidth(mesh.getLineWidth());
         }
 
         if (gl4 != null && mesh.getMode().equals(Mode.Patch)) {
@@ -4692,8 +4689,25 @@ public final class GLRenderer implements Renderer {
      *
      * @return the maximum width (in pixels)
      */
+    private float supportedLineWidth = Float.NaN;
+
+    private void applyLineWidth(float requested) {
+        // Old serialized assets can bypass RenderState's public validation.
+        float width = Float.isFinite(requested) && requested >= 1f ? requested : 1f;
+        if (width > 1f) {
+            width = Math.min(width, getMaxLineWidth());
+        }
+        if (context.lineWidth != width) {
+            gl.glLineWidth(width);
+            context.lineWidth = width;
+        }
+    }
+
     @Override
     public float getMaxLineWidth() {
+        if (!Float.isNaN(supportedLineWidth)) {
+            return supportedLineWidth;
+        }
         // Since neither JMonkeyEngine nor LWJGL ever enables GL_LINE_SMOOTH,
         // all lines are aliased, but just in case...
         assert !gl.glIsEnabled(GL.GL_LINE_SMOOTH);
@@ -4701,14 +4715,16 @@ public final class GLRenderer implements Renderer {
         // When running with OpenGL 3.2+ core profile,
         // compatibility features such as multipixel lines aren't available.
         if (caps.contains(Caps.CoreProfile)) {
-            return 1f;
+            supportedLineWidth = 1f;
+            return supportedLineWidth;
         }
 
         floatBuf16.clear();
         gl.glGetFloat(GL.GL_ALIASED_LINE_WIDTH_RANGE, floatBuf16);
         float result = floatBuf16.get(1);
 
-        return result;
+        supportedLineWidth = Float.isFinite(result) ? Math.max(1f, result) : 1f;
+        return supportedLineWidth;
     }
 
     /**

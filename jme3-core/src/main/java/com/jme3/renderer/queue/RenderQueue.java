@@ -288,8 +288,11 @@ public class RenderQueue {
 
     public void renderShadowQueue(GeometryList list, RenderManager rm, Camera cam, boolean clear) {
         rm.getRenderer().pushDebugGroup("ShadowQueue");
-        renderGeometryList(list, rm, cam, clear);
-        rm.getRenderer().popDebugGroup();
+        try {
+            renderGeometryList(list, rm, cam, clear);
+        } finally {
+            rm.getRenderer().popDebugGroup();
+        }
     }
 
     public boolean isQueueEmpty(Bucket bucket) {
@@ -315,27 +318,30 @@ public class RenderQueue {
 
     public void renderQueue(Bucket bucket, RenderManager rm, Camera cam, boolean clear) {
         rm.getRenderer().pushDebugGroup(bucket.name());
-        switch (bucket) {
-            case Gui:
-                renderGeometryList(guiList, rm, cam, clear);
-                break;
-            case Opaque:
-                renderGeometryList(opaqueList, rm, cam, clear);
-                break;
-            case Sky:
-                renderGeometryList(skyList, rm, cam, clear);
-                break;
-            case Transparent:
-                renderGeometryList(transparentList, rm, cam, clear);
-                break;
-            case Translucent:
-                renderGeometryList(translucentList, rm, cam, clear);
-                break;
+        try {
+            switch (bucket) {
+                case Gui:
+                    renderGeometryList(guiList, rm, cam, clear);
+                    break;
+                case Opaque:
+                    renderGeometryList(opaqueList, rm, cam, clear);
+                    break;
+                case Sky:
+                    renderGeometryList(skyList, rm, cam, clear);
+                    break;
+                case Transparent:
+                    renderGeometryList(transparentList, rm, cam, clear);
+                    break;
+                case Translucent:
+                    renderGeometryList(translucentList, rm, cam, clear);
+                    break;
 
-            default:
-                throw new UnsupportedOperationException("Unsupported bucket type: " + bucket);
+                default:
+                    throw new UnsupportedOperationException("Unsupported bucket type: " + bucket);
+            }
+        } finally {
+            rm.getRenderer().popDebugGroup();
         }
-        rm.getRenderer().popDebugGroup();
     }
     
     public GeometryList getList(Bucket bucket) {
