@@ -70,4 +70,30 @@ public class IrradianceShTest {
         assertEquals(4 * Math.PI, e.y, 0.001);
         assertEquals(2 * Math.PI, e.z, 0.001);
     }
+    /** Analytic hemisphere integrals catch axis, sign and band-normalization errors. */
+    @Test
+    public void directionalAndQuadraticRadianceMatchAnalyticIntegrals() {
+        float[] linear = GiProbeBaker.project(Vector3f.ZERO, 65536,
+                (p, n, out) -> out.set(2 + n.x, 3 + n.y, 4 + n.z), () -> false);
+        float[] quadratic = GiProbeBaker.project(Vector3f.ZERO, 65536,
+                (p, n, out) -> out.set(1 + n.x * n.x, 1 + n.y * n.y, 1 + n.z * n.z),
+                () -> false);
+        for (int i = 0; i < 512; i++) {
+            double z = 1 - 2 * (i + 0.5) / 512;
+            double radius = Math.sqrt(1 - z * z);
+            double angle = i * Math.PI * (3 - Math.sqrt(5));
+            Vector3f n = new Vector3f((float) (radius * Math.cos(angle)),
+                    (float) (radius * Math.sin(angle)), (float) z);
+            Vector3f actualLinear = IrradianceSh.evaluate(linear, n);
+            Vector3f actualQuadratic = IrradianceSh.evaluate(quadratic, n);
+            for (int channel = 0; channel < 3; channel++) {
+                double axis = n.get(channel);
+                assertEquals(Math.PI * (channel + 2 + 2.0 / 3 * axis),
+                        actualLinear.get(channel), 0.0001);
+                assertEquals(Math.PI * (1.25 + 0.25 * axis * axis),
+                        actualQuadratic.get(channel), 0.0001);
+            }
+        }
+    }
+
 }

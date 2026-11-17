@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition SubtractFloat {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/subtractFloat.glsl
+        Documentation{
+            Subtracts the second float from the first.
+            @input float a the first float
+            @input float b the second float
+            @output float result the difference
+        }
+        Input {
+            float a 0.0
+            float b 0.0
+        }
+        Output {
+            float result
+        }
+    }
+}

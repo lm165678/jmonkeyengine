@@ -1,0 +1,17 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition NormalizeVec3 {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/normalizeVec3.glsl
+        Documentation{
+            Normalizes a vec3.
+            @input vec3 value the input vector
+            @output vec3 result the normalized vector
+        }
+        Input {
+            vec3 value vec3(1.0, 0.0, 0.0)
+        }
+        Output {
+            vec3 result
+        }
+    }
+}

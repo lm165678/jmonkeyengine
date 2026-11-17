@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition AddVec3 {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/addVec3.glsl
+        Documentation{
+            Adds two vec3 values.
+            @input vec3 a the first vector
+            @input vec3 b the second vector
+            @output vec3 result the sum
+        }
+        Input {
+            vec3 a vec3(0.0)
+            vec3 b vec3(0.0)
+        }
+        Output {
+            vec3 result
+        }
+    }
+}

@@ -1,0 +1,21 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexSplitVec3 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/splitVec3.glsl
+        Documentation{
+            Splits a vec3 into scalar channels in the vertex stage.
+            @input vec3 value the input vector
+            @output float x the x channel
+            @output float y the y channel
+            @output float z the z channel
+        }
+        Input {
+            vec3 value vec3(0.0)
+        }
+        Output {
+            float x
+            float y
+            float z
+        }
+    }
+}

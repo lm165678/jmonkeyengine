@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexMult {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/mult.frag
+        Documentation{
+            Multiplies two floats in the vertex stage.
+            @input float float1 the first float
+            @input float float2 the second float
+            @output float outFloat the product
+        }
+        Input {
+            float float1 1.0
+            float float2 1.0
+        }
+        Output {
+            float outFloat
+        }
+    }
+}

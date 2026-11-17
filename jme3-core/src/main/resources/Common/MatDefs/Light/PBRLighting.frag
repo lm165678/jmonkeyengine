@@ -82,14 +82,14 @@ void main(){
     PBRLightingUtils_computeProbesContribution(surface);
     #ifdef ENVIRONMENT_LIGHTING
         surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, surface.normal),
-                surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight;
+                surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight * g_SkyIntensity;
         // Local reflections replace distant sky specular; they do not add energy.
         if (g_EnvironmentData.z > 0.5) {
             vec3 reflected = getSpecularDominantDir(surface.normal,
                     reflect(-surface.viewDir, surface.normal), surface.roughness * surface.roughness);
             surface.envLightContribution += ApproximateSpecularIBLPolynomial(g_SkyMap,
                     surface.specularColor, surface.roughness, surface.NdotV, reflected,
-                    g_SkyMipCount) * (1.0 - environmentReflectionCoverage) * computeSpecularAO(clamp(surface.ao.r, 0.0, 1.0),
+                    g_SkyMipCount) * g_SkyIntensity * (1.0 - environmentReflectionCoverage) * computeSpecularAO(clamp(surface.ao.r, 0.0, 1.0),
                     surface.roughness, surface.NdotV);
         }
     #endif

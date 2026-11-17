@@ -1,0 +1,17 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexColorToGrey {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/colorToGrey.frag
+        Documentation{
+            Converts a vec4 color to a luminance float in the vertex stage.
+            @input vec4 color the input color
+            @output float grey the luminance
+        }
+        Input {
+            vec4 color vec4(1.0)
+        }
+        Output {
+            float grey
+        }
+    }
+}

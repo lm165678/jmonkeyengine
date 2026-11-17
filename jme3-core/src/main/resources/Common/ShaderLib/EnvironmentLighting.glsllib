@@ -7,6 +7,7 @@ uniform vec4 g_EnvironmentData;
 uniform samplerCube g_EnvironmentMap;
 uniform samplerCube g_SkyMap;
 uniform float g_SkyMipCount;
+uniform float g_SkyIntensity;
 uniform mat4 g_EnvironmentLocalData;
 float environmentReflectionCoverage = 0.0;
 float environmentLocalCoverage(vec3 position) {
@@ -31,16 +32,19 @@ float environmentLocalCoverage(vec3 position) {
 vec3 environmentSpecular(vec3 direction, float roughness) {
     float lod = clamp(roughness, 0.0, 1.0) * max(0.0, g_EnvironmentData.x - 1.0);
     #if (__VERSION__ >= 130) || (defined(GL_EXT_shader_texture_lod))
-        return textureCubeLod(g_EnvironmentMap, direction, lod).rgb;
+        return textureCubeLod(g_EnvironmentMap, direction, lod).rgb
+                * (g_EnvironmentData.y > 0.5 ? g_SkyIntensity : 1.0);
     #else
-        return textureCube(g_EnvironmentMap, direction, lod).rgb;
+        return textureCube(g_EnvironmentMap, direction, lod).rgb
+                * (g_EnvironmentData.y > 0.5 ? g_SkyIntensity : 1.0);
     #endif
 }
 vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
         vec3 diffuseReflectance, vec3 specularReflectance, float shininess,
         float diffuseWeight) {
     vec3 diffuse = shLambertResponse(shNativeIrradiance(g_EnvironmentSh, normal),
-            diffuseReflectance, 1.0) * (g_EnvironmentData.w > 0.5 ? diffuseWeight : giSkyDiffuseWeight);
+            diffuseReflectance, 1.0) * (g_EnvironmentData.w > 0.5
+                    ? diffuseWeight : giSkyDiffuseWeight * g_SkyIntensity);
     // Map Blinn-Phong exponent to a roughness approximation for the GGX-prefiltered
     // environment. This is not exact convolution of a Blinn-Phong BRDF.
     float roughness = pow(2.0 / (max(shininess, 0.0) + 2.0), 0.25);
@@ -55,7 +59,7 @@ vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
         #else
             vec3 skySpecular = textureCube(g_SkyMap, direction, lod).rgb * specularReflectance;
         #endif
-        specular = mix(skySpecular, specular, coverage);
+        specular = mix(skySpecular * g_SkyIntensity, specular, coverage);
     } else {
         specular *= coverage;
     }

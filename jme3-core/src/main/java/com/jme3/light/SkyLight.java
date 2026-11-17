@@ -31,6 +31,51 @@ import com.jme3.util.TempVars;
  * shadowing, dynamic occlusion, or multi-bounce solution is implied.
  */
 public class SkyLight extends LightProbe {
+    private float intensity = 1f;
+
+    /**
+     * Returns the environment lighting multiplier, default 1 (unscaled).
+     * @return nonnegative lighting intensity
+     */
+    public float getIntensity() {
+        return intensity;
+    }
+
+    /**
+     * Scales sky diffuse and fallback specular lighting, independently of the
+     * visible background and local reflection probes. No environment recapture
+     * is needed. Existing baked GI is not recomputed. Call on the render thread.
+     * <pre>{@code
+     * // 第一步：获取 SkyFactory 创建的天空上的天光。
+     * SkyLight light = sky.getControl(SkyLightControl.class).getLight();
+     * // 第二步：调节天光；0 关闭贡献，2 加倍，允许大于 1。
+     * light.setIntensity(2f);
+     * // 第三步：恢复默认；保存 J3O 会保留强度，旧文件默认 1。
+     * light.setIntensity(1f);
+     * }</pre>
+     * @param intensity finite, nonnegative multiplier
+     * @throws IllegalArgumentException for negative or non-finite values
+     */
+    public void setIntensity(float intensity) {
+        if (!Float.isFinite(intensity) || intensity < 0f) {
+            throw new IllegalArgumentException("Sky intensity must be finite and nonnegative");
+        }
+        this.intensity = intensity;
+    }
+
+    @Override
+    public void write(com.jme3.export.JmeExporter exporter) throws java.io.IOException {
+        super.write(exporter);
+        exporter.getCapsule(this).write(intensity, "intensity", 1f);
+    }
+
+    @Override
+    public void read(com.jme3.export.JmeImporter importer) throws java.io.IOException {
+        super.read(importer);
+        float stored = importer.getCapsule(this).readFloat("intensity", 1f);
+        intensity = Float.isFinite(stored) && stored >= 0f ? stored : 1f;
+    }
+
     public SkyLight() {
         setName("SkyLight");
         getArea().setRadius(Float.MAX_VALUE);

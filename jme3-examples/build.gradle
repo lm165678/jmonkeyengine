@@ -12,6 +12,17 @@ plugins {
 
 ext.mainClassName = 'jme3test.TestChooser'
 
+tasks.register('exposureSmoke', JavaExec) {
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestExposure'
+    systemProperty 'exposureSmoke', 'true'
+    systemProperty 'exposureSamples', project.findProperty('exposureSamples') ?: '0'
+    if (project.hasProperty('exposureRenderer')) {
+        systemProperty 'exposureRenderer', project.property('exposureRenderer')
+    }
+}
+
 tasks.register('giProbeSmoke', JavaExec) {
     group = 'verification'
     dependsOn 'classes'
@@ -1027,6 +1038,15 @@ tasks.register('giCompactVisibilitySmoke', JavaExec) {
     mainClass = 'jme3test.light.TestGiVisibilityFiltering'
     classpath = sourceSets.main.runtimeClasspath
     systemProperty 'gi.test.compact', 'true'
+    enableAssertions = true
+}
+
+tasks.register('giConfidenceContinuitySmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestGiVisibilityFiltering'
+    classpath = sourceSets.main.runtimeClasspath
+    systemProperty 'gi.test.confidenceSweep', 'true'
     enableAssertions = true
 }
 

@@ -71,6 +71,9 @@ public final class EnvironmentLighting {
         shader.getUniform("g_ShadowAtlas").setValue(VarType.Int, 0);
         shader.getUniform("g_ShadowRecords").setValue(VarType.Int, 0);
         LightProbe diffuse = local != null && local.isDiffuseEnabled() ? local : sky;
+        // Separate sky scaling preserves local probe radiance and stored SH data.
+        shader.getUniform("g_SkyIntensity").setValue(VarType.Float,
+                sky == null ? 1f : sky.getIntensity());
         shader.getUniform("g_EnvironmentSh").setValue(VarType.Vector3Array,
                 diffuse != null && diffuse.isDiffuseEnabled() ? diffuse.getShCoeffs() : ZERO_SH);
         shader.getUniform("g_SkySh").setValue(VarType.Vector3Array,

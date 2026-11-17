@@ -1,11 +1,11 @@
 ShaderNodeDefinitions{
-    ShaderNodeDefinition MultVec3 {      
+    ShaderNodeDefinition MultVec3 {
         Type: Fragment
         Shader GLSL100: Common/MatDefs/ShaderNodes/Math/multVec3.frag
         Documentation{
             Multiplies a vec3 by another vec3
             @input pos1 the first vec3
-            @input pos2 the second vec3            
+            @input pos2 the second vec3
             @output outPos the resulting position
         }
         Input {
@@ -13,7 +13,7 @@ ShaderNodeDefinitions{
             vec3 pos2 vec3(1.0)
         }
         Output {
-            vec2 outPos
+            vec3 outPos
         }
     }
 }

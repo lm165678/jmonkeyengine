@@ -1,0 +1,58 @@
+MaterialDef Lighting Nodes {
+    MaterialParameters {
+        Color Ambient : 0.2 0.2 0.2 1.0
+        Color Diffuse : 1.0 1.0 1.0 1.0
+        Color Specular : 1.0 1.0 1.0 1.0
+        Float Shininess : 16.0
+    }
+    Technique {
+        LightModel MultiPass
+        WorldParameters {
+            WorldViewProjectionMatrix
+            WorldViewMatrix
+            NormalMatrix
+            ViewMatrix
+            LightColor
+            LightPosition
+            LightDirection
+            AmbientLightColor
+        }
+        VertexShaderNodes {
+            ShaderNode LightingVert {
+                Definition : LightingVert : Common/MatDefs/ShaderNodes/Lighting/LightingVert.j3sn
+                InputMappings {
+                    modelPosition = Global.position.xyz
+                    modelNormal = Attr.inNormal
+                    worldViewProjectionMatrix = WorldParam.WorldViewProjectionMatrix
+                    worldViewMatrix = WorldParam.WorldViewMatrix
+                    normalMatrix = WorldParam.NormalMatrix
+                }
+                OutputMappings {
+                    Global.position = projPosition
+                }
+            }
+        }
+        FragmentShaderNodes {
+            ShaderNode Lighting {
+                Definition : Lighting : Common/MatDefs/ShaderNodes/Lighting/Lighting.j3sn
+                InputMappings {
+                    diffuseColor = MatParam.Diffuse
+                    specularColor = MatParam.Specular
+                    ambientColor = MatParam.Ambient
+                    shininess = MatParam.Shininess
+                    viewPosition = LightingVert.viewPosition
+                    viewNormal = LightingVert.viewNormal
+                    viewDir = LightingVert.viewDir
+                    lightColor = WorldParam.LightColor
+                    lightPosition = WorldParam.LightPosition
+                    viewMatrix = WorldParam.ViewMatrix
+                    lightDirection = WorldParam.LightDirection
+                    ambientLightColor = WorldParam.AmbientLightColor
+                }
+                OutputMappings {
+                    Global.color = outColor
+                }
+            }
+        }
+    }
+}

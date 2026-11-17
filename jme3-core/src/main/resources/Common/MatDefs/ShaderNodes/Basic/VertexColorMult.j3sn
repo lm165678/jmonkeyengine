@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexColorMult {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/colorMult.frag
+        Documentation{
+            Multiplies two vec4 colors component-wise in the vertex stage.
+            @input vec4 color1 the first color
+            @input vec4 color2 the second color
+            @output vec4 outColor the product
+        }
+        Input {
+            vec4 color1 vec4(1.0)
+            vec4 color2 vec4(1.0)
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}

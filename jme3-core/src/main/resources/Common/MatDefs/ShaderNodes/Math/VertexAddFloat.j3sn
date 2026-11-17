@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexAddFloat {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/addFloat.glsl
+        Documentation{
+            Adds two floats in the vertex stage.
+            @input float a the first float
+            @input float b the second float
+            @output float result the sum
+        }
+        Input {
+            float a 0.0
+            float b 0.0
+        }
+        Output {
+            float result
+        }
+    }
+}

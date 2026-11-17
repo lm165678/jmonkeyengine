@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexSubtractVec2 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/subtractVec2.glsl
+        Documentation{
+            Subtracts two vec2 values in the vertex stage.
+            @input vec2 a the first vector
+            @input vec2 b the second vector
+            @output vec2 result the difference
+        }
+        Input {
+            vec2 a vec2(0.0)
+            vec2 b vec2(0.0)
+        }
+        Output {
+            vec2 result
+        }
+    }
+}

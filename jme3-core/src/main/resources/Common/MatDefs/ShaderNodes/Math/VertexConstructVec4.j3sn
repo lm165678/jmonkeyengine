@@ -1,0 +1,23 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexConstructVec4 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/constructVec4.glsl
+        Documentation{
+            Constructs a vec4 from scalar channels in the vertex stage.
+            @input float x the x channel
+            @input float y the y channel
+            @input float z the z channel
+            @input float w the w channel
+            @output vec4 result the constructed vector
+        }
+        Input {
+            float x 0.0
+            float y 0.0
+            float z 0.0
+            float w 0.0
+        }
+        Output {
+            vec4 result
+        }
+    }
+}

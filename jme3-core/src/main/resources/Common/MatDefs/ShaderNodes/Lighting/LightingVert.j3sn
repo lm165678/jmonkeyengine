@@ -1,0 +1,31 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition LightingVert {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Lighting/lightingVert.vert
+        Documentation{
+            Computes view-space inputs for the Lighting fragment node.
+            @input vec3 modelPosition the object-space position
+            @input vec3 modelNormal the object-space normal
+            @input mat4 worldViewProjectionMatrix the world-view-projection matrix
+            @input mat4 worldViewMatrix the world-view matrix
+            @input mat3 normalMatrix the view-space normal matrix
+            @output vec4 projPosition the projected position
+            @output vec3 viewPosition the view-space position
+            @output vec3 viewNormal the view-space normal
+            @output vec3 viewDir the direction toward the camera
+        }
+        Input {
+            vec3 modelPosition
+            vec3 modelNormal
+            mat4 worldViewProjectionMatrix
+            mat4 worldViewMatrix
+            mat3 normalMatrix
+        }
+        Output {
+            vec4 projPosition
+            vec3 viewPosition
+            vec3 viewNormal
+            vec3 viewDir
+        }
+    }
+}

@@ -1,0 +1,17 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexNormalizeVec2 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/normalizeVec2.glsl
+        Documentation{
+            Normalizes a vec2 in the vertex stage.
+            @input vec2 value the input vector
+            @output vec2 result the normalized vector
+        }
+        Input {
+            vec2 value vec2(1.0, 0.0)
+        }
+        Output {
+            vec2 result
+        }
+    }
+}

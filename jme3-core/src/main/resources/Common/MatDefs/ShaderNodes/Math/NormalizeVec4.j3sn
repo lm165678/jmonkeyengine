@@ -1,0 +1,17 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition NormalizeVec4 {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/normalizeVec4.glsl
+        Documentation{
+            Normalizes a vec4.
+            @input vec4 value the input vector
+            @output vec4 result the normalized vector
+        }
+        Input {
+            vec4 value vec4(1.0, 0.0, 0.0, 0.0)
+        }
+        Output {
+            vec4 result
+        }
+    }
+}

@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexColorAdd {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/colorAdd.frag
+        Documentation{
+            Adds two vec4 colors in the vertex stage.
+            @input vec4 color1 the first color
+            @input vec4 color2 the second color
+            @output vec4 outColor the sum
+        }
+        Input {
+            vec4 color1 vec4(1.0)
+            vec4 color2 vec4(1.0)
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}

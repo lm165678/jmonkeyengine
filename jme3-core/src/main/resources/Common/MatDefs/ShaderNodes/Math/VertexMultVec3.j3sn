@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexMultVec3 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/multVec3.frag
+        Documentation{
+            Multiplies two vec3 values component-wise in the vertex stage.
+            @input vec3 pos1 the first vector
+            @input vec3 pos2 the second vector
+            @output vec3 outPos the product
+        }
+        Input {
+            vec3 pos1 vec3(1.0)
+            vec3 pos2 vec3(1.0)
+        }
+        Output {
+            vec3 outPos
+        }
+    }
+}

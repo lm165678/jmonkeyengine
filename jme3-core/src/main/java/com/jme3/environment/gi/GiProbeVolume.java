@@ -141,6 +141,11 @@ public final class GiProbeVolume extends Node {
      * Enables visibility-weight stabilization and square-root irradiance mixing.
      * Default false preserves strict visibility and linear mixing. This runtime
      * option does not change baked SH/distance data or enable dynamic DDGI.
+     * The default eight-neighbor path uses a continuous linear visibility
+     * confidence with a 5% fallback, without cubing/crushing weak confidence.
+     * Wide and surface layouts retain their existing confidence weighting.
+     * This favors smooth transitions over strict occlusion and may change local
+     * contrast. No additional distance texture reads or rebake are required.
      * Valid but occluded probes receive a small weight: this can reduce black
      * patches but may increase thin-wall leakage. Invalid probes remain excluded.
      * Change on the render thread; generated adaptive children inherit the value.

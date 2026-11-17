@@ -1,0 +1,39 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition Lighting {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Lighting/lighting.frag
+        Documentation{
+            Blinn-Phong direct and ambient lighting for a MultiPass forward technique.
+            @input vec4 diffuseColor the diffuse material color
+            @input vec4 specularColor the specular material color
+            @input vec4 ambientColor the ambient material color
+            @input float shininess the specular exponent
+            @input vec3 viewPosition the view-space position
+            @input vec3 viewNormal the view-space normal
+            @input vec3 viewDir the direction toward the camera
+            @input vec4 lightColor the current light color
+            @input vec4 lightPosition the current world-space light position
+            @input mat4 viewMatrix the camera view matrix
+            @input vec4 lightDirection the current view-space spot direction
+            @input vec4 ambientLightColor the scene ambient light
+            @output vec4 outColor the lit fragment color
+        }
+        Input {
+            vec4 diffuseColor vec4(1.0)
+            vec4 specularColor vec4(1.0)
+            vec4 ambientColor vec4(0.2, 0.2, 0.2, 1.0)
+            float shininess 16.0
+            vec3 viewPosition
+            vec3 viewNormal
+            vec3 viewDir
+            vec4 lightColor
+            vec4 lightPosition
+            mat4 viewMatrix
+            vec4 lightDirection
+            vec4 ambientLightColor
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}

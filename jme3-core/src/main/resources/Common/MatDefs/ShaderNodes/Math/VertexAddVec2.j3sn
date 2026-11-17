@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexAddVec2 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/addVec2.frag
+        Documentation{
+            Adds two vec2 values in the vertex stage.
+            @input vec2 coord1 the first vector
+            @input vec2 coord2 the second vector
+            @output vec2 outCoord the sum
+        }
+        Input {
+            vec2 coord1 vec2(0.0)
+            vec2 coord2 vec2(0.0)
+        }
+        Output {
+            vec2 outCoord
+        }
+    }
+}

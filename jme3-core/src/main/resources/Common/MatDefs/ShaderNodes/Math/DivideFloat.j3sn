@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition DivideFloat {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/divideFloat.glsl
+        Documentation{
+            Divides the first float by the second.
+            @input float a the numerator
+            @input float b the denominator
+            @output float result the quotient
+        }
+        Input {
+            float a 0.0
+            float b 1.0
+        }
+        Output {
+            float result
+        }
+    }
+}

@@ -276,10 +276,18 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
         if (stabilized) {
             // Valid probes retain a small fallback contribution. This is an
             // explicit quality/leakage tradeoff, not a new visibility estimate.
-            float confidence = normalWeight * max(0.05, visibilityWeight);
-            float lowWeight = min(1.0, confidence / 0.2);
-            confidence *= lowWeight * lowWeight;
-            weight *= confidence;
+            if (!wide && !surfaceLayout) {
+                // Confidence must vary continuously with visibility. Cubing it
+                // and crushing small weights again sharpens a smooth distance
+                // distribution into almost binary bright/dark probe selection.
+                // Keep the existing stabilized fallback, with a linear ramp.
+                weight *= normalWeight * mix(0.05, 1.0, visibility);
+            } else {
+                float confidence = normalWeight * max(0.05, visibilityWeight);
+                float lowWeight = min(1.0, confidence / 0.2);
+                confidence *= lowWeight * lowWeight;
+                weight *= confidence;
+            }
         } else {
             weight *= normalWeight * visibilityWeight;
         }

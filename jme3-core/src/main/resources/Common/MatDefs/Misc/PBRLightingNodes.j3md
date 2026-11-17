@@ -1,0 +1,60 @@
+MaterialDef PBR Lighting Nodes {
+    MaterialParameters {
+        Color BaseColor : 1.0 1.0 1.0 1.0
+        Float Metallic : 0.0
+        Float Roughness : 0.5
+        Float Ao : 1.0
+    }
+    Technique {
+        LightModel MultiPass
+        WorldParameters {
+            WorldViewProjectionMatrix
+            WorldMatrix
+            WorldNormalMatrix
+            CameraPosition
+            ViewMatrixInverse
+            LightColor
+            LightPosition
+            LightDirection
+            AmbientLightColor
+        }
+        VertexShaderNodes {
+            ShaderNode PBRLightingVert {
+                Definition : PBRLightingVert : Common/MatDefs/ShaderNodes/PBRLighting/PBRLightingVert.j3sn
+                InputMappings {
+                    modelPosition = Global.position.xyz
+                    modelNormal = Attr.inNormal
+                    worldViewProjectionMatrix = WorldParam.WorldViewProjectionMatrix
+                    worldMatrix = WorldParam.WorldMatrix
+                    worldNormalMatrix = WorldParam.WorldNormalMatrix
+                    cameraPosition = WorldParam.CameraPosition
+                }
+                OutputMappings {
+                    Global.position = projPosition
+                }
+            }
+        }
+        FragmentShaderNodes {
+            ShaderNode PBRLighting {
+                Definition : PBRLighting : Common/MatDefs/ShaderNodes/PBRLighting/PBRLighting.j3sn
+                InputMappings {
+                    baseColor = MatParam.BaseColor
+                    metallic = MatParam.Metallic
+                    roughness = MatParam.Roughness
+                    ao = MatParam.Ao
+                    worldPosition = PBRLightingVert.worldPosition
+                    worldNormal = PBRLightingVert.worldNormal
+                    viewDir = PBRLightingVert.viewDir
+                    lightColor = WorldParam.LightColor
+                    lightPosition = WorldParam.LightPosition
+                    viewMatrixInverse = WorldParam.ViewMatrixInverse
+                    lightDirection = WorldParam.LightDirection
+                    ambientLightColor = WorldParam.AmbientLightColor
+                }
+                OutputMappings {
+                    Global.color = outColor
+                }
+            }
+        }
+    }
+}

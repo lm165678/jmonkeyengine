@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexMultVec2 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/multVec2.frag
+        Documentation{
+            Multiplies two vec2 values component-wise in the vertex stage.
+            @input vec2 coord1 the first vector
+            @input vec2 coord2 the second vector
+            @output vec2 outCoord the product
+        }
+        Input {
+            vec2 coord1 vec2(1.0)
+            vec2 coord2 vec2(1.0)
+        }
+        Output {
+            vec2 outCoord
+        }
+    }
+}

@@ -1,0 +1,21 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexColorMix {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/colorMix.frag
+        Documentation{
+            Linearly mixes two vec4 colors in the vertex stage.
+            @input vec4 color1 the first color
+            @input vec4 color2 the second color
+            @input float factor the interpolation factor
+            @output vec4 outColor the mixed color
+        }
+        Input {
+            vec4 color1 vec4(1.0)
+            vec4 color2 vec4(1.0)
+            float factor 0.5
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}

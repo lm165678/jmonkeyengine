@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition CrossVec3 {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/crossVec3.glsl
+        Documentation{
+            Computes the cross product of two vec3 values.
+            @input vec3 a the first vector
+            @input vec3 b the second vector
+            @output vec3 result the cross product
+        }
+        Input {
+            vec3 a vec3(1.0, 0.0, 0.0)
+            vec3 b vec3(0.0, 1.0, 0.0)
+        }
+        Output {
+            vec3 result
+        }
+    }
+}

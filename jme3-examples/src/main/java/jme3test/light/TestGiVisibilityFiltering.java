@@ -30,19 +30,27 @@ import java.nio.ByteBuffer;
  * remain blocked. The normal hemisphere and spatial-stencil tests must also
  * remain valid when the angular support is widened.
  * The companion {@code giCompactVisibilitySmoke} task retains eight probes and
- * four moment taps. It checks planar illumination and fully blocked probes on
+ * four bilinear moment taps. It checks planar illumination and fully blocked probes on
  * the same four paths and two materials. The compact moment filter can still
  * merge foreground/background distributions; it does not claim the strict
  * checkerboard occlusion guarantee of the wide reference mode.
  * These synthetic cases do not validate curved receivers or a full scene's
  * indirect-light energy. Compare actual scene captures with matching shadow,
  * stable-blending and post-processing settings before accepting shader changes.
+ * Run {@code gradlew :jme3-examples:giConfidenceContinuitySmoke}, or this entry
+ * with {@code -Dgi.test.confidenceSweep=true}, to sweep partial
+ * visibility over 33 steps with unequal probe energies on all four paths and
+ * both material models. GI_CONFIDENCE_CONTINUITY_PASS verifies monotone, gradual
+ * stabilized response rather than a dark plateau followed by a steep rise.
  * Existing bakes and the default eight-probe mode remain usable.
  * Volume diffuse evaluation applies an angular heat-kernel window (SH bands
  * 1 and 2 scaled by 0.5 and 0.125). The constant band, visibility moments and
  * sky visibility are unchanged. This smooths directional contrast, not spatial
  * occlusion. Bounce capture bypasses the window to avoid repeated filtering.
  * Raw CPU evaluateProbeIrradiance remains the unwindowed data diagnostic.
+ * The compact path retains four moment reads per probe. Increasing the filter
+ * to sixteen taps was rejected for its frame cost and remaining scene artifacts.
+ * A passing synthetic test does not establish correctness of the baked field.
  * <pre>
  * 第一步：普通应用加载包含 GI 的 J3O，自动场景服务会接入可见性过滤。
  * 第二步：无需平滑开关，也无需重烘焙；关闭 GI 则恢复没有体积间接光的结果。
@@ -53,10 +61,18 @@ import java.nio.ByteBuffer;
  * 第七步：原场景保持八探针，无需重新烘焙；方向低通保留平均能量，但会改变局部明暗。
  * 第八步：运行时自动应用方向低通，天空可见性及多次反射捕获不受此滤波影响。
  * 第九步：关闭 GI 可恢复无体积间接光的对照；滤波没有单独开关，已有烘焙文件不被修改。
+ * 第十步：默认保持八探针、每探针四次距离图采样；对照真实场景的遮挡、
+ *         接触处及 GPU 耗时，勿将增加采样或提升亮度作为通过标准。
+ * 第十一步：启用 volume.setStabilizedBlending(true)，八探针使用连续可见性置信度；
+ *         无需重烘焙，不增加距离图读取；在渲染线程恢复 false 可回到严格遮挡模式。
+ *         稳定模式保留少量被遮挡探针贡献，需同时检查薄墙漏光；宽邻域和表面布局保持原行为。
  * </pre>
  */public final class TestGiVisibilityFiltering extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
         RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
+    private static final boolean CONFIDENCE_SWEEP = Boolean.getBoolean("gi.test.confidenceSweep");
+    private static final int CONFIDENCE_STEPS = 33;
+    private final int[] confidenceValues = new int[CONFIDENCE_STEPS];
     private Geometry receiver;
     private GiProbeData data;
     private GiProbeData.Binding binding;
@@ -107,6 +123,10 @@ import java.nio.ByteBuffer;
 
     @Override
     public void simpleUpdate(float tpf) {
+        if (CONFIDENCE_SWEEP) {
+            updateConfidenceSweep();
+            return;
+        }
         if (frame % 3 != 0) {
             return;
         }
@@ -201,10 +221,32 @@ import java.nio.ByteBuffer;
 
     @Override
     public void simpleRender(RenderManager manager) {
+        if (CONFIDENCE_SWEEP) {
+            readConfidenceSweep();
+            return;
+        }
         if (frame % 3 == 2) {
             ByteBuffer pixels = BufferUtils.createByteBuffer(64 * 64 * 4);
             renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
             int value = pixels.get((32 * 64 + 32) * 4) & 255;
+            if (COMPACT) {
+                // A flat synthetic receiver has no isolated one-pixel occluders.
+                // Catch negative cubic weights/NaNs near angular texel borders,
+                // which a single center-pixel assertion can miss.
+                for (int y = 8; y < 56; y++) {
+                    for (int x = 8; x < 56; x++) {
+                        int center = pixels.get((y * 64 + x) * 4) & 255;
+                        int adjacent = Math.min(
+                                pixels.get((y * 64 + x - 1) * 4) & 255,
+                                pixels.get((y * 64 + x + 1) * 4) & 255);
+                        adjacent = Math.min(adjacent, pixels.get(((y - 1) * 64 + x) * 4) & 255);
+                        adjacent = Math.min(adjacent, pixels.get(((y + 1) * 64 + x) * 4) & 255);
+                        if (adjacent - center > 8) {
+                            throw new AssertionError("Isolated compact visibility dropout at " + x + "," + y);
+                        }
+                    }
+                }
+            }
             if (frame / 3 >= 56) {
                 int step = (frame / 3 - 56) % PLANE_STEPS;
                 planeValues[step] = value;
@@ -254,5 +296,102 @@ import java.nio.ByteBuffer;
         }
         frame++;
     }
-}
+    /** Sweep uncertainty while holding geometry and baked radiance fixed. */
+    private void updateConfidenceSweep() {
+        if (frame % 3 != 0) {
+            return;
+        }
+        int phase = frame / 3;
+        int step = phase % CONFIDENCE_STEPS;
+        int scenario = phase / CONFIDENCE_STEPS;
+        viewPort.setRenderPath(PATHS[scenario % 4]);
+        if (binding != null) {
+            binding.close();
+        }
+        Material material = new Material(assetManager, scenario < 4
+                ? "Common/MatDefs/Light/Lighting.j3md" : "Common/MatDefs/Light/PBRLighting.j3md");
+        if (scenario < 4) {
+            material.setBoolean("UseMaterialColors", true);
+            material.setColor("Diffuse", ColorRGBA.White);
+            material.setColor("Ambient", ColorRGBA.Black);
+            material.setColor("Specular", ColorRGBA.Black);
+        } else {
+            material.setColor("BaseColor", ColorRGBA.White);
+            material.setFloat("Metallic", 0f);
+            material.setFloat("Roughness", 1f);
+        }
+        receiver.setMaterial(material);
+        binding = data.bind(material, new Vector3f(-2, -2, -2), 0);
+        Vector4f atlas = ((Vector4f) material.getParam("GiAtlas").getValue()).clone();
+        atlas.z = 4.125f;
+        material.setVector4("GiAtlas", atlas);
+        Image source = material.getTextureParam("GiIrradiance").getTextureValue().getImage();
+        ByteBuffer sh = BufferUtils.createByteBuffer(source.getData(0).capacity());
+        sh.put(source.getData(0).duplicate().clear()).clear();
+        int columns = source.getWidth() / 9;
+        int width = columns * 4;
+        int height = source.getHeight() * 4;
+        ByteBuffer moments = BufferUtils.createByteBuffer(width * height * 16);
+        float probability = (float) step / (CONFIDENCE_STEPS - 1);
+        float distanceScale = ((Vector2f) material.getParam("GiEncoding").getValue()).x;
+        float squaredDistance = (4f + 1.9f * 1.9f + 4f) / (distanceScale * distanceScale);
+        float variance = probability < 1f ? squaredDistance * probability / (1f - probability) : 0f;
+        for (int probe = 0; probe < 8; probe++) {
+            boolean bright = probe % 2 == 0;
+            for (int c = 0; c < 9; c++) {
+                int offset = (probe / columns * source.getWidth() + probe % columns * 9 + c) * 16;
+                for (int channel = 0; channel < 3; channel++) {
+                    sh.putFloat(offset + channel * 4,
+                            sh.getFloat(offset + channel * 4) * (bright ? 1f : 0.1f));
+                }
+            }
+            float mean = bright && probability < 1f ? 0f : 100f;
+            for (int y = 0; y < 4; y++) {
+                for (int x = 0; x < 4; x++) {
+                    int offset = ((probe / columns * 4 + y) * width + probe % columns * 4 + x) * 16;
+                    moments.putFloat(offset, mean);
+                    moments.putFloat(offset + 4, mean * mean);
+                    moments.putFloat(offset + 8, bright ? (float) Math.sqrt(variance) : 0f);
+                    moments.putFloat(offset + 12, 1f);
+                }
+            }
+        }
+        material.setTexture("GiIrradiance", new Texture2D(new Image(Image.Format.RGBA32F,
+                source.getWidth(), source.getHeight(), sh, ColorSpace.Linear)));
+        material.setTexture("GiMoments", new Texture2D(new Image(Image.Format.RGBA32F,
+                width, height, moments, ColorSpace.Linear)));
+    }
 
+    private void readConfidenceSweep() {
+        if (frame % 3 == 2) {
+            ByteBuffer pixels = BufferUtils.createByteBuffer(64 * 64 * 4);
+            renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
+            int step = frame / 3 % CONFIDENCE_STEPS;
+            confidenceValues[step] = pixels.get((32 * 64 + 32) * 4) & 255;
+            if (step == CONFIDENCE_STEPS - 1) {
+                int jump = 0;
+                for (int i = 1; i < CONFIDENCE_STEPS; i++) {
+                    if (confidenceValues[i] < confidenceValues[i - 1]) {
+                        throw new AssertionError("Visibility confidence must not reverse illumination");
+                    }
+                    jump = Math.max(jump, confidenceValues[i] - confidenceValues[i - 1]);
+                }
+                int range = confidenceValues[CONFIDENCE_STEPS - 1] - confidenceValues[0];
+                int mid = confidenceValues[CONFIDENCE_STEPS / 2] - confidenceValues[0];
+                System.out.println("GI_CONFIDENCE jump=" + jump + " values="
+                        + java.util.Arrays.toString(confidenceValues));
+                if (range < 10 || jump > 3 || mid < range * 0.5f) {
+                    throw new AssertionError("Stabilized blend crushes partial visibility into a dark plateau");
+                }
+            }
+            if (frame == 8 * CONFIDENCE_STEPS * 3 - 1) {
+                binding.close();
+                data.dispose();
+                System.out.println("GI_CONFIDENCE_CONTINUITY_PASS");
+                stop();
+            }
+        }
+        frame++;
+    }
+
+}

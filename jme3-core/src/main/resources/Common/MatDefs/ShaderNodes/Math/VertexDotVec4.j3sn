@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexDotVec4 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/dotVec4.glsl
+        Documentation{
+            Computes a vec4 dot product in the vertex stage.
+            @input vec4 a the first vector
+            @input vec4 b the second vector
+            @output float result the dot product
+        }
+        Input {
+            vec4 a vec4(0.0)
+            vec4 b vec4(0.0)
+        }
+        Output {
+            float result
+        }
+    }
+}

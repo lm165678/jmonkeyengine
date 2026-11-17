@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexPow {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/pow.frag
+        Documentation{
+            Raises a float to a power in the vertex stage.
+            @input float value the base
+            @input float factor the exponent
+            @output float outFloat the result
+        }
+        Input {
+            float value 1.0
+            float factor 1.0
+        }
+        Output {
+            float outFloat
+        }
+    }
+}

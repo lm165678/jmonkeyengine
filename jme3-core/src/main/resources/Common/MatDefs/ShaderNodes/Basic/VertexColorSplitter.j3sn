@@ -1,0 +1,23 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexColorSplitter {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/colorSplitter.frag
+        Documentation{
+            Splits a vec4 into four float channels in the vertex stage.
+            @input vec4 color the color to split
+            @output float red the red channel
+            @output float green the green channel
+            @output float blue the blue channel
+            @output float alpha the alpha channel
+        }
+        Input {
+            vec4 color vec4(1.0)
+        }
+        Output {
+            float red
+            float green
+            float blue
+            float alpha
+        }
+    }
+}

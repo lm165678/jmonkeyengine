@@ -1,0 +1,23 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexConstructColor {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/constructColor.frag
+        Documentation{
+            Constructs a vec4 from four float channels in the vertex stage.
+            @input float red the red channel
+            @input float green the green channel
+            @input float blue the blue channel
+            @input float alpha the alpha channel
+            @output vec4 outColor the constructed color
+        }
+        Input {
+            float red 1.0
+            float green 1.0
+            float blue 1.0
+            float alpha 1.0
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}

@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition DotVec3 {
+        Type: Fragment
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/dotVec3.glsl
+        Documentation{
+            Computes the dot product of two vec3 values.
+            @input vec3 a the first vector
+            @input vec3 b the second vector
+            @output float result the dot product
+        }
+        Input {
+            vec3 a vec3(0.0)
+            vec3 b vec3(0.0)
+        }
+        Output {
+            float result
+        }
+    }
+}

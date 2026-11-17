@@ -1,0 +1,17 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexOneMinus {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/oneMinus.frag
+        Documentation{
+            Computes one minus a float in the vertex stage.
+            @input float value the input value
+            @output float outFloat the result
+        }
+        Input {
+            float value 0.0
+        }
+        Output {
+            float outFloat
+        }
+    }
+}

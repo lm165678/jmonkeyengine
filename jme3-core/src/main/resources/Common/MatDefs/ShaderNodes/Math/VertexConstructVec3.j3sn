@@ -1,0 +1,21 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexConstructVec3 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/constructVec3.frag
+        Documentation{
+            Constructs a vec3 from three floats in the vertex stage.
+            @input float x the x channel
+            @input float y the y channel
+            @input float z the z channel
+            @output vec3 outVec the constructed vector
+        }
+        Input {
+            float x 0.0
+            float y 0.0
+            float z 0.0
+        }
+        Output {
+            vec3 outVec
+        }
+    }
+}

@@ -1,0 +1,19 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexConstructVec2 {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Math/constructVec2.frag
+        Documentation{
+            Constructs a vec2 from two floats in the vertex stage.
+            @input float x the x channel
+            @input float y the y channel
+            @output vec2 outVec the constructed vector
+        }
+        Input {
+            float x 0.0
+            float y 0.0
+        }
+        Output {
+            vec2 outVec
+        }
+    }
+}

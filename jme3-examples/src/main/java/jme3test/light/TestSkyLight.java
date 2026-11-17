@@ -23,6 +23,9 @@ import java.util.ArrayList;
  * Disable the control for background-only rendering. Request rebake after sky
  * texture changes and separately rebake any static GI volumes. Rendering and
  * lifecycle changes run on the application's render thread.
+ * SkyLight.get/setIntensity scales diffuse and fallback reflections without
+ * changing the background or recapturing maps. Default 1; 0 disables the
+ * contribution. The final smoke phases check 0, 0.5 and restored 1 in every path.
  */
 public final class TestSkyLight extends SimpleApplication {
     private int frames;
@@ -33,6 +36,7 @@ public final class TestSkyLight extends SimpleApplication {
     private Geometry target;
     private Spatial skySpatial;
     private SkyLightControl skyLighting;
+    private com.jme3.light.LightProbe localReflection;
     private final RenderPath[] paths = {RenderPath.Forward, RenderPath.Deferred,
         RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
 
@@ -181,10 +185,24 @@ public final class TestSkyLight extends SimpleApplication {
             reflection.setDiffuseEnabled(false);
             reflection.setReady(true);
             rootNode.addLight(reflection);
+            localReflection = reflection;
         }
         if (frames >= 36 && frames < 100 && frames % 4 == 0) {
             viewPort.setRenderPath(paths[((frames - 36) / 4) % 4]);
             selectMaterial(((frames - 36) / 16) % 2 == 1);
+        }
+        if (frames == 100) {
+            rootNode.removeLight(localReflection);
+            binding.close();
+            binding = null;
+            data = null;
+        }
+        if (frames >= 100 && frames % 4 == 0) {
+            // 第五步：渲染线程调节天光，无需重新捕捉；最后恢复默认 1。
+            int phase = (frames - 100) / 32;
+            skyLighting.getLight().setIntensity(phase == 0 ? 0f : phase == 1 ? 0.5f : 1f);
+            viewPort.setRenderPath(paths[((frames - 100) / 4) % 4]);
+            selectMaterial(((frames - 100) / 16) % 2 == 1);
         }
     }
 
@@ -196,13 +214,20 @@ public final class TestSkyLight extends SimpleApplication {
             int index = (32 * 64 + 32) * 4;
             int red = data.get(index) & 255;
             int green = data.get(index + 1) & 255;
-            if ((frames < 32 || frames >= 36) && !(red > green && green > 0)) {
+            if ((frames < 32 || frames >= 36 && frames < 100) && !(red > green && green > 0)) {
                 throw new AssertionError("Missing HDR sky lighting at frame " + frames + ": " + red + "," + green);
             }
             if (frames >= 32 && frames < 36 && red != 0) {
                 throw new AssertionError("Disabled sky still lights receiver: " + red);
             }
-            if (frames != 35) {
+            if (frames >= 100) {
+                int model = ((frames - 100) / 16) % 2;
+                float intensity = skyLighting.getLight().getIntensity();
+                if (Math.abs(red - baseline[model][0] * intensity) > 2
+                        || Math.abs(green - baseline[model][1] * intensity) > 2) {
+                    throw new AssertionError("Sky intensity mismatch at frame " + frames);
+                }
+            } else if (frames != 35) {
                 int model = frames < 32 ? frames / 16 : ((frames - 36) / 16) % 2;
                 if (baseline[model] == null) {
                     baseline[model] = new int[]{red, green};
@@ -214,7 +239,7 @@ public final class TestSkyLight extends SimpleApplication {
             System.out.println("SKY_LIGHT_CHECK frame=" + frames + " rgb=" + red + "," + green);
         }
         frames++;
-        if (frames == 100) {
+        if (frames == 196) {
             System.out.println("SKY_LIGHT_PASS png=" + png);
             stop();
         }

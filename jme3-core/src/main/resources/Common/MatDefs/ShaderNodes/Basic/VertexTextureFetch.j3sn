@@ -1,0 +1,22 @@
+ShaderNodeDefinitions{
+    ShaderNodeDefinition VertexTextureFetch {
+        Type: Vertex
+        Shader GLSL100: Common/MatDefs/ShaderNodes/Basic/vertexTexture.vert
+        Shader GLSL150: Common/MatDefs/ShaderNodes/Basic/vertexTexture150.vert
+        Documentation{
+            Fetches a texture with an explicit LOD in the vertex stage.
+            @input sampler2D textureMap the texture to sample
+            @input vec2 texCoord the texture coordinates
+            @input float lod the explicit mip level
+            @output vec4 outColor the sampled color
+        }
+        Input {
+            sampler2D textureMap
+            vec2 texCoord vec2(0.0)
+            float lod 0.0
+        }
+        Output {
+            vec4 outColor
+        }
+    }
+}
