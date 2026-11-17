@@ -1,3 +1,8 @@
+## 2026-11-17 paired implementation revisions
+- Engine implementation: `6f31fb125635c32e85184576f514dbf353aff27b` on `dev_fix_lightprobe_issue`.
+- SDK implementation: `029771dd08dc37e05ecc88ee012d2e7a9fdf8404` on `master` (also includes the preceding offline texture-tool archive commit).
+- These paired revisions include the rendering/performance, project asset lookup and Nifty changes described below, plus all three agents' context Markdown files across the repositories. Documentation-only commits follow these implementation revisions. User reported normal SDK behavior before handoff; this commit/push task did not build SDK.
+
 ## 2026-11-17 user verification and fork handoff
 - User reports the SDK/model preview and performance are now normal after local rebuilding/testing. This is user verification; no new SDK build was run during the commit/push task.
 - Include all pending source fixes and other agents' code_buddy_agents*.md context files. Keep workstation proxy settings and generated engine exports/templates/packaging outputs local. The updated versioned Nifty editor dependency is part of its source integration fix.
