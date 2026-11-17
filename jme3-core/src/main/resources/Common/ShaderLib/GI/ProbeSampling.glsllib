@@ -300,12 +300,12 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
             weightScale = weight;
         }
         weight /= weightScale;
-        vec3 irradiance = giEvaluateSh9(c0.rgb, c1.rgb, c2.rgb, c3.rgb,
+        vec3 irradiance = giEvaluateDiffuseSh9(c0.rgb, c1.rgb, c2.rgb, c3.rgb,
                 giReadCoefficient(probe, 4.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 5.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 6.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 7.0, atlasInfo, dimensions).rgb,
-                giReadCoefficient(probe, 8.0, atlasInfo, dimensions).rgb, normal) * encoding.y;
+                giReadCoefficient(probe, 8.0, atlasInfo, dimensions).rgb, normal, m_GiBakeBounce ? 1.0 : 0.5) * encoding.y;
         if (separated) {
             vec3 skyCoefficients[9];
             vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));

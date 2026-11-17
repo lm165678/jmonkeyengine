@@ -23,6 +23,20 @@ vec3 giEvaluateSh9(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4,
             c5 * 1.0925484306, c6 * 0.3153915653, c7 * 1.0925484306,
             c8 * 0.5462742153, n);
 }
+// Angular heat-kernel window for diffuse volume irradiance. The l=0 band
+// is unchanged; exp(-l*(l+1)*log(2)/2) gives 1/2 for l=1 and 1/8
+// for l=2. This preserves the spherical mean and softens truncated-SH
+// directional cancellation without adding a brightness floor or disabling
+// probe visibility. Use band1=0.5 for display, 1.0 for bounce captures to
+// avoid repeatedly filtering feedback. Not for scalar sky visibility.
+vec3 giEvaluateDiffuseSh9(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4,
+        vec3 c5, vec3 c6, vec3 c7, vec3 c8, vec3 n, float band1) {
+    float band2 = band1 * band1 * band1;
+    return giEvaluateSh9(c0, c1 * band1, c2 * band1, c3 * band1,
+            c4 * band2, c5 * band2, c6 * band2, c7 * band2,
+            c8 * band2, n);
+}
+
 vec3 shNativeIrradiance(vec3 c[9], vec3 n) {
     return 3.14159265359 * shEvaluatePolynomial(c[0], c[1], c[2], c[3],
             c[4], c[5], c[6], c[7], c[8], n);

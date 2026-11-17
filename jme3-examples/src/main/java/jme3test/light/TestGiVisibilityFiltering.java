@@ -38,6 +38,11 @@ import java.nio.ByteBuffer;
  * indirect-light energy. Compare actual scene captures with matching shadow,
  * stable-blending and post-processing settings before accepting shader changes.
  * Existing bakes and the default eight-probe mode remain usable.
+ * Volume diffuse evaluation applies an angular heat-kernel window (SH bands
+ * 1 and 2 scaled by 0.5 and 0.125). The constant band, visibility moments and
+ * sky visibility are unchanged. This smooths directional contrast, not spatial
+ * occlusion. Bounce capture bypasses the window to avoid repeated filtering.
+ * Raw CPU evaluateProbeIrradiance remains the unwindowed data diagnostic.
  * <pre>
  * 第一步：普通应用加载包含 GI 的 J3O，自动场景服务会接入可见性过滤。
  * 第二步：无需平滑开关，也无需重烘焙；关闭 GI 则恢复没有体积间接光的结果。
@@ -45,7 +50,9 @@ import java.nio.ByteBuffer;
  * 第四步：面背后探针即使距离图判断可见也不得贡献；普通模式和稳定模式均验证。
  * 第五步：旧平滑标志不再启用漏光权重。绑定在渲染线程释放。
  * 第六步：运行 giCompactVisibilitySmoke 检查默认八探针的平面照明和完整遮挡。
- * 第七步：原场景保持八探针及原亮度，无需重新烘焙；模型法线贴图仍用于照明。
+ * 第七步：原场景保持八探针，无需重新烘焙；方向低通保留平均能量，但会改变局部明暗。
+ * 第八步：运行时自动应用方向低通，天空可见性及多次反射捕获不受此滤波影响。
+ * 第九步：关闭 GI 可恢复无体积间接光的对照；滤波没有单独开关，已有烘焙文件不被修改。
  * </pre>
  */public final class TestGiVisibilityFiltering extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
