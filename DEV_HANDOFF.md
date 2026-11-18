@@ -358,3 +358,9 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 ## 2026-11-18 fork source snapshot
 - User requested committing and pushing current engine and SDK source changes to the existing lm165678 forks. Includes lighting/GI, editor/UI, postprocessing source, tests, icons and handoff/roadmap changes. Generated archives, extracted assets/native libraries, automatic SDK version metadata and the local engine proxy remain outside this source snapshot.
 - This Git operation does not add build or runtime validation. Earlier per-feature results and limitations remain applicable; not a fully validated binary release. Paired implementation hashes are recorded in a following documentation commit.
+
+
+## 2026-11-18 paired implementation snapshot
+- Engine implementation: 619ed3e24d8c2bc1012d928ee22b46fe97641a06 (dev_fix_lightprobe_issue).
+- SDK implementation: 788da869f934480e11e38d612ad5b74117de5929 (master).
+- These are paired source snapshots; the following commits only record this pairing. Prior validation results and limitations remain applicable. No additional full SDK build or binary deployment for this Git operation.
