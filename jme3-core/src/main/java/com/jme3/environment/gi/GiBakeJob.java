@@ -337,7 +337,7 @@ public final class GiBakeJob implements AutoCloseable {
         if (settings.sceneRevision.isEmpty()) {
             throw new IllegalStateException("Set sceneRevision for checkpoint use");
         }
-        return "sky-separated-v2:" + skyState + ":" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
+        return "sky-total-v3:" + skyState + ":" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
                 + ":" + settings.captureSize + ":" + settings.radianceSamples + ":" + settings.visibilityResolution
                 + ":" + settings.visibilitySamples + ":" + settings.near + ":" + settings.far
                 + ":" + settings.visibilityCone + ":" + settings.probeClearance + ":" + settings.relativeProbeClearance + ":" + settings.classifyProbes

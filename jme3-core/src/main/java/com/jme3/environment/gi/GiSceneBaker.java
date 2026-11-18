@@ -26,7 +26,7 @@ import java.util.function.IntConsumer;
  * GiSceneBaker.Settings quality = new GiSceneBaker.Settings();
  * quality.captureSize = 64;
  * quality.far = 200;
- * // 第三步：separateSky 默认开启，分开保存反弹光与天空可见性；烘焙；默认逐灯阴影，可在 configureCapture 中覆盖视口阴影配置。
+ * // 第三步：separateSky 默认关闭，保存包含天空的完整漫反射；设为 true 可恢复分离模式；烘焙；默认逐灯阴影，可在 configureCapture 中覆盖视口阴影配置。
  * GiProbeData data = GiSceneBaker.bake(renderManager, rootNode, volume, quality,
  *         capture -> { }, () -> false, completed -> { });
  * // 第四步：绑定并保留恢复句柄；保存 volume 可连同烘焙资源一起序列化。
@@ -48,13 +48,15 @@ import java.util.function.IntConsumer;
  * never share live processors. Geometry with ShadowMode.Off remains unshadowed.
  * Do not add tone mapping or display transforms. Capture uses raster shadow maps,
  * not a path-traced solver. shadowByteBudget covers depth maps and their atlas.
- * New bakes separate directly visible sky from surface radiance. Runtime adds
+ * New bakes include directly visible sky in total diffuse irradiance. Within
+ * volume coverage this replaces runtime sky diffuse; sky specular stays separate.
+ * The opt-in separateSky=true mode separates sky from surface radiance and adds
  * SkyLight diffuse multiplied by interpolated cosine-weighted sky visibility to
- * surface radiance SH. Visibility SH also supplies a bent-normal first moment.
+ * surface radiance SH. In that opt-in mode, visibility SH also supplies a bent-normal first moment.
  * This is a low-frequency directional approximation, not full sky transfer:
  * strongly colored directional skies can require higher-fidelity transport.
  * Sky illumination still participates when shading captured surfaces. Set
- * Settings.separateSky=false only for legacy total-irradiance capture. Existing
+ * Settings.separateSky=false (the default) for total-irradiance capture. Existing
  * total assets retain compatibility and should be rebaked before additive use.
  * Visibility defaults to 16 texels per axis. New bakes preserve independent
  * distance standard deviation for stable half-precision visibility. Existing
@@ -122,11 +124,15 @@ public final class GiSceneBaker {
         /** Prefer half-float storage; surface layouts always use full precision
          * for position offsets and exact spatial-bin indices. */
         public boolean compactStorage = true;
-        /** Separate directly visible sky from bounced radiance (default true).
+        /** Separate directly visible sky from bounced radiance (opt-in, default false).
+         * False stores total diffuse lighting including the sky, and suppresses runtime
+         * sky diffuse inside resident volume coverage. Outside coverage or with GI
+         * disabled, runtime sky diffuse returns. Sky specular remains independent.
+         * Switching either way requires rebaking; loaded data retains its own mode.
          * Sky remains in capture to illuminate surfaces. Visibility SH modulates
          * runtime SkyLight with a bent-normal direction; this low-frequency field approximates
          * directional colored-sky transport, not exact Lumen ray tracing. */
-        public boolean separateSky = true;
+        public boolean separateSky = false;
         public boolean classifyProbes = true;
         /** Minimum world-space clearance, default 0.05. Classification uses at
          * least 1.25 times near, preventing surfaces clipped by capture cameras.
@@ -254,6 +260,7 @@ public final class GiSceneBaker {
     static final class Capture {
         private final Settings settings;
         private final Camera camera;
+        private final float backgroundSkyScale;
         final ViewPort viewport;
         final FrameBuffer framebuffer;
         final ByteBuffer[] colors = new ByteBuffer[6];
@@ -265,6 +272,26 @@ public final class GiSceneBaker {
 
         Capture(Settings settings, Spatial scene) {
             this.settings = settings;
+            Spatial skyRoot = scene;
+            while (skyRoot.getParent() != null) {
+                skyRoot = skyRoot.getParent();
+            }
+            final float[] skyScale = {-1f};
+            final boolean[] hasSky = {false};
+            skyRoot.depthFirstTraversal(spatial -> {
+                for (com.jme3.light.Light light : spatial.getLocalLightList()) {
+                    if (light instanceof com.jme3.light.SkyLight) {
+                        hasSky[0] = true;
+                        com.jme3.light.SkyLight sky = (com.jme3.light.SkyLight) light;
+                        if (skyScale[0] < 0f && sky.isEnabled() && sky.isReady()) {
+                            skyScale[0] = sky.isDiffuseEnabled() ? sky.getIntensity() : 0f;
+                        }
+                    }
+                }
+            });
+            // Background rendering does not apply SkyLight intensity. Only sky
+            // pixels need this scale; captured surfaces already applied it.
+            backgroundSkyScale = skyScale[0] >= 0f ? skyScale[0] : hasSky[0] ? 0f : 1f;
             camera = new Camera(settings.captureSize, settings.captureSize);
             camera.setFrustumPerspective(90, 1, settings.near, settings.far);
             viewport = new ViewPort("GI probe capture", camera);
@@ -328,6 +355,9 @@ public final class GiSceneBaker {
             result.set(Math.max(0, colors[face].getFloat(pixel)),
                     Math.max(0, colors[face].getFloat(pixel + 4)),
                     Math.max(0, colors[face].getFloat(pixel + 8)));
+            if (skyVisibility(direction) > 0.5f) {
+                result.multLocal(backgroundSkyScale);
+            }
         }
 
         float skyVisibility(Vector3f direction) {

@@ -155,6 +155,7 @@ public final class TestSkyLight extends SimpleApplication {
             rootNode.attachChild(volume);
             rootNode.updateGeometricState();
             com.jme3.environment.gi.GiSceneBaker.Settings quality = new com.jme3.environment.gi.GiSceneBaker.Settings();
+            quality.separateSky = true;
             quality.captureSize = 8;
             quality.radianceSamples = 64;
             quality.visibilityResolution = 4;

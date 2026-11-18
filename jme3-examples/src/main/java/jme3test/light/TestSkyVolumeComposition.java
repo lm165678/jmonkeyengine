@@ -18,13 +18,18 @@ import java.util.ArrayList;
 
 /**
  * Entry main; OpenGL 4.3 offscreen, fixed linear exposure, no input controls.
- * Run gradlew :jme3-examples:skyVolumeCompositionSmoke. Bakes black-walled outdoor,
+ * Run gradlew :jme3-examples:skyVolumeCompositionSmoke for separated mode,
+ * or :jme3-examples:skyTotalVolumeCompositionSmoke for total mode. Bakes black-walled outdoor,
  * enclosed and window rooms, isolating sky visibility from bounced irradiance.
  * Tests sky / sky+GI / sky+reflection / all, intensity 0/1/2, Phong/PBR and four
- * paths. This isolates composition; black walls do not validate multibounce transport.
+ * paths. Add -Dgi.test.totalSky=true to test the new default total-light mode,
+ * including volume exit, GI disable and bake-bounce sky suppression.
+ * This isolates composition; black walls do not validate multibounce transport.
  * <pre>
  * 第一步：SkyFactory 创建独立天光，等待捕捉完成。
- * 第二步：用默认 separateSky=true 烘焙体积；天空可见性与反弹光分别存储。
+ * 第二步：默认 Settings.separateSky=false 保存完整漫反射，不保存天空可见度。
+ * 本示例通常显式设 true 测试分离模式；-Dgi.test.totalSky=true 测试默认模式。
+ * 切换模式必须重新烘焙；运行时根据数据格式自动选择，不改变已载入数据。
  * 第三步：在渲染线程绑定体积；无体积时天空全可见，旧 total 格式仍替代天空漫反射。
  * 第四步：修改天光强度；直接照明更新，旧反弹光保持并提示过期，手动重烘焙。
  * 第五步：ReflectionProbe 只提供局部镜面反射；这里故意保留旧 diffuseEnabled=true。
@@ -37,6 +42,7 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
     private final GiProbeData[] volumes = new GiProbeData[3];
     private final int[][][][] values = new int[3][4][2][3];
     private final int[][] directional = new int[3][2];
+    private final boolean totalSky = Boolean.getBoolean("gi.test.totalSky");
     private SkyLightControl sky;
     private Geometry receiver;
     private LightProbe reflection;
@@ -120,6 +126,7 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
             rootNode.attachChild(volume);
             rootNode.updateGeometricState();
             GiSceneBaker.Settings settings = new GiSceneBaker.Settings();
+            settings.separateSky = !totalSky;
             settings.captureSize = 16;
             settings.radianceSamples = 512;
             settings.visibilityResolution = 4;
@@ -194,6 +201,10 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
     }
 
     private void configureDirectional() {
+        if (totalSky) {
+            configureTotalFallback();
+            return;
+        }
         int scenario = (test - 288) / 2;
         int side = (test - 288) % 2;
         if (binding != null) {
@@ -229,6 +240,10 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
         renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
         int red = pixels.get((32 * 64 + 32) * 4) & 255;
         if (test >= 288) {
+            if (totalSky) {
+                verifyTotalFallback(red);
+                return;
+            }
             directional[(test - 288) / 2][(test - 288) % 2] = red;
             if (++test == 294) {
                 if (Math.abs(directional[0][0] - directional[0][1]) > 2
@@ -262,6 +277,45 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
         }
     }
 
+    private void configureTotalFallback() {
+        int scenario = (test - 288) / 2;
+        if (binding != null) {
+            binding.close();
+        }
+        rootNode.removeLight(reflection);
+        sky.getLight().setIntensity(1);
+        Material material = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+        material.setBoolean("UseMaterialColors", true);
+        material.setColor("Diffuse", new ColorRGBA(.1f, .1f, .1f, 1));
+        material.setColor("Specular", ColorRGBA.Black);
+        binding = volumes[1].bind(material,
+                scenario == 1 ? new Vector3f(100, 100, 100) : new Vector3f(-1, -1, -1), .02f);
+        material.setBoolean("GiBakeBounce", (test - 288) % 2 == 1);
+        if (scenario == 2) {
+            material.setBoolean("GiEnabled", false);
+        }
+        receiver.setMaterial(material);
+        viewPort.setRenderPath(RenderPath.Forward);
+    }
+
+    private void verifyTotalFallback(int red) {
+        int scenario = (test - 288) / 2;
+        if ((scenario == 0 && red > 1) || (scenario != 0 && red < 20)) {
+            throw new AssertionError("Total coverage/fallback case=" + (test - 288) + " red=" + red);
+        }
+        if (++test == 294) {
+            binding.close();
+            for (GiProbeData data : volumes) {
+                if (data.hasSeparatedSky()) {
+                    throw new AssertionError("Total mode must not allocate sky visibility");
+                }
+                data.dispose();
+            }
+            System.out.println("SKY_TOTAL_COMPOSITION_PASS cases=288 fallback=6");
+            stop();
+        }
+    }
+
     private void verify() {
         for (int scenario = 0; scenario < 3; scenario++) {
             for (int combination = 0; combination < 4; combination++) {
@@ -272,7 +326,7 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
                     }
                 }
                 int[] diffuse = values[scenario][combination][0];
-                if (diffuse[0] > 1) {
+                if ((!totalSky || combination % 2 == 0) && diffuse[0] > 1) {
                     throw new AssertionError("Local reflection leaked diffuse");
                 }
                 if (combination % 2 == 0 && diffuse[1] < 20) {
@@ -280,6 +334,14 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
                 }
                 if (scenario == 1 && combination % 2 == 1 && diffuse[1] > 1) {
                     throw new AssertionError("Enclosed room sky leak: " + diffuse[1]);
+                }
+            }
+        }
+        if (totalSky) {
+            for (int scenario = 0; scenario < 3; scenario++) {
+                int[] diffuse = values[scenario][1][0];
+                if (Math.abs(diffuse[0] - diffuse[2]) > 2) {
+                    throw new AssertionError("Total GI must not add live sky diffuse");
                 }
             }
         }

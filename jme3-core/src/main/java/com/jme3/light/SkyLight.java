@@ -12,8 +12,9 @@ import com.jme3.util.TempVars;
  * parallax correction or distance falloff is applied. The sky SH contains
  * diffuse irradiance/pi and the prefiltered cubemap contains specular radiance.
  * This is an unoccluded fallback, NOT a replacement for local GI visibility.
- * New GI volumes add bounced radiance and modulate this sky by local sky
- * visibility. Legacy total-irradiance volumes retain replacement semantics. Specular
+ * Default total-irradiance GI volumes replace this diffuse light inside coverage.
+ * Opt-in separated volumes add bounced radiance and modulate this sky by local
+ * sky visibility. Disabling GI or leaving coverage restores sky diffuse. Specular
  * falls back to this sky when no local reflection probe covers the geometry.
  * One enabled ready sky per light scope is supported; the first wins.
  * Use SkyLightControl on the sky for automatic baking and lifecycle management.
