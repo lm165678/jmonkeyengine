@@ -1,3 +1,6 @@
+## 2026-11-19 sky composition source pair
+- Engine implementation: f783330fb4496181e7dd75064dd7a9ce8c56907f; SDK implementation: 848feb9ac874c3d02267de67f9dc91a1c436760d. Local commits only; no push or SDK deployment. Documentation-only commits may follow.
+
 ## 2026-11-19 selectable sky composition; total diffuse is the new bake default
 - User requested two modes with total diffuse preferred. GiSceneBaker.Settings.separateSky now defaults false: sky/background is included in total irradiance, no sky-visibility texture is stored, and runtime sky diffuse is replaced inside resident valid volume coverage. Outside the volume, disabled GI or missing data retains sky fallback; sky specular is independent. True preserves the separated bounce/visibility path. Existing assets retain their format and require a rebake to switch; no relabeling/conversion.
 - Total coverage no longer falls back to unoccluded sky solely when directional weights become zero. Invalid/no-support regions still allow missing-data/adaptive fallback. Multi-bounce captures suppress live sky where previous total irradiance already includes it; separated capture behavior stays unchanged. Capture sky pixels apply SkyLight intensity/diffuse/enabled state once; surface pixels are not rescaled. Checkpoint identity bumped to sky-total-v3 to reject old captures with different sky scaling.
