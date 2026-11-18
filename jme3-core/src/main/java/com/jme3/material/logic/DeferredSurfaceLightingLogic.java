@@ -52,7 +52,7 @@ public final class DeferredSurfaceLightingLogic implements TechniqueDefLogic {
         indirectLights.clear();
         if (lights != null) for (int i = 0; i < lights.size(); i++) {
             Light light = lights.get(i);
-            if (light.isEnabled() && (light instanceof AmbientLight || light instanceof LightProbe)) {
+            if (light.isEnabled() && (light instanceof AmbientLight || light instanceof LightProbe || light instanceof com.jme3.light.SkyLight)) {
                 indirectLights.add(light);
             }
         }

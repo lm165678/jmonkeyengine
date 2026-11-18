@@ -244,6 +244,31 @@ public final class GiProbeData implements Savable {
         return skyVisibility != null;
     }
 
+    /** Irradiance composition contract; visibility contains no sky radiance. */
+    public enum LightingContent {
+        /** Legacy bake already includes direct sky diffuse; suppress runtime sky in coverage. */
+        TOTAL_IRRADIANCE,
+        /** Surface radiance and a separate visibility field; add visible runtime sky once. */
+        BOUNCED_IRRADIANCE_WITH_SKY_VISIBILITY
+    }
+
+    /**
+     * Returns the existing format's semantics without converting any coefficients.
+     * Legacy data defaults to total irradiance. Rebuild using separateSky=true
+     * (the default) to acquire visibility. Query after bake/load on the owner thread.
+     * <pre>{@code
+     * // 第一步：载入或完成烘焙后检查格式。
+     * GiProbeData.LightingContent content = data.getLightingContent();
+     * // 第二步：使用 data.bind 或自动场景服务；合成方式由格式自动选择。
+     * // 第三步：旧数据必须重新烘焙才能分离；不能修改标签假装完成转换。
+     * }</pre>
+     * @return explicit composition semantics
+     */
+    public LightingContent getLightingContent() {
+        return hasSeparatedSky() ? LightingContent.BOUNCED_IRRADIANCE_WITH_SKY_VISIBILITY
+                : LightingContent.TOTAL_IRRADIANCE;
+    }
+
     int columns() {
         return columns;
     }

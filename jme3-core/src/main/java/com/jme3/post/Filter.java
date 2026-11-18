@@ -497,6 +497,23 @@ public abstract class Filter implements Savable {
     }
 
     /**
+     * Whether this filter currently outputs diagnostic data instead of scene color.
+     * FPP presents the first enabled diagnostic filter directly, bypassing all
+     * later effects without changing their enabled flags. Output sRGB encoding
+     * still belongs to the framebuffer. Change the mode on the render thread.
+     * <pre>{@code
+     * // 第一步：自定义效果在调试模式返回 true。
+     * public boolean isDiagnosticOutput() { return showOnlyData; }
+     * // 第二步：在应用更新中打开 showOnlyData，后续曝光/Bloom/Tonemap 自动旁路。
+     * // 第三步：恢复 false，下一帧恢复原后处理链及各效果原有开关。
+     * }</pre>
+     * @return false by default, preserving existing custom filters
+     */
+    public boolean isDiagnosticOutput() {
+        return false;
+    }
+
+    /**
      * sets a reference to the FilterPostProcessor to which this filter is attached
      *
      * @param proc the desired FPP (alias created)

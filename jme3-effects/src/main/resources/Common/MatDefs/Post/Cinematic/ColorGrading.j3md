@@ -1,0 +1,20 @@
+MaterialDef ColorGrading {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Int Curve
+        Float Saturation
+        Float Contrast
+        Float WhitePoint
+        Vector3 Gain
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/ColorGrading.frag
+        Defines {
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+        }
+    }
+}

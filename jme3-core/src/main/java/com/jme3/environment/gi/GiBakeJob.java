@@ -62,6 +62,8 @@ import java.util.zip.*;
 public final class GiBakeJob implements AutoCloseable {
     private final RenderManager manager;
     private final Spatial scene;
+    private final Spatial skyStateRoot;
+    private final String skyState;
     private final GiProbeVolume volume;
     private final GiSceneBaker.Settings settings;
     private final GiProbeGrid grid;
@@ -91,6 +93,12 @@ public final class GiBakeJob implements AutoCloseable {
             Consumer<ViewPort> configure, BooleanSupplier cancelled, IntConsumer progress) {
         this.manager = manager;
         this.scene = scene;
+        Spatial root = scene;
+        while (root.getParent() != null) {
+            root = root.getParent();
+        }
+        skyStateRoot = root;
+        skyState = GiSkyState.capture(root);
         this.volume = volume;
         this.settings = settings;
         this.cancelled = cancelled;
@@ -143,6 +151,9 @@ public final class GiBakeJob implements AutoCloseable {
         }
         long start = System.nanoTime();
         try {
+            if (!skyState.equals(GiSkyState.capture(skyStateRoot))) {
+                throw new IllegalStateException("Sky changed during GI bake; restart the bake");
+            }
             do {
                 if (cancelled.getAsBoolean()) {
                     throw new CancellationException("GI bake cancelled");
@@ -173,7 +184,7 @@ public final class GiBakeJob implements AutoCloseable {
                         continue;
                     }
                     close();
-                    volume.publish(ready);
+                    volume.publish(ready, skyState);
                     result = ready;
                     return true;
                 }
@@ -326,7 +337,7 @@ public final class GiBakeJob implements AutoCloseable {
         if (settings.sceneRevision.isEmpty()) {
             throw new IllegalStateException("Set sceneRevision for checkpoint use");
         }
-        return "surface-bin-v1:" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
+        return "sky-separated-v2:" + skyState + ":" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
                 + ":" + settings.captureSize + ":" + settings.radianceSamples + ":" + settings.visibilityResolution
                 + ":" + settings.visibilitySamples + ":" + settings.near + ":" + settings.far
                 + ":" + settings.visibilityCone + ":" + settings.probeClearance + ":" + settings.relativeProbeClearance + ":" + settings.classifyProbes

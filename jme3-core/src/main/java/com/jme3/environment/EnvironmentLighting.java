@@ -33,7 +33,8 @@ public final class EnvironmentLighting {
             return false;
         }
         for (Light light : lights) {
-            if (light instanceof LightProbe && ((LightProbe) light).isReady()
+            if (((light instanceof LightProbe && ((LightProbe) light).isReady())
+                    || (light instanceof SkyLight && ((SkyLight) light).isReady()))
                     && light.isEnabled()) {
                 return true;
             }
@@ -49,20 +50,18 @@ public final class EnvironmentLighting {
         SkyLight sky = null;
         LightProbe local = null;
         for (Light light : lights) {
-            if (!(light instanceof LightProbe) || !light.isEnabled()
-                    || !((LightProbe) light).isReady()) {
+            if (!light.isEnabled()) {
                 continue;
             }
             if (light instanceof SkyLight) {
-                if (sky == null) {
+                if (sky == null && ((SkyLight) light).isReady()) {
                     sky = (SkyLight) light;
                 }
-            } else if (local == null) {
+            } else if (local == null && light instanceof LightProbe && ((LightProbe) light).isReady()) {
                 local = (LightProbe) light;
             }
         }
-        LightProbe reflection = local != null ? local : sky;
-        if (reflection == null) {
+        if (local == null && sky == null) {
             return;
         }
         // GLSL validates sampler types even in an inactive uniform branch.
@@ -70,20 +69,20 @@ public final class EnvironmentLighting {
         units.textureUnit = Math.max(1, units.textureUnit);
         shader.getUniform("g_ShadowAtlas").setValue(VarType.Int, 0);
         shader.getUniform("g_ShadowRecords").setValue(VarType.Int, 0);
-        LightProbe diffuse = local != null && local.isDiffuseEnabled() ? local : sky;
+        SkyLight diffuse = sky;
         // Separate sky scaling preserves local probe radiance and stored SH data.
         shader.getUniform("g_SkyIntensity").setValue(VarType.Float,
                 sky == null ? 1f : sky.getIntensity());
         shader.getUniform("g_EnvironmentSh").setValue(VarType.Vector3Array,
                 diffuse != null && diffuse.isDiffuseEnabled() ? diffuse.getShCoeffs() : ZERO_SH);
         shader.getUniform("g_SkySh").setValue(VarType.Vector3Array,
-                sky != null && sky.isDiffuseEnabled() && (local == null || !local.isDiffuseEnabled())
+                sky != null && sky.isDiffuseEnabled()
                         ? sky.getShCoeffs() : ZERO_SH);
         shader.getUniform("g_EnvironmentData").setValue(VarType.Vector4,
-                new Vector4f(reflection.getNbMipMaps(), local == null ? 1 : 0,
-                        sky == null ? 0 : 1, local != null && local.isDiffuseEnabled() ? 1 : 0));
+                new Vector4f((local != null ? local.getNbMipMaps() : sky.getNbMipMaps()), local == null ? 1 : 0,
+                        sky == null ? 0 : 1, 0));
         try {
-            renderer.setTexture(units.textureUnit, reflection.getPrefilteredEnvMap());
+            renderer.setTexture(units.textureUnit, (local != null ? local.getPrefilteredEnvMap() : sky.getPrefilteredEnvMap()));
         } catch (com.jme3.renderer.TextureUnitException exception) {
             throw new IllegalStateException("No texture unit available for environment lighting", exception);
         }
@@ -92,7 +91,7 @@ public final class EnvironmentLighting {
         shader.getUniform("g_EnvironmentLocalData").setValue(VarType.Matrix4,
                 local != null ? local.getUniformMatrix() : LightProbe.FALLBACK_MATRIX);
         int skyUnit = reflectionUnit;
-        if (sky != null && sky != reflection) {
+        if (sky != null && local != null) {
             try {
                 renderer.setTexture(units.textureUnit, sky.getPrefilteredEnvMap());
             } catch (com.jme3.renderer.TextureUnitException exception) {

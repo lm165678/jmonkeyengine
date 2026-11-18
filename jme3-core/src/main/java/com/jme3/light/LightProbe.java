@@ -83,22 +83,21 @@ public class LightProbe extends Light implements Savable {
     private boolean diffuseEnabled = true;
 
     /**
-     * Enables native diffuse IBL (legacy default true). Reflection-only probes
-     * retain their SH data for conversion/debugging but upload zero diffuse SH.
-     * Change on the render thread before drawing. Existing assets remain unchanged.
-     * <pre>{@code
-     * // 第一步：正常烘焙局部环境探针。
-     * LightProbe probe = LightProbeFactory.makeProbe(environmentCamera, scene);
-     * // 第二步：仅保留局部镜面反射；漫反射交给 SkyLight / GI Volume。
-     * probe.setDiffuseEnabled(false);
-     * scene.addLight(probe);
-     * // 第三步：如需兼容旧式漫反射，可恢复 probe.setDiffuseEnabled(true)。
-     * }</pre>
+     * Retains the old serialized flag for asset round-tripping only.
+     * Built-in rendering treats every local LightProbe as specular-only, even
+     * when an old asset stored true. Use SkyLight for global diffuse environment
+     * lighting and GiProbeVolume for baked diffuse. Existing SH stays available
+     * for explicit migration via SkyLight.fromEnvironment; no automatic conversion.
+     * @param enabled legacy metadata, no effect on built-in diffuse lighting
+     * @deprecated Local reflection probes no longer supply diffuse lighting.
      */
+    @Deprecated
     public void setDiffuseEnabled(boolean enabled) {
         diffuseEnabled = enabled;
     }
 
+    /** Returns legacy stored metadata, not active diffuse lighting capability. */
+    @Deprecated
     public boolean isDiffuseEnabled() {
         return diffuseEnabled;
     }

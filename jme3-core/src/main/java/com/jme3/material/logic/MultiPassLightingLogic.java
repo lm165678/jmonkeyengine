@@ -82,7 +82,7 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
 
         for (int i = 0; i < lights.size(); i++) {
             Light l = lights.get(i);
-            if (l.getType() == Light.Type.Ambient  || l.getType() == Light.Type.Probe) {
+            if (l.getType() == Light.Type.Ambient  || l.getType() == Light.Type.Probe || l.getType() == Light.Type.Sky) {
                 continue;
             }
 

@@ -62,7 +62,7 @@ final class DeferredBatch {
         }
         int count = 0;
         for (Light light : list) {
-            if (!(light instanceof LightProbe)) {
+            if (!(light instanceof LightProbe) && !(light instanceof com.jme3.light.SkyLight)) {
                 count++;
                 if (!identities.contains(light)) {
                     return false;

@@ -42,7 +42,7 @@ vec3 environmentSpecular(vec3 direction, float roughness) {
 vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
         vec3 diffuseReflectance, vec3 specularReflectance, float shininess,
         float diffuseWeight) {
-    vec3 diffuse = shLambertResponse(shNativeIrradiance(g_EnvironmentSh, normal),
+    vec3 diffuse = shLambertResponse(shNativeIrradiance(g_EnvironmentSh, giSkyDirection(normal)),
             diffuseReflectance, 1.0) * (g_EnvironmentData.w > 0.5
                     ? diffuseWeight : giSkyDiffuseWeight * g_SkyIntensity);
     // Map Blinn-Phong exponent to a roughness approximation for the GGX-prefiltered

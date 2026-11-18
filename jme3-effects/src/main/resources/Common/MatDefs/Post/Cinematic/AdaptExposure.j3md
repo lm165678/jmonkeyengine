@@ -1,0 +1,20 @@
+MaterialDef AdaptExposure {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Texture2D History
+        Vector4 Settings
+        Vector2 Speeds
+        Float DeltaTime
+        Boolean Reset
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/AdaptExposure.frag
+        Defines {
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+        }
+    }
+}

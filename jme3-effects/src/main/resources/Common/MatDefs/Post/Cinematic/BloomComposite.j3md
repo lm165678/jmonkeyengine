@@ -1,0 +1,18 @@
+MaterialDef BloomComposite {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Texture2D Bloom
+        Vector2 BloomSize
+        Float Intensity
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/BloomComposite.frag
+        Defines {
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+        }
+    }
+}

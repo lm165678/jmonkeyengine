@@ -139,7 +139,7 @@ public final class SinglePassLightingLogic extends DefaultTechniqueDefLogic {
         for (curIndex = startIndex; curIndex < endIndex && curIndex < lightList.size(); curIndex++) {
 
             Light l = lightList.get(curIndex);
-            if (l.getType() == Light.Type.Ambient || l.getType() == Light.Type.Probe) {
+            if (l.getType() == Light.Type.Ambient || l.getType() == Light.Type.Probe || l.getType() == Light.Type.Sky) {
                 endIndex++;
                 continue;
             }

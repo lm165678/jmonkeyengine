@@ -186,7 +186,7 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             ColorRGBA color = l.getColor();
             //Color
 
-            if(l.getType() != Light.Type.Probe){
+            if (l.getType() != Light.Type.Probe && l.getType() != Light.Type.Sky) {
                 shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), 0, 0, 0, lightDataIndex / 3);
                 lightData.setVector4InArray(color.getRed(),
                         color.getGreen(),
@@ -254,8 +254,8 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             Uniform lightProbePemMap, LightProbe lightProbe) {
         lightProbeData.setValue(VarType.Matrix4, lightProbe.getUniformMatrix());
         //setVector4InArray(lightProbe.getPosition().x, lightProbe.getPosition().y, lightProbe.getPosition().z, 1f / area.getRadius() + lightProbe.getNbMipMaps(), 0);
-        shCoeffs.setValue(VarType.Vector3Array, lightProbe.isDiffuseEnabled()
-                ? lightProbe.getShCoeffs() : com.jme3.environment.EnvironmentLighting.ZERO_SH);
+        // Reflection probes never contribute diffuse, including legacy serialized probes.
+        shCoeffs.setValue(VarType.Vector3Array, com.jme3.environment.EnvironmentLighting.ZERO_SH);
         /*
          * Assign the prefiltered env map to the next available texture unit.
          */
@@ -305,8 +305,8 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
                     j--;
                 }
             }
-            if (l instanceof LightProbe) {
-                if (!(l instanceof com.jme3.light.SkyLight)) {
+            if (l instanceof LightProbe || l instanceof com.jme3.light.SkyLight) {
+                if (l instanceof LightProbe) {
                     lightProbes.add((LightProbe) l);
                 }
                 if(removeLights){

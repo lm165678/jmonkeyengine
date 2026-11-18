@@ -285,7 +285,7 @@ public final class DeferredPipeline implements OpaquePipeline {
             Light l = list.get(i);
             if (!(l instanceof AmbientLight || l instanceof DirectionalLight
                     || l instanceof PointLight || l instanceof SpotLight
-                    || l instanceof LightProbe)) {
+                    || l instanceof LightProbe || l instanceof com.jme3.light.SkyLight)) {
                 return false;
             }
         }
@@ -377,7 +377,7 @@ public final class DeferredPipeline implements OpaquePipeline {
                 selected.reset();
                 selected.colorRamp = ramp;
                 for (Light light : worldLights) {
-                    if (!(light instanceof LightProbe)) {
+                    if (!(light instanceof LightProbe) && !(light instanceof com.jme3.light.SkyLight)) {
                         selected.lights.add(light);
                         selected.identities.add(light);
                     }

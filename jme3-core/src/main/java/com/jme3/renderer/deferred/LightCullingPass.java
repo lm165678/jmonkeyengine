@@ -69,7 +69,7 @@ final class LightCullingPass implements DeferredPass {
             if (light instanceof AmbientLight) {
                 ColorRGBA color = light.getColor();
                 frame.ambient.addLocal(color.r, color.g, color.b);
-            } else if (!(light instanceof LightProbe)) {
+            } else if (!(light instanceof LightProbe) && !(light instanceof com.jme3.light.SkyLight)) {
                 frame.lights.add(light);
             }
         }

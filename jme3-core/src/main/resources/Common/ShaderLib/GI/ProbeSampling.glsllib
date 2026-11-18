@@ -3,6 +3,20 @@
 // Set once per surface before evaluating environment and material response.
 float giEnvironmentDiffuseWeight = 1.0;
 float giSkyDiffuseWeight = 1.0;
+// First angular moment of visibility, not radiance or an extra GI term.
+vec3 giSkyBentMoment = vec3(0.0);
+vec3 giSkyDirection(vec3 normal) {
+    float anisotropy = clamp(length(giSkyBentMoment), 0.0, 1.0);
+    if (anisotropy < 0.0001) {
+        return normal;
+    }
+    vec3 bent = normalize(giSkyBentMoment);
+    // Low-frequency bent-normal approximation, not full radiance transfer.
+    // Keep the direction in the receiving hemisphere and preserve open sky.
+    float amount = anisotropy * (1.0 - giSkyDiffuseWeight)
+            * max(dot(bent, normal), 0.0);
+    return normalize(mix(normal, bent, amount));
+}
 #ifdef GI_PROBES
 uniform float m_GiEnvironmentMix;
 uniform float m_GiFadeDistance;
@@ -111,25 +125,39 @@ float giReadVisibility(float probe, vec3 direction, vec3 normal, float distanceT
     }
     return result;
 }
-// Eight-probe path: filter the distance distribution before evaluating visibility.
-// Stored standard deviations cannot be linearly filtered as second moments.
-// Do not warp these distributions onto the receiver triangle: neighboring rays
-// can hit different surfaces, producing dark facets and periodic floor bands.
-float giCompactVisibility(float probe, vec3 direction, float distanceToProbe,
+// Eight-probe path: evaluate four distributions separately, then filter their
+// visibility. Merging depths first invents variance at silhouettes and exposes
+// angular atlas facets. This still performs exactly four moment texture reads.
+float giCompactVisibility(float probe, vec3 direction, vec3 normal, float distanceToProbe,
         vec4 atlasInfo, vec4 dimensions) {
-    vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * floor(atlasInfo.w) - 0.5;
+    float size = floor(atlasInfo.w);
+    vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * size - 0.5;
     vec2 a = fract(p);
     vec2 b = floor(p);
-    vec2 m0 = giMomentTexel(probe, b, atlasInfo, dimensions);
-    vec2 m1 = giMomentTexel(probe, b + vec2(1.0, 0.0), atlasInfo, dimensions);
-    vec2 m2 = giMomentTexel(probe, b + vec2(0.0, 1.0), atlasInfo, dimensions);
-    vec2 m3 = giMomentTexel(probe, b + vec2(1.0), atlasInfo, dimensions);
-    float mean = mix(mix(m0.x, m1.x, a.x), mix(m2.x, m3.x, a.x), a.y);
-    // Parallel-axis variance merge, avoiding cancellation of large squared means.
-    vec4 d = vec4(m0.x, m1.x, m2.x, m3.x) - mean;
-    vec4 v = vec4(m0.y, m1.y, m2.y, m3.y) + d * d;
-    float variance = mix(mix(v.x, v.y, a.x), mix(v.z, v.w, a.x), a.y);
-    return giVisibilityFromVariance(vec2(mean, variance), distanceToProbe);
+    float result = 0.0;
+    float numerator = dot(direction, normal);
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = vec2(mod(float(i), 2.0), floor(float(i) / 2.0));
+        vec2 pixel = giWrapMomentPixel(b + offset, size);
+        vec3 tapDirection = giOctDecode((pixel + 0.5) * (2.0 / size) - 1.0);
+        float denominator = dot(tapDirection, normal);
+        vec2 weights = mix(1.0 - a, a, offset);
+        float weight = weights.x * weights.y;
+        vec2 moments = giMomentTexel(probe, b + offset, atlasInfo, dimensions);
+        // One-sided receiver-plane bias only removes self-occlusion. Never
+        // extend the query along a near-horizon ray or discard its weight:
+        // either would manufacture dark bands on curved/nearby receivers.
+        float tapDistance = distanceToProbe;
+        if (numerator * denominator > 0.0 && abs(denominator) > 1.0e-6) {
+            tapDistance = min(tapDistance, distanceToProbe * numerator / denominator);
+        }
+        // One binary16 relative step covers stored-depth rounding and the
+        // plane projection. This is depth tolerance, not a variance floor;
+        // a zero-depth blocker remains blocked for positive receiver depth.
+        float tolerance = 0.0009765625 * max(tapDistance, abs(moments.x));
+        result += weight * giVisibilityFromVariance(moments, max(0.0, tapDistance - tolerance));
+    }
+    return result;
 }
 // Separable C2 edge window. A nearest-face minimum creates derivative seams
 // wherever two face distances exchange order (visible diagonal bands in GI).
@@ -154,9 +182,10 @@ float giSpatialKernel(float distance) {
 
 // Returns incident irradiance in linear HDR units. No material response is
 // assumed here. The world-space normal must be normalized by the caller.
-vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
-        vec3 counts, vec2 encoding, vec4 atlasInfo, vec4 dimensions, float fade, bool metadata, out vec2 skyResult) {
+vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 origin, vec3 spacing,
+        vec3 counts, vec2 encoding, vec4 atlasInfo, vec4 dimensions, float fade, bool metadata, out vec2 skyResult, out vec3 bentResult) {
     skyResult = vec2(1.0, 0.0);
+    bentResult = vec3(0.0);
     vec3 coordinate = (worldPosition - origin) / spacing;
     if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, counts - 1.0))) {
         return vec4(0.0);
@@ -164,20 +193,22 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
     // Use the same biased position for cell selection and visibility. Otherwise
     // a receiver exactly on a grid plane can give all usable front-side probes
     // zero trilinear weight. Keep coverage based on the actual surface position.
-    vec3 samplePosition = worldPosition + normal * m_GiBias;
-    vec3 sampleCoordinate = clamp((samplePosition - origin) / spacing, vec3(0.0), counts - 1.0);
     bool wide = mod(floor(fract(atlasInfo.w) * 64.0 + 0.01), 2.0) > 0.5;
+    bool surfaceLayout = mod(floor(fract(atlasInfo.w) * 16.0 + 0.01), 2.0) > 0.5;
+    vec3 biasNormal = wide || surfaceLayout ? normal : planeNormal;
+    vec3 samplePosition = worldPosition + biasNormal * m_GiBias;
+    vec3 sampleCoordinate = clamp((samplePosition - origin) / spacing, vec3(0.0), counts - 1.0);
     vec3 base = wide ? floor(sampleCoordinate + 0.5) : min(floor(sampleCoordinate), counts - 2.0);
     vec3 alpha = sampleCoordinate - base;
 
     vec3 sum = vec3(0.0);
     float total = 0.0;
     float skySum = 0.0;
+    vec3 bentSum = vec3(0.0);
     float weightScale = 0.0;
     // Descriptor fractional bits: 1/2 separated sky, 1/8 stabilized mixing.
     bool separated = fract(atlasInfo.w) > 0.25;
     bool stabilized = mod(floor(fract(atlasInfo.w) * 8.0 + 0.01), 2.0) > 0.5;
-    bool surfaceLayout = mod(floor(fract(atlasInfo.w) * 16.0 + 0.01), 2.0) > 0.5;
     float nextProbe = -1.0;
     // Surface bins have eight entries at most. Compact support has unit radius
     // in bin coordinates, so exactly 27 bins contain every possible contributor.
@@ -267,7 +298,7 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
         }
         float visibility;
         if (!wide && !surfaceLayout) {
-            visibility = giCompactVisibility(probe, direction, distanceToProbe / encoding.x, atlasInfo, dimensions);
+            visibility = giCompactVisibility(probe, direction, planeNormal, distanceToProbe / encoding.x, atlasInfo, dimensions);
         } else {
             visibility = giReadVisibility(probe, direction, normal, distanceToProbe / encoding.x, atlasInfo, dimensions);
         }
@@ -305,6 +336,7 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
             sum *= rescale;
             total *= rescale;
             skySum *= rescale;
+            bentSum *= rescale;
             weightScale = weight;
         }
         weight /= weightScale;
@@ -325,6 +357,13 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
                     skyCoefficients[2], skyCoefficients[3], skyCoefficients[4],
                     skyCoefficients[5], skyCoefficients[6], skyCoefficients[7], skyCoefficients[8], normal).r;
             skySum += clamp(visibility / 3.14159265359, 0.0, 1.0) * weight;
+            // Undo l=1 versus l=0 cosine convolution and SH normalization.
+            // sqrt(3)/2 * (c11,c1-1,c10)/c00 = integral(V*w)/integral(V).
+            vec3 moment = 0.86602540378 * vec3(skyCoefficients[3].r,
+                    skyCoefficients[1].r, skyCoefficients[2].r)
+                    / max(skyCoefficients[0].r, 0.000001);
+            moment /= max(1.0, length(moment));
+            bentSum += moment * weight;
         }
         // Interpolate nonnegative irradiance in square-root space to reduce
         // bright-probe dominance, then return to linear HDR before material BRDF.
@@ -339,6 +378,7 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 origin, vec3 spacing,
     vec3 edge = min(coordinate * spacing, (counts - 1.0 - coordinate) * spacing);
     float blend = fade > 0.0 ? giOverlapWindow(edge, vec3(fade)) : 1.0;
     skyResult = vec2(separated && total > 0.0 ? skySum / total : 0.0, blend);
+    bentResult = bentSum / total;
     // Prefer dense volumes, smoothly; keep endpoints defined even at exact borders.
     // Relative overlap weights must not attenuate the only available volume.
     // Zero outer fade keeps room boundary surfaces lit while still smoothly
@@ -362,19 +402,29 @@ vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
     if (!m_GiEnabled) {
         return vec4(0.0);
     }
+    // Derivatives must precede per-fragment volume coverage tests. Compute once
+    // for all volumes. Normal-map detail remains in the SH/material response,
+    // but must not perturb the receiver plane or its visibility bias.
+    vec3 planeNormal = cross(dFdx(worldPosition), dFdy(worldPosition));
+    float planeScale = max(abs(planeNormal.x), max(abs(planeNormal.y), abs(planeNormal.z)));
+    planeNormal = planeScale > 0.0 ? normalize(planeNormal / planeScale) : normal;
+    planeNormal *= dot(planeNormal, normal) < 0.0 ? -1.0 : 1.0;
     if (m_GiVolumeCount == 0) {
         vec4 atlasInfo = vec4(m_GiAtlas.x, 0.0, 0.0, m_GiAtlas.z);
         vec4 dimensions = vec4(m_GiAtlas.x * 9.0, m_GiAtlas.y, m_GiAtlas.xy * floor(m_GiAtlas.z));
         vec2 skyResult;
-        vec4 value = giSampleVolume(worldPosition, normal, m_GiOrigin, m_GiSpacing, m_GiCounts,
+        vec3 bentResult;
+        vec4 value = giSampleVolume(worldPosition, normal, planeNormal, m_GiOrigin, m_GiSpacing, m_GiCounts,
                 m_GiEncoding, atlasInfo, dimensions, fract(m_GiAtlas.z) > 0.25 ? max(0.0, m_GiFadeDistance) : 0.0,
-                m_GiAtlas.w > 0.5, skyResult);
+                m_GiAtlas.w > 0.5, skyResult, bentResult);
+        giSkyBentMoment = bentResult * skyResult.y;
         giSkyDiffuseWeight = mix(1.0, skyResult.x, skyResult.y);
         return vec4(value.rgb * skyResult.y, skyResult.y);
     }
     vec3 sum = vec3(0.0);
     float total = 0.0;
     float skySum = 0.0;
+    vec3 bentSum = vec3(0.0);
     float coverage = 0.0;
     for (int volume = 0; volume < 16; volume++) {
         if (volume >= m_GiVolumeCount) {
@@ -390,14 +440,17 @@ vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
         }
         vec4 atlasInfo = texture2D(m_GiVolumeData, vec2(0.875, y));
         vec2 skyResult;
-        vec4 value = giSampleVolume(worldPosition, normal, origin.xyz, spacing.xyz, counts.xyz,
-                vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult);
+        vec3 bentResult;
+        vec4 value = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
+                vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult, bentResult);
+        bentSum += bentResult * value.a;
         skySum += skyResult.x * value.a;
         coverage = max(coverage, skyResult.y);
         sum += value.rgb * value.a;
         total += value.a;
     }
     giSkyDiffuseWeight = mix(1.0, total > 0.0 ? skySum / total : 1.0, coverage);
+    giSkyBentMoment = total > 0.0 ? bentSum / total * coverage : vec3(0.0);
     return vec4(total > 0.0 ? sum / total * coverage : vec3(0.0), coverage);
 }
 vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
@@ -408,6 +461,7 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
     if (m_GiBakeBounce) {
         giEnvironmentDiffuseWeight = 1.0;
         giSkyDiffuseWeight = 1.0;
+        giSkyBentMoment = vec3(0.0);
     }
     return sampleValue.rgb;
 }

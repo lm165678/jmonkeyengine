@@ -81,7 +81,7 @@ void main(){
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);
     #ifdef ENVIRONMENT_LIGHTING
-        surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, surface.normal),
+        surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, giSkyDirection(surface.normal)),
                 surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight * g_SkyIntensity;
         // Local reflections replace distant sky specular; they do not add energy.
         if (g_EnvironmentData.z > 0.5) {

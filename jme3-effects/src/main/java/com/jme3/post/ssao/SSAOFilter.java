@@ -348,6 +348,11 @@ public class SSAOFilter extends Filter {
         return useOnlyAo;
     }
 
+    @Override
+    public boolean isDiagnosticOutput() {
+        return useOnlyAo;
+    }
+
     /**
      * debugging only, will be removed
      *

@@ -50,6 +50,7 @@ public final class GiProbeVolume extends Node {
     private GiProbeData data;
     private Transform bakedTransform;
     private String streamAsset;
+    private String bakedSkyState;
     private long streamBytes;
     private float intensity = 1;
     private boolean stabilizedBlending;
@@ -345,7 +346,42 @@ public final class GiProbeVolume extends Node {
                 (int) counts.x, (int) counts.y, (int) counts.z);
     }
 
+    /**
+     * Checks static sky-bounce freshness without discarding the last completed bake.
+     * Legacy files report Unknown until rebaked. Call on the scene thread after
+     * sky controls have updated. This scans the scene; do not call per material.
+     * No volume or unloaded coverage means fully visible sky in the shader.
+     * <pre>{@code
+     * // 第一步：修改天光，直接天空照明立即变化。
+     * sky.setIntensity(2f);
+     * // 第二步：检查旧反弹光；显示提示，但继续使用旧结果。
+     * String status = volume.getSkyBakeStatus();
+     * // 第三步：手动重新运行 GiSceneBaker；成功后才替换结果并恢复 Current。
+     * // 取消或失败保留旧数据；恢复原强度可恢复原状态（未重新捕捉时）。
+     * }</pre>
+     * @return No bake, Unknown (rebake), Current, or Stale (rebake)
+     */
+    public String getSkyBakeStatus() {
+        if (data == null && streamAsset == null) {
+            return "No bake";
+        }
+        if (bakedSkyState == null) {
+            return "Unknown (rebake)";
+        }
+        com.jme3.scene.Spatial root = this;
+        while (root.getParent() != null) {
+            root = root.getParent();
+        }
+        return bakedSkyState.equals(GiSkyState.capture(root)) ? "Current" : "Stale (rebake)";
+    }
+
+    void publish(GiProbeData result, String skyState) {
+        publish(result);
+        bakedSkyState = skyState;
+    }
+
     void publish(GiProbeData result) {
+        bakedSkyState = null;
         data = result;
         streamAsset = null;
         streamBytes = 0;
@@ -370,6 +406,7 @@ public final class GiProbeVolume extends Node {
         out.write(data, "giData", null);
         out.write(streamAsset, "giStreamAsset", null);
         out.write(streamBytes, "giStreamBytes", 0L);
+        out.write(bakedSkyState, "giSkyState", null);
         out.write(intensity, "giIntensity", 1f);
         out.write(smoothBlending, "giSmoothBlending", false);
         out.write(stabilizedBlending, "giStabilizedBlending", false);
@@ -388,6 +425,7 @@ public final class GiProbeVolume extends Node {
         data = (GiProbeData) in.readSavable("giData", null);
         streamAsset = in.readString("giStreamAsset", null);
         streamBytes = in.readLong("giStreamBytes", 0L);
+        bakedSkyState = in.readString("giSkyState", null);
         setIntensity(in.readFloat("giIntensity", 1f));
         surfaceLayout = in.readBoolean("giSurfaceLayout", false);
         setSmoothBlending(in.readBoolean("giSmoothBlending", false));

@@ -1,0 +1,18 @@
+MaterialDef BloomUp {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Texture2D Detail
+        Vector2 TexelSize
+        Float Scatter
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/BloomUp.frag
+        Defines {
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+        }
+    }
+}

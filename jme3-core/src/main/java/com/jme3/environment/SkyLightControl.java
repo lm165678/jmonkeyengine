@@ -61,6 +61,7 @@ public final class SkyLightControl extends AbstractControl {
 
     public void requestRebake() {
         dirty = true;
+        light.invalidateCaptureRevision();
     }
 
     public int getResolution() {

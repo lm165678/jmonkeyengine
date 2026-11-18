@@ -50,7 +50,8 @@ import java.util.function.IntConsumer;
  * not a path-traced solver. shadowByteBudget covers depth maps and their atlas.
  * New bakes separate directly visible sky from surface radiance. Runtime adds
  * SkyLight diffuse multiplied by interpolated cosine-weighted sky visibility to
- * surface radiance SH. This is a low-frequency scalar visibility approximation:
+ * surface radiance SH. Visibility SH also supplies a bent-normal first moment.
+ * This is a low-frequency directional approximation, not full sky transfer:
  * strongly colored directional skies can require higher-fidelity transport.
  * Sky illumination still participates when shading captured surfaces. Set
  * Settings.separateSky=false only for legacy total-irradiance capture. Existing
@@ -123,7 +124,7 @@ public final class GiSceneBaker {
         public boolean compactStorage = true;
         /** Separate directly visible sky from bounced radiance (default true).
          * Sky remains in capture to illuminate surfaces. Visibility SH modulates
-         * runtime SkyLight; this low-frequency scalar occlusion approximates
+         * runtime SkyLight with a bent-normal direction; this low-frequency field approximates
          * directional colored-sky transport, not exact Lumen ray tracing. */
         public boolean separateSky = true;
         public boolean classifyProbes = true;

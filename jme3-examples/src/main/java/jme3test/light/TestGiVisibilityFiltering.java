@@ -30,10 +30,11 @@ import java.nio.ByteBuffer;
  * remain blocked. The normal hemisphere and spatial-stencil tests must also
  * remain valid when the angular support is widened.
  * The companion {@code giCompactVisibilitySmoke} task retains eight probes and
- * four bilinear moment taps. It checks planar illumination and fully blocked probes on
- * the same four paths and two materials. The compact moment filter can still
- * merge foreground/background distributions; it does not claim the strict
- * checkerboard occlusion guarantee of the wide reference mode.
+ * four moment reads with bilinear probability filtering. It checks planar
+ * illumination, mixed foreground/background and fully blocked probes on all
+ * four paths and two materials. Geometric receiver-plane bias and binary16
+ * depth tolerance avoid self-shadowing without mixing unrelated distributions.
+ * This finite angular filter is not a guarantee against all thin-wall leaks.
  * These synthetic cases do not validate curved receivers or a full scene's
  * indirect-light energy. Compare actual scene captures with matching shadow,
  * stable-blending and post-processing settings before accepting shader changes.
@@ -66,8 +67,12 @@ import java.nio.ByteBuffer;
  * 第十一步：启用 volume.setStabilizedBlending(true)，八探针使用连续可见性置信度；
  *         无需重烘焙，不增加距离图读取；在渲染线程恢复 false 可回到严格遮挡模式。
  *         稳定模式保留少量被遮挡探针贡献，需同时检查薄墙漏光；宽邻域和表面布局保持原行为。
+ * 第十二步：加载旧烘焙数据即可使用四采样可见性过滤，无需改变密度或重烘焙。
+ *         几何平面只参与遮挡和偏移；材质法线贴图仍参与光照响应。
+ *         重建引擎资源后部署到运行程序；此测试不修改场景文件。
  * </pre>
- */public final class TestGiVisibilityFiltering extends SimpleApplication {
+ */
+public final class TestGiVisibilityFiltering extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
         RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
     private static final boolean CONFIDENCE_SWEEP = Boolean.getBoolean("gi.test.confidenceSweep");
@@ -277,8 +282,9 @@ import java.nio.ByteBuffer;
                 System.out.println("GI_VISIBILITY values=" + java.util.Arrays.toString(values));
                 if (COMPACT) {
                     if (values[0] < 40 || Math.abs(values[1] - values[3]) > 1
-                            || values[1] >= values[0] / 2 || Math.abs(values[4] - values[0]) > 2) {
-                        throw new AssertionError("Compact visibility lost planar illumination or blocker rejection");
+                            || values[1] >= values[0] / 2 || Math.abs(values[4] - values[0]) > 2
+                            || values[2] <= values[1] || values[2] >= values[0] - 10) {
+                        throw new AssertionError("Compact visibility lost planar illumination, partial visibility or blocker rejection");
                     }
                     if (frame == 56 * 3 - 1) {
                         binding.close();

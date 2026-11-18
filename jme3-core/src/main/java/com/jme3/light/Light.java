@@ -84,7 +84,10 @@ public abstract class Light implements Savable, Cloneable {
          * Light probe
          * @see LightProbe
          */
-        Probe(4);
+        Probe(4),
+
+        /** Distant sky radiance, independent of local reflection selection. */
+        Sky(5);
                 
 
         private final int typeId;

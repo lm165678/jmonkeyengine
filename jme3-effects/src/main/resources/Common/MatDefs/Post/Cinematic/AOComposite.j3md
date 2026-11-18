@@ -1,0 +1,24 @@
+MaterialDef AOComposite {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Int NumSamplesDepth
+        Texture2D DepthTexture
+        Texture2D Occlusion
+        Matrix4 InverseProjection
+        Vector2 AOSize
+        Float Sharpness
+        Float Intensity
+        Boolean ShowOnly
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/AOComposite.frag
+        Defines {
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+            RESOLVE_DEPTH_MS: NumSamplesDepth
+        }
+    }
+}

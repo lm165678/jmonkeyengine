@@ -348,7 +348,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     @Override
     public void postQueue(RenderQueue rq) {
-        for (Filter filter : filters.getArray()) {
+        for (int i = 0; i <= lastFilterIndex; i++) {
+            Filter filter = filters.get(i);
             if (filter.isEnabled()) {
                 if (prof != null) {
                     prof.spStep(SpStep.ProcPostQueue, FPP, filter.getName());
@@ -361,9 +362,9 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     @Override
     public void appendPostQueuePasses(FrameGraph graph, RenderQueue queue) {
         filterGraph = graph;
-        int index = 0;
-        for (Filter filter : filters.getArray()) {
-            graph.addExpansionPass("Filter[" + index++ + "]:" + filter.getName(), current -> {
+        for (int index = 0; index <= lastFilterIndex; index++) {
+            Filter filter = filters.get(index);
+            graph.addExpansionPass("Filter[" + index + "]:" + filter.getName(), current -> {
                 if (filter.isEnabled()) {
                     if (prof != null) {
                         prof.spStep(SpStep.ProcPostQueue, FPP, filter.getName());
@@ -384,7 +385,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      * @param sceneFb The framebuffer containing the rendered scene (either MS or single-sample).
      */
     private void appendFilterChain(FrameGraph graph, Renderer r, FrameBuffer sceneFb) {
-        for (Filter filter : filters.getArray()) {
+        for (int i = 0; i <= lastFilterIndex; i++) {
+            Filter filter = filters.get(i);
             if (filter.isEnabled() && filter instanceof FrameGraphFilter) {
                 appendMixedFilterChain(graph, r, sceneFb);
                 return;
@@ -396,7 +398,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         ResourceHandle<FrameBuffer> scene = graph.importResource(
                 "Scene", FrameBuffer.class, () -> sceneFb);
         FrameGraph.PassBuilder previous = null;
-        for (int i = 0; i < filters.size(); i++) {
+        for (int i = 0; i <= lastFilterIndex; i++) {
             final int index = i;
             Filter filter = filters.get(i);
             if (!filter.isEnabled()) {
@@ -444,7 +446,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
             () -> depthTexture);
         boolean graphOutput = false;
         FilterChainState chain = new FilterChainState();
-        for (int i = 0; i < filters.size(); i++) {
+        for (int i = 0; i <= lastFilterIndex; i++) {
             Filter filter = filters.get(i);
             if (!filter.isEnabled()) {
                 continue;
@@ -683,6 +685,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     @Override
     public void preFrame(float tpf) {
+        // Diagnostic mode can change without changing a filter enabled flag.
+        updateLastFilterIndex();
         if (filters.isEmpty() || lastFilterIndex == -1) {
             // If no filters are enabled, restore the output framebuffer and
             // bypass the post-processor.
@@ -703,8 +707,9 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
             }
         }
 
-        // Call preFrame on all enabled filters
-        for (Filter filter : filters.getArray()) {
+        // Do not run callbacks for effects bypassed by a diagnostic output.
+        for (int i = 0; i <= lastFilterIndex; i++) {
+            Filter filter = filters.get(i);
             if (filter.isEnabled()) {
                 if (prof != null) {
                     prof.spStep(SpStep.ProcPreFrame, FPP, filter.getName());
@@ -737,6 +742,13 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      */
     private void updateLastFilterIndex() {
         lastFilterIndex = -1;
+        for (int i = 0; i < filters.size(); i++) {
+            Filter filter = filters.get(i);
+            if (filter.isEnabled() && filter.isDiagnosticOutput()) {
+                lastFilterIndex = i;
+                return;
+            }
+        }
         for (int i = filters.size() - 1; i >= 0 && lastFilterIndex == -1; i--) {
             if (filters.get(i).isEnabled()) {
                 lastFilterIndex = i;

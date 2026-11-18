@@ -12,6 +12,14 @@ plugins {
 
 ext.mainClassName = 'jme3test.TestChooser'
 
+tasks.register('cinematicPostSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestCinematicPostProcessing'
+    systemProperty 'cinematic.verify', 'true'
+}
+
 tasks.register('exposureSmoke', JavaExec) {
     dependsOn classes
     classpath = sourceSets.main.runtimeClasspath
@@ -981,6 +989,12 @@ tasks.register('managedShadowFilterSmoke', JavaExec) {
 tasks.register('skyLightSmoke', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'jme3test.light.TestSkyLight'
+    enableAssertions = true
+}
+
+tasks.register('skyVolumeCompositionSmoke', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.light.TestSkyVolumeComposition'
     enableAssertions = true
 }
 

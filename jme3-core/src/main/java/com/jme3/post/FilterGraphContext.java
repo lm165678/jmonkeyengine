@@ -80,8 +80,28 @@ public final class FilterGraphContext {
         if (w > Integer.MAX_VALUE || h > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Color target is too large");
         }
-        return graph.createResource(name(local), new ColorDefinition(
-            Math.max(1, (int) w), Math.max(1, (int) h), format));
+        return createColor(local, Math.max(1, (int) w), Math.max(1, (int) h), format);
+    }
+
+    /**
+     * Creates an exact-size transient target, for example a 1x1 exposure meter.
+     * Same ownership rules as the relative-size overload apply.
+     * <pre>{@code
+     * // 第一步：声明固定尺寸的测光结果，不分配视口大小的纹理。
+     * ResourceHandle<RenderTarget> meter = context.createColor("Meter", 1, 1, Image.Format.RGBA16F);
+     * // 第二步：context.draw("Measure", material, input, meter) 声明写入。
+     * }</pre>
+     * @param local scoped name
+     * @param width positive pixel width
+     * @param height positive pixel height
+     * @param format supported color format
+     * @return frame-local resource handle
+     */
+    public ResourceHandle<RenderTarget> createColor(String local, int width, int height, Image.Format format) {
+        if (width < 1 || height < 1) {
+            throw new IllegalArgumentException("Color dimensions must be positive");
+        }
+        return graph.createResource(name(local), new ColorDefinition(width, height, format));
     }
 
     /**
@@ -96,14 +116,43 @@ public final class FilterGraphContext {
      */
     public FrameGraph.PassBuilder draw(String local, Material material,
         ResourceHandle<RenderTarget> input, ResourceHandle<RenderTarget> output) {
+        return draw(local, material, input, output, java.util.Collections.emptyMap());
+    }
+
+    /**
+     * Draws with additional single-sample color inputs, binding textures only at
+     * execution and declaring all lifetimes. Extra parameters must be Texture2D.
+     * <pre>{@code
+     * // 第一步：先生成 bloom；第二步：声明合成时读取它，禁止手动缓存池中纹理。
+     * context.draw("Composite", material, scene, output, Map.of("BloomTexture", bloom));
+     * // 第三步：output 不能同时作为任何输入，避免 framebuffer feedback。
+     * }</pre>
+     * @param local pass name
+     * @param material material owned by the caller
+     * @param input primary input, optionally multisampled
+     * @param output separate output
+     * @param textures additional parameter-to-resource bindings
+     * @return pass declaration
+     */
+    public FrameGraph.PassBuilder draw(String local, Material material,
+        ResourceHandle<RenderTarget> input, ResourceHandle<RenderTarget> output,
+        java.util.Map<String, ResourceHandle<RenderTarget>> textures) {
         Objects.requireNonNull(material);
-        if (input == output) {
+        java.util.Map<String, ResourceHandle<RenderTarget>> bindings = new java.util.LinkedHashMap<>(textures);
+        if (input == output || bindings.containsValue(output)) {
             throw new IllegalArgumentException("Use a separate output, not texture feedback");
         }
-        return graph.addPass(name(local), context -> {
+        FrameGraph.PassBuilder pass = graph.addPass(name(local), context -> {
+            for (java.util.Map.Entry<String, ResourceHandle<RenderTarget>> entry : bindings.entrySet()) {
+                material.setTexture(entry.getKey(), context.get(entry.getValue()).getColorTexture(0));
+            }
             processor.drawGraphMaterial(material, context.get(input).getColorTexture(0),
                 context.get(depth), context.get(output).getFrameBuffer());
         }).read(input).read(depth).write(output);
+        for (ResourceHandle<RenderTarget> handle : bindings.values()) {
+            pass.read(handle);
+        }
+        return pass;
     }
 
     private static final class ColorDefinition implements ResourceDefinition<RenderTarget> {
