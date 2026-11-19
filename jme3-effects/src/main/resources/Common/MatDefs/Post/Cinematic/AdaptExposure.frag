@@ -7,6 +7,9 @@ uniform vec4 m_Settings;
 uniform vec2 m_Speeds;
 uniform float m_DeltaTime;
 uniform bool m_Reset;
+uniform bool m_UE4Mode;
+uniform vec2 m_Brightness;
+uniform float m_TransitionDistance;
 void main() {
     float cumulative = 0.0;
     float sum = 0.0;
@@ -23,11 +26,31 @@ void main() {
         cumulative += count;
     }
     float target = clamp(log2(0.18) - sum / max(total, 0.00001), m_Settings.x, m_Settings.y);
+    if (m_UE4Mode) {
+        float average = clamp(exp2(sum / max(total, 0.00001)), m_Brightness.x, m_Brightness.y);
+        target = log2(0.18 / average);
+    }
     float result = target;
     if (!m_Reset) {
         float previous = texture2D(m_History, vec2(0.5)).r;
         float speed = target > previous ? m_Speeds.x : m_Speeds.y;
-        result = mix(previous, target, 1.0 - exp(-speed * m_DeltaTime));
+        if (m_UE4Mode) {
+            // Exposure multiplier changes opposite to the metered scene brightness.
+            speed = target < previous ? m_Speeds.x : m_Speeds.y;
+            float distance = abs(target - previous);
+            float stepSize;
+            if (distance > m_TransitionDistance) {
+                stepSize = min(distance, speed * m_DeltaTime);
+            } else {
+                float epsilon = 1.0 / 60.0;
+                float scale = epsilon * speed / ((1.0 - exp2(-epsilon * speed)) * m_TransitionDistance);
+                stepSize = min(distance, distance * (1.0 - exp2(-m_DeltaTime * speed)) * scale);
+            }
+            result = previous + sign(target - previous) * stepSize;
+            result = clamp(result, log2(0.18 / m_Brightness.y), log2(0.18 / m_Brightness.x));
+        } else {
+            result = mix(previous, target, 1.0 - exp(-speed * m_DeltaTime));
+        }
     }
     gl_FragColor = vec4(result, target, 0.0, 1.0);
 }

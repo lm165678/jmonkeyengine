@@ -1,0 +1,33 @@
+MaterialDef CombineLUTs {
+    MaterialParameters {
+        Int BoundDrawBuffer
+        Int NumSamples
+        Texture2D Texture
+        Float Saturation
+        Float Contrast
+        Vector3 Gain
+        Vector3 Gamma
+        Vector3 Offset
+        Vector3 ShadowGain
+        Vector3 MidtoneGain
+        Vector3 HighlightGain
+        Vector4 Film
+        Float WhiteClip
+        Float Temperature
+        Float Tint
+        Float ExpandGamut
+        Float BlueCorrection
+        Texture2D UserLut -LINEAR
+        Float UserLutSize
+        Float LutWeight
+    }
+    Technique {
+        VertexShader GLSL300 GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL300 GLSL150: Common/MatDefs/Post/Cinematic/CombineLUTs.frag
+        Defines {
+            USER_LUT: UserLut
+            BOUND_DRAW_BUFFER: BoundDrawBuffer
+            RESOLVE_MS: NumSamples
+        }
+    }
+}

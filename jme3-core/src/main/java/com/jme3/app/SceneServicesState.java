@@ -16,6 +16,8 @@ import java.util.concurrent.*;
  * Automatic runtime services for the SimpleApplication world root. Loading an
  * asset alone has no side effects: attaching it to the root activates services
  * on the next application frame. Detached scenes release their registrations.
+ * Attached WorldSettings automatically restore the main viewport post-processing
+ * chain; manual FPPs take precedence. Removing the scene releases the owned chain.
  * Serialized GI volumes create a lazy page streamer; PhysicsControl instances
  * create/reuse a BulletAppState when an optional Bullet implementation is present.
  * Existing physics-space assignments are never stolen. Custom controls, sounds
@@ -62,6 +64,7 @@ import java.util.concurrent.*;
  */
 public final class SceneServicesState extends AbstractAppState {
     private SimpleApplication app;
+    private final com.jme3.post.WorldSettingsRuntime worldSettings = new com.jme3.post.WorldSettingsRuntime();
     private final ScenePhysicsBridge physics = new ScenePhysicsBridge();
     private final SceneServiceCatalog catalog = new SceneServiceCatalog();
     private final Map<GiProbeVolume, Source> sources = new IdentityHashMap<>();
@@ -92,6 +95,13 @@ public final class SceneServicesState extends AbstractAppState {
     public void update(float tpf) {
         catalog.refresh(app.getRootNode());
         physics.update(app, catalog.controls);
+        com.jme3.post.WorldSettings selected = null;
+        for (com.jme3.post.WorldSettings candidate : catalog.worlds) {
+            if (selected == null || candidate.getPriority() > selected.getPriority()) {
+                selected = candidate;
+            }
+        }
+        worldSettings.sync(selected, app.getAssetManager(), app.getViewPort(), app.getRenderer().getCaps());
     }
 
     /** Internal SimpleApplication render hook, after geometric updates. */
@@ -216,6 +226,7 @@ public final class SceneServicesState extends AbstractAppState {
     @Override
     public void setEnabled(boolean enabled) {
         if (!enabled) {
+            worldSettings.close();
             closeGi();
             physics.close();
             catalog.close();
@@ -225,6 +236,7 @@ public final class SceneServicesState extends AbstractAppState {
 
     @Override
     public void cleanup() {
+        worldSettings.close();
         closeGi();
         physics.close();
         catalog.close();

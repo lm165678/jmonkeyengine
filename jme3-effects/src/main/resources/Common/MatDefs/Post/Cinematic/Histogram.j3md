@@ -2,6 +2,8 @@ MaterialDef Histogram {
     MaterialParameters {
         Int BoundDrawBuffer
         Int NumSamples
+        Vector2 LogRange
+        Boolean UE4Mode
         Texture2D Texture
     }
     Technique {

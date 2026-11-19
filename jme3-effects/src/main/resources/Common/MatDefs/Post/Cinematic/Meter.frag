@@ -2,6 +2,8 @@
 #import "Common/ShaderLib/MultiSample.glsllib"
 uniform COLORTEXTURE m_Texture;
 varying vec2 texCoord;
+uniform vec2 m_LogRange;
+uniform bool m_UE4Mode;
 void main() {
     // Four stratified samples per metering cell. Store log luminance, not RGB.
     float value = 0.0;
@@ -9,7 +11,7 @@ void main() {
         for (int x = 0; x < 2; x++) {
             vec2 uv = texCoord + (vec2(float(x), float(y)) - 0.5) / 64.0;
             vec3 color = max(getColor(m_Texture, uv).rgb, vec3(0.0));
-            value += clamp(log2(max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.000244140625)), -12.0, 16.0);
+            value += clamp(log2(max(dot(color, vec3(0.2126, 0.7152, 0.0722)), exp2(m_LogRange.x))), m_LogRange.x, m_LogRange.y);
         }
     }
     gl_FragColor = vec4(value * 0.25, 0.0, 0.0, 1.0);

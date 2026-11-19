@@ -166,3 +166,7 @@ git pull --ff-only origin dev_feature_lightprobe
 - [ ] 更好方案通过后替换或减弱固定低通，记录数据兼容与恢复步骤。本项是待办，不追加实现；下次继续GI质量优化时主动提醒。
 
 复现相机：位置(5.7239,2.0553,-3.7907)，朝向(-.9887,-.1464,.0332)，FOV45。验收重点是平滑，不是偏黑就是错。诊断见DEV_HANDOFF；build产物为本机临时文件，跨机器需重新生成。
+
+## 2026-11-19 UE4-style SDR implementation checkpoint
+
+AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantics; ColorGradingFilter offers opt-in AP1 Film and cached CombineLUTs/ApplyColorLUT. Old modes remain defaults for compatibility. Targeted native numeric tests passed; see DEV_HANDOFF.md for limitations (sparse metering, approximate tint, no EV100/pre-exposure/PQ, partial tonal grading) and commands. Full UE visual parity, physical-camera exposure and later TAA remain pending.

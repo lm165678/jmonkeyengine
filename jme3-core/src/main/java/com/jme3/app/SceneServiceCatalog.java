@@ -15,6 +15,7 @@ final class SceneServiceCatalog implements AutoCloseable {
     final Set<GiProbeVolume> volumes = Collections.newSetFromMap(new IdentityHashMap<>());
     final Set<Material> materials = Collections.newSetFromMap(new IdentityHashMap<>());
     final Set<Control> controls = Collections.newSetFromMap(new IdentityHashMap<>());
+    final java.util.List<com.jme3.post.WorldSettings> worlds = new java.util.ArrayList<>();
     private Node root;
     private boolean dirty = true;
     private final SceneChangeListener listener = (spatial, change) -> {
@@ -37,6 +38,7 @@ final class SceneServiceCatalog implements AutoCloseable {
         volumes.clear();
         materials.clear();
         controls.clear();
+        worlds.clear();
         root.depthFirstTraversal(spatial -> {
             if (spatial instanceof GiProbeVolume) {
                 volumes.add((GiProbeVolume) spatial);
@@ -48,7 +50,11 @@ final class SceneServiceCatalog implements AutoCloseable {
                 }
             }
             for (int i = 0; i < spatial.getNumControls(); i++) {
-                controls.add(spatial.getControl(i));
+                Control control = spatial.getControl(i);
+                controls.add(control);
+                if (control instanceof com.jme3.post.WorldSettings) {
+                    worlds.add((com.jme3.post.WorldSettings) control);
+                }
             }
         });
         dirty = false;
@@ -63,6 +69,7 @@ final class SceneServiceCatalog implements AutoCloseable {
         volumes.clear();
         materials.clear();
         controls.clear();
+        worlds.clear();
         dirty = true;
     }
 }
