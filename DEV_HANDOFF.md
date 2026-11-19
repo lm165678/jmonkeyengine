@@ -1,3 +1,9 @@
+## 2026-11-19 temporal effects / Vulkan roadmap recorded (documentation only)
+
+- User requested recording and publishing the agreed TAA/GTAO/FSR/RHI/Vulkan development order. See the final pending section of RENDERING_QUALITY_ROADMAP.md for dependencies, references and acceptance criteria. This is not implementation authorization.
+- Start with necessary backend boundaries, then common temporal inputs/TAA, GTAO and FSR1 on OpenGL; complete Vulkan before official FSR2 integration, with FSR3 frame generation/presentation last. FSR2 itself does not generate frames. TAA reference: UE4 design/public materials plus Three.js TRAANode as a supplement; GTAO: original paper/XeGTAO, with Three.js as a supplement.
+- No source/API/runtime changes or build/tests for this documentation update. Compatible implementation pair below remains unchanged. Keep existing GI, performance and animation validation limits; this plan does not supersede them.
+
 ## 2026-11-19 compatible implementation revisions for GI/performance publication
 
 - Engine implementation: 45b41e76afab9172c0932cf45518f7d8ac16587b on dev_fix_lightprobe_issue; SDK implementation: 89566b32 on master. Documentation-only commits follow this pair. Export this engine before rebuilding SDK; no full SDK deployment was performed.

@@ -185,3 +185,28 @@ AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantic
 - [ ] 分离后端运行环境测试：同一中立资产分别在 JBullet/Minie 下保存重载、创建碰撞与交互；验证无后端加载、依赖冲突、缓存失效、复合形状/非均匀缩放、迁移失败保护和性能。
 
 背景：TestGame 引用了 JBullet，而 SDK 使用 Minie 9.0.3；现有碰撞对象反序列化产生 BVH 异常及后续空指针。此待办不表示现有资产已自动兼容，也不授权本轮实现。
+
+## 待办：TAA / GTAO / FSR 与 LWJGL Vulkan 后端（2026-11-19）
+
+用户要求记录以下路线，本轮仅更新文档，不实现功能。FSR 2 是时序超分辨率，不含帧生成；FSR 3 才引入帧生成。不要因版本混淆，把 TAA 或 FSR 2 的全部开发依赖于插帧呈现框架。
+
+建议顺序：必要 RHI 边界 → 公共时序基础与 TAA → GTAO → FSR 1 → 完整 Vulkan 后端 → 官方 FSR 2 → FSR 3 帧生成。FSR 1 不依赖时序基础，可按需求提前；GTAO 空间采样可先独立验证。无需等待完整 RHI 才开始效果开发，以 OpenGL 验证效果，再由 Vulkan 验证后端抽象。
+
+- [ ] 整理现有 Renderer/FrameGraph 的后端边界：资源描述、访问状态、同步、能力查询、渲染/输出尺寸及资源生命周期。逐步消除上层 GLFence、OpenGL barrier 位等依赖，保留现有 OpenGL 行为。RHI 不等于逐项包装 LWJGL 调用；避免一次性重写成熟路径。
+- [ ] 建立公共时序契约：明确速度单位、方向、坐标空间与 jitter 约定；保存相机/对象前帧矩阵、骨骼/Morph 前帧形变；覆盖 GPU Scene 与传统提交。历史按视口管理，定义切场景、相机切换/瞬移、resize、动态分辨率、曝光变化和效果启停的失效/恢复规则。
+- [ ] TAA 主要参考 UE4 的公开技术资料和完整时序管线设计：重投影、深度/遮挡显露拒绝、历史裁剪、抗闪烁和清晰度控制。Three.js TRAANode 可辅助核对实现；传统 TAARenderPass 不含重投影，不能作为动态场景成熟 TAA 的基础。明确透明、粒子、Alpha Test、形变和无速度材质的处理/回退，不把静态累积当作完成。
+- [ ] GTAO 主要参考原论文和 Intel XeGTAO，Three.js GTAOPass 用于辅助理解/调试。先验证深度预处理、空间采样和边缘滤波，再按需复用速度/历史进行时序稳定。明确 Forward/Deferred 输入及中性 GBuffer 的模型解码，AO 按光照分量合成，避免整体压暗直接光/发光，以及与 GI/天空已有遮挡重复计暗。
+- [ ] FSR 1：在 OpenGL 上先实现空间升采样，分离渲染与输出分辨率，明确抗锯齿、Tonemap、EASU/RCAS 和 UI 的执行顺序与色彩约定；UI 按输出分辨率绘制。保留原生分辨率及关闭后的恢复路径，不要求速度或历史。
+- [ ] 基于 LWJGL 完成 Vulkan 后端：资源/描述符绑定、pipeline 状态、shader 编译与变体、命令提交、队列/图像布局同步、延迟释放及 swapchain resize/out-of-date 生命周期。处理 OpenGL/Vulkan 深度和坐标差异，采用同一组效果/场景回归；SDK 原生窗口/AWT 嵌入兼容单独评估，不默认随 GLFW 窗口支持完成。
+- [ ] Vulkan 稳定后集成官方 FSR 2 时序超分辨率：复用速度、jitter、深度、曝光和历史重置契约，补齐所需透明/reactive 输入；作为常规 TAA 的替代重建选项，不默认在 TAA 后再次累积。官方 DX12/Vulkan 后端路线优先于自行维护 OpenGL 移植。
+- [ ] FSR 3 帧生成最后开发：在 Vulkan 呈现框架上验证交换链代理/调度、GPU 同步、帧节奏、输入延迟、UI 合成及窗口模式切换；分别统计真实渲染帧率与插帧输出帧率。预留接口不代表已支持插帧。
+- [ ] 每阶段独立开关、保留旧路径与恢复步骤，并提供 jme3-examples 可运行示例、源码中文分步用法和自动验证入口。固定曝光/分辨率比较静止、相机移动、骨骼/Morph、透明、细线/高光、遮挡显露、切场景及多视口；覆盖四条现有渲染路径和 Lighting/PBR，记录 GPU 时间、显存、拖影/闪烁及历史重置结果。不能仅用静态截图验收 TAA。
+
+参考资料（算法与架构参考，不表示照搬实现或已达到同等质量）：
+
+- [Epic Temporal Upscalers](https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-upscalers-in-unreal-engine)：时序输入、曝光与调试契约。
+- [GTAO 原论文](https://www.activision.com/cdn/research/PracticalRealtimeStrategiesTRfinal.pdf) 与 [Intel XeGTAO](https://github.com/GameTechDev/XeGTAO)：遮挡算法与工程参考。
+- [Three.js TRAANode](https://threejs.org/docs/pages/TRAANode.html)、[TAARenderPass 源码](https://github.com/mrdoob/three.js/blob/dev/examples/jsm/postprocessing/TAARenderPass.js)、[GTAOPass](https://threejs.org/docs/pages/GTAOPass.html)：区分重投影与静态累积，辅助验证。
+- [AMD FSR 1](https://gpuopen.com/fidelityfx-superresolution/)、[FSR 2](https://gpuopen.com/fidelityfx-superresolution-2/)、[FSR 3 集成文档](https://gpuopen.com/manuals/fidelityfx_sdk/techniques/super-resolution-interpolation/)：集成时重新核对选定版本的能力、后端与接口要求。
+
+下次继续时序效果、RHI 或 Vulkan 工作时主动读取本节；此待办不授权自动开始实现。
