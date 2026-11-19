@@ -1,3 +1,8 @@
+## 2026-11-19 compatible implementation revisions for GI/performance publication
+
+- Engine implementation: 45b41e76afab9172c0932cf45518f7d8ac16587b on dev_fix_lightprobe_issue; SDK implementation: 89566b32 on master. Documentation-only commits follow this pair. Export this engine before rebuilding SDK; no full SDK deployment was performed.
+- Focused engine publication tests passed 69/69. Expanded baseline failures and performance limits remain as recorded below. These implementation revisions supersede earlier working-tree pairing notes for this publication.
+
 ## 2026-11-19 FG/material optimization publication checkpoint
 - FrameGraph still rebuilds declarations every frame and uses current callbacks/import suppliers. A per-graph LRU of at most 64 exact declaration plans reuses validated culling/order/lifetimes, including expansion prefixes. Changes to dependencies/access/version/export declarations revalidate; runtime resources, sizes and barriers are not cached. No public API or quality setting change.
 - GPU Scene material watching folds hash and exact-value checks into one snapshot traversal, retaining mutable array/math/texture checks. Material sort-ID recomputation caches only texture-parameter membership; current texture/image IDs and original ordering formula remain unchanged. Clone/read/add/remove maintain the cache.
