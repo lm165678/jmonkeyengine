@@ -1,3 +1,6 @@
+## 2026-11-19 compatible publication revisions
+- Engine implementation: fbc68bd0d on dev_fix_lightprobe_issue; SDK implementation: dc5d1ec2 on master. Use this pair for WorldSettings, UE4-style post-processing and preceding sky composition changes. Documentation-only commits follow. Validation limits below remain applicable; no full SDK build for publication.
+
 ## 2026-11-19 publication checkpoint
 - Publish current WorldSettings, editor lifecycle and UE4-style post-processing source changes together with the existing sky-composition commits. Validation and limitations are recorded below; no full SDK build or deployment for publication.
 - SDK also includes binary Unity input diagnostics and conversion load-failure handling. Generated archives, extracted libraries/templates, crash logs and local build revision changes are excluded.
