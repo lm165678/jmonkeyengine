@@ -121,6 +121,10 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
     private boolean transparent = false;
     private boolean receivesShadows = false;
     private int sortingId = -1;
+    // Rebuilt only when texture parameters are added/removed. Values and native
+    // image IDs are still read on each sort-ID invalidation (including technique
+    // switches). Non-texture GI/uniform parameters cannot affect this key.
+    private transient MatParam[] sortingTextures;
 
     /**
      * Manages and tracks texture and buffer binding units for rendering.
@@ -218,6 +222,9 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
      * <p>The sorting ID is used internally by the system to sort rendering
      * of geometries. It sorted to reduce shader switches, if the shaders
      * are equal, then it is sorted by textures.
+     * Texture-parameter membership is cached internally; current texture values
+     * and native image IDs still participate whenever the sort ID is invalidated.
+     * Parameter setters, cloning and loading maintain this cache automatically.
      *
      * @return The sorting ID used for sorting geometries for rendering.
      */
@@ -225,11 +232,17 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         if (sortingId == -1 && technique != null) {
             sortingId = technique.getSortId() << 16;
             int texturesSortId = 17;
-            for (int i = 0; i < paramValues.size(); i++) {
-                MatParam param = paramValues.getValue(i);
-                if (!param.getVarType().isTextureType()) {
-                    continue;
+            if (sortingTextures == null) {
+                java.util.ArrayList<MatParam> textures = new java.util.ArrayList<>();
+                for (int i = 0; i < paramValues.size(); i++) {
+                    MatParam parameter = paramValues.getValue(i);
+                    if (parameter.getVarType().isTextureType()) {
+                        textures.add(parameter);
+                    }
                 }
+                sortingTextures = textures.toArray(new MatParam[0]);
+            }
+            for (MatParam param : sortingTextures) {
                 Texture texture = (Texture) param.getValue();
                 if (texture == null) {
                     continue;
@@ -270,6 +283,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
             }
 
             mat.sortingId = -1;
+            mat.sortingTextures = null;
 
             return mat;
         } catch (CloneNotSupportedException ex) {
@@ -599,6 +613,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
 
         paramValues.remove(name);
         if (matParam instanceof MatParamTexture) {
+            sortingTextures = null;
             sortingId = -1;
         }
         if (technique != null) {
@@ -630,6 +645,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         if (param == null) {
             param = new MatParamTexture(type, name, value, colorSpace);
             paramValues.put(name, param);
+            sortingTextures = null;
         } else {
             param.setTextureValue(value);
             param.setColorSpace(colorSpace);
@@ -1289,6 +1305,8 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
     @Override
     @SuppressWarnings("unchecked")
     public void read(JmeImporter im) throws IOException {
+        sortingTextures = null;
+        sortingId = -1;
         InputCapsule ic = im.getCapsule(this);
 
         name = ic.readString("name", null);

@@ -33,6 +33,7 @@ final class GiPagePool implements AutoCloseable {
         float intensity = 1;
         boolean stabilized;
         boolean wide;
+        boolean curved;
         boolean smooth;
         int index;
         int shRow;
@@ -146,9 +147,14 @@ final class GiPagePool implements AutoCloseable {
     }
 
     void appearance(String id, float intensity, float fade, boolean stabilized, boolean smooth, boolean wide) {
+        appearance(id, intensity, fade, stabilized, smooth, wide, false);
+    }
+
+    void appearance(String id, float intensity, float fade, boolean stabilized, boolean smooth, boolean wide, boolean curved) {
         Slot slot = slots.get(id);
-        if (slot != null && (slot.intensity != intensity || slot.fade != fade || slot.stabilized != stabilized || slot.wide != wide || slot.smooth)) {
+        if (slot != null && (slot.intensity != intensity || slot.fade != fade || slot.stabilized != stabilized || slot.wide != wide || slot.curved != curved || slot.smooth)) {
             slot.wide = wide;
+            slot.curved = curved;
             slot.smooth = false;
             slot.stabilized = stabilized;
             slot.intensity = intensity;
@@ -239,7 +245,7 @@ final class GiPagePool implements AutoCloseable {
         float[] values = {origin.x, origin.y, origin.z, slot.fade,
             spacing.x, spacing.y, spacing.z, data.distanceScale(),
             counts.x, counts.y, counts.z, data.irradianceScale() * slot.intensity,
-            data.columns(), slot.shRow, slot.visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0) + (slot.stabilized ? 0.125f : 0) + (slot.wide ? 0.015625f : 0)};
+            data.columns(), slot.shRow, slot.visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0) + (slot.stabilized ? 0.125f : 0) + (slot.wide ? 0.015625f : 0) + (slot.curved ? 0.0078125f : 0)};
         for (int c = 0; c < 16; c++) {
             metadata.getImage().getData(0).putFloat(slot.index * 64 + c * 4, values[c]);
         }

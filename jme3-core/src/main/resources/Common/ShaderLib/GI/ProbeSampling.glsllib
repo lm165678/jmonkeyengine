@@ -2,6 +2,8 @@
 
 // Set once per surface before evaluating environment and material response.
 float giEnvironmentDiffuseWeight = 1.0;
+// Inverse-world-length normal variation; set once per receiver, before coverage branches.
+float giReceiverCurvature = 0.0;
 float giSkyDiffuseWeight = 1.0;
 // Geometric coverage of total-light volumes, independent of the SH direction.
 float giTotalSkyCoverage = 0.0;
@@ -131,7 +133,7 @@ float giReadVisibility(float probe, vec3 direction, vec3 normal, float distanceT
 // visibility. Merging depths first invents variance at silhouettes and exposes
 // angular atlas facets. This still performs exactly four moment texture reads.
 float giCompactVisibility(float probe, vec3 direction, vec3 normal, float distanceToProbe,
-        vec4 atlasInfo, vec4 dimensions) {
+        vec4 atlasInfo, vec4 dimensions, float worldDistance) {
     float size = floor(atlasInfo.w);
     vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * size - 0.5;
     vec2 a = fract(p);
@@ -151,7 +153,16 @@ float giCompactVisibility(float probe, vec3 direction, vec3 normal, float distan
         // either would manufacture dark bands on curved/nearby receivers.
         float tapDistance = distanceToProbe;
         if (numerator * denominator > 0.0 && abs(denominator) > 1.0e-6) {
-            tapDistance = min(tapDistance, distanceToProbe * numerator / denominator);
+            float projected = min(tapDistance, distanceToProbe * numerator / denominator);
+            // A tangent plane is reliable over a planar footprint, not over an
+            // angular texel spanning a curved receiver. Geometry normals only;
+            // normal-map detail must not change the visibility estimator.
+            // Octahedral footprint estimate, not an exact angular bound. Fade the
+            // heuristic over 1..10 milliradians; flat geometry keeps full correction.
+            float footprintTurn = giReceiverCurvature * worldDistance / max(size, 1.0);
+            bool curved = mod(floor(fract(atlasInfo.w) * 128.0 + 0.01), 2.0) > 0.5;
+            float planarConfidence = curved ? 1.0 - smoothstep(0.001, 0.01, footprintTurn) : 1.0;
+            tapDistance = mix(tapDistance, projected, planarConfidence);
         }
         // One binary16 relative step covers stored-depth rounding and the
         // plane projection. This is depth tolerance, not a variance floor;
@@ -302,7 +313,8 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
         }
         float visibility;
         if (!wide && !surfaceLayout) {
-            visibility = giCompactVisibility(probe, direction, planeNormal, distanceToProbe / encoding.x, atlasInfo, dimensions);
+            visibility = giCompactVisibility(probe, direction, planeNormal,
+                    distanceToProbe / encoding.x, atlasInfo, dimensions, distanceToProbe);
         } else {
             visibility = giReadVisibility(probe, direction, normal, distanceToProbe / encoding.x, atlasInfo, dimensions);
         }
@@ -461,7 +473,17 @@ vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
     giSkyBentMoment = total > 0.0 ? bentSum / total * coverage : vec3(0.0);
     return vec4(total > 0.0 ? sum / total * coverage : vec3(0.0), coverage);
 }
-vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
+vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
+    // Use interpolated mesh normals, never perturbed material normals. This is
+    // a local curvature estimate, not a replacement for the actual triangle
+    // plane used by depth projection. Hard/flat-shaded meshes cannot supply
+    // smooth curvature information and retain the original plane behavior.
+    vec3 dx = dFdx(worldPosition);
+    vec3 dy = dFdy(worldPosition);
+    vec3 nx = dFdx(geometryNormal);
+    vec3 ny = dFdy(geometryNormal);
+    giReceiverCurvature = sqrt((dot(nx, nx) + dot(ny, ny))
+            / max(dot(dx, dx) + dot(dy, dy), 1.0e-20));
     vec4 sampleValue = giSampleIndirect(worldPosition, normal);
     giEnvironmentDiffuseWeight = 1.0 - sampleValue.a * (1.0 - clamp(m_GiEnvironmentMix, 0.0, 1.0));
     // Separated captures add direct sky to bounced radiance. Total captures
@@ -472,5 +494,10 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
         giSkyBentMoment = vec3(0.0);
     }
     return sampleValue.rgb;
+}
+// Compatibility for custom shaders without a separate geometry normal. Built-in
+// normal-mapped materials use the three-argument entry above.
+vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal) {
+    return giSampleIrradiance(worldPosition, normal, normal);
 }
 #endif

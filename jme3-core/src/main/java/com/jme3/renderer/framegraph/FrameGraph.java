@@ -209,6 +209,148 @@ public final class FrameGraph implements AutoCloseable {
             return this;
         }
     }
+    /** Exact declaration key: callbacks, suppliers and physical allocations are
+     * never cached. Dynamic values/viewport sizes remain execution-time state. */
+    private static final class TopologyKey {
+        final int[] declarations;
+        final int length;
+        final int hash;
+
+        TopologyKey(int[] declarations, int length) {
+            this.declarations = declarations;
+            this.length = length;
+            int value = 1;
+            for (int i = 0; i < length; i++) {
+                value = 31 * value + declarations[i];
+            }
+            hash = value;
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof TopologyKey
+                    && length == ((TopologyKey) other).length
+                    && java.util.Arrays.equals(declarations, 0, length,
+                            ((TopologyKey) other).declarations, 0, length);
+        }
+    }
+
+    private static final class CompiledTopology {
+        int[] order;
+        int[] lifetimes;
+        int[][] ordering;
+    }
+
+    // Expansions revisit several prefixes of one graph every frame. Keep a
+    // bounded per-graph cache: no static scene/resource retention or hash-only hits.
+    private final Map<TopologyKey, CompiledTopology> compiledTopologies =
+            new LinkedHashMap<TopologyKey, CompiledTopology>(8, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<TopologyKey, CompiledTopology> eldest) {
+                    return size() > 64;
+                }
+            };
+    private int[] declarationScratch = new int[128];
+    private int declarationCount;
+    private long topologyHits;
+    private long topologyMisses;
+
+    private void declaration(int value) {
+        if (declarationCount == declarationScratch.length) {
+            declarationScratch = java.util.Arrays.copyOf(declarationScratch, declarationCount * 2);
+        }
+        declarationScratch[declarationCount++] = value;
+    }
+
+    private void declarations(Set<Integer> values) {
+        declaration(values.size());
+        for (int value : values) {
+            declaration(value);
+        }
+    }
+
+    private TopologyKey topologyKey() {
+        declarationCount = 0;
+        declaration(resources.size());
+        for (Resource resource : resources) {
+            declaration(resource.imported == null ? 0 : 1);
+            declaration(resource.persistent == null ? 0 : 1);
+            declaration(resource.exported ? 1 : 0);
+            declaration(resource.previous == null ? -1 : resource.previous.handle.index);
+            declaration(resource.storage.handle.index);
+        }
+        declaration(passes.size());
+        for (PassBuilder pass : passes) {
+            declaration(pass.sideEffect ? 1 : 0);
+            declarations(pass.dependencies);
+            declarations(pass.orderingDependencies);
+            declarations(pass.reads);
+            for (int read : pass.reads) {
+                declaration(pass.readAccess.get(read).ordinal());
+            }
+            declarations(pass.writes);
+            for (int write : pass.writes) {
+                declaration(pass.writeAccess.get(write).ordinal());
+            }
+        }
+        // Lookup may borrow scratch storage only until this synchronous compile
+        // returns. Stored keys always own a copy (see rememberTopology).
+        return new TopologyKey(declarationScratch, declarationCount);
+    }
+
+    private boolean restoreTopology(TopologyKey key) {
+        CompiledTopology cached = compiledTopologies.get(key);
+        if (cached == null) {
+            topologyMisses++;
+            return false;
+        }
+        topologyHits++;
+        for (int i = 0; i < resources.size(); i++) {
+            Resource resource = resources.get(i);
+            resource.writer = cached.lifetimes[i * 3];
+            resource.first = cached.lifetimes[i * 3 + 1];
+            resource.last = cached.lifetimes[i * 3 + 2];
+        }
+        // Recreate compiler-added anti-dependencies, needed by later expansions.
+        for (int i = 0; i < passes.size(); i++) {
+            for (int prior : cached.ordering[i]) {
+                passes.get(i).orderingDependencies.add(prior);
+            }
+        }
+        List<PassBuilder> result = new ArrayList<>(cached.order.length);
+        for (int index : cached.order) {
+            result.add(passes.get(index));
+        }
+        schedule = Collections.unmodifiableList(result);
+        return true;
+    }
+
+    private void rememberTopology(TopologyKey key) {
+        CompiledTopology compiled = new CompiledTopology();
+        compiled.order = new int[schedule.size()];
+        for (int i = 0; i < schedule.size(); i++) {
+            compiled.order[i] = schedule.get(i).index;
+        }
+        compiled.lifetimes = new int[resources.size() * 3];
+        for (int i = 0; i < resources.size(); i++) {
+            Resource resource = resources.get(i);
+            compiled.lifetimes[i * 3] = resource.writer;
+            compiled.lifetimes[i * 3 + 1] = resource.first;
+            compiled.lifetimes[i * 3 + 2] = resource.last;
+        }
+        compiled.ordering = new int[passes.size()][];
+        for (int i = 0; i < passes.size(); i++) {
+            compiled.ordering[i] = passes.get(i).orderingDependencies.stream().mapToInt(Integer::intValue).toArray();
+        }
+        compiledTopologies.put(new TopologyKey(java.util.Arrays.copyOf(key.declarations, key.length),
+                key.length), compiled);
+    }
+
     private final List<Resource> resources = new ArrayList<>();
     private final List<PassBuilder> passes = new ArrayList<>();
     private final List<Slot> pool = new ArrayList<>();
@@ -253,6 +395,8 @@ public final class FrameGraph implements AutoCloseable {
      * ResourceHandle<RenderTarget> hdr = graph.findOrCreate("HDR", definition);
      * // 第三步：添加本帧 Pass，声明 read/write；然后 compile/execute。
      * // 不要把 hdr 保存到下一帧，下一帧应重新获取句柄。
+     * // 相同声明自动复用编译计划（最多 64 份），不需要应用端管理缓存。
+     * // 增删 Pass、改变读写/导出/依赖会重新校验；资源和回调仍使用本帧对象。
      * }</pre>
      */
     public void beginFrame() {
@@ -987,6 +1131,10 @@ public final class FrameGraph implements AutoCloseable {
     /**
      * Validates writers, uninitialized reads and cycles, then freezes the graph.
      * Unused passes are culled after validation. No GPU resources are allocated.
+     * Repeated exact declarations reuse a bounded compilation plan, including
+     * intermediate expansion prefixes. Callbacks/import suppliers, physical
+     * resources, barriers and runtime values are resolved for the current frame.
+     * Any declaration change revalidates normally; failures are never cached.
      * @throws IllegalStateException on invalid dependency declarations
      */
     public void compile() {
@@ -994,6 +1142,10 @@ public final class FrameGraph implements AutoCloseable {
             throw new IllegalStateException("Graph unavailable");
         }
         if (schedule != null) {
+            return;
+        }
+        TopologyKey key = topologyKey();
+        if (restoreTopology(key)) {
             return;
         }
         for (Resource r : resources) {
@@ -1121,6 +1273,7 @@ public final class FrameGraph implements AutoCloseable {
             }
         }
         schedule = Collections.unmodifiableList(result);
+        rememberTopology(key);
     }
     private void mark(int id, List<Set<Integer>> deps, Set<Integer> live) {
         if (live.add(id)) {
@@ -1519,6 +1672,7 @@ public final class FrameGraph implements AutoCloseable {
         try {
             clearResources();
         } finally {
+            compiledTopologies.clear();
             closed = true;
             ownerManager = null;
             ownerViewport = null;

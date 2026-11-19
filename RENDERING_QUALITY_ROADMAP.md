@@ -170,3 +170,18 @@ git pull --ff-only origin dev_feature_lightprobe
 ## 2026-11-19 UE4-style SDR implementation checkpoint
 
 AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantics; ColorGradingFilter offers opt-in AP1 Film and cached CombineLUTs/ApplyColorLUT. Old modes remain defaults for compatibility. Targeted native numeric tests passed; see DEV_HANDOFF.md for limitations (sparse metering, approximate tint, no EV100/pre-exposure/PQ, partial tonal grading) and commands. Full UE visual parity, physical-camera exposure and later TAA remain pending.
+
+## 待办：中立碰撞资产与物理后端适配（2026-11-19）
+
+用户要求记录设计，暂不实现。目标是 SDK 一次烘焙，J3O 保存中立描述，游戏运行时由所选物理后端创建对象；不在同一个 J3O 中直接保存两套 JBullet/Minie 对象。
+
+- [ ] 定义版本化 CollisionDescription：基本形状、凸包、三角网格、复合形状、顶点/索引、子形状变换，以及质量、摩擦、恢复系数、碰撞组等参数。明确坐标、单位、缩放与数据所有权。
+- [ ] SDK 烘焙与预览使用中立描述，保存不依赖具体物理实现类；无物理库时仍可加载/显示模型并保留描述，加载模型与启用物理分开。
+- [ ] 提供独立 JBullet/Minie 适配模块。配置显式选择后端；仅存在一个实现时允许自动选择，冲突或不支持时清晰报错。两库含同名类，不通过普通 classpath 共存或反序列化失败后偷偷切换解决。
+- [ ] 明确共同能力与后端扩展参数；不支持的形状/参数需报告或使用用户明确选择的降级方案，不静默丢失。相同描述不承诺模拟数值完全相同。
+- [ ] 按需设计后端专用烘焙缓存，包含后端/版本/平台/输入摘要；缓存失效时从中立描述重建，评估大型网格加载耗时和存储成本。
+- [ ] 为旧 J3O 中直接保存的 RigidBodyControl/碰撞形状提供迁移工具：在匹配原物理库的环境读取，提取中立描述后另存；失败保留原资产，不依赖错误后端强行读取。
+- [ ] 定义线程、启用/禁用、重复实例、物理空间注册与释放生命周期；提供详细中文分步用法注释及 SDK 操作说明。
+- [ ] 分离后端运行环境测试：同一中立资产分别在 JBullet/Minie 下保存重载、创建碰撞与交互；验证无后端加载、依赖冲突、缓存失效、复合形状/非均匀缩放、迁移失败保护和性能。
+
+背景：TestGame 引用了 JBullet，而 SDK 使用 Minie 9.0.3；现有碰撞对象反序列化产生 BVH 异常及后续空指针。此待办不表示现有资产已自动兼容，也不授权本轮实现。

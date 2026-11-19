@@ -22,6 +22,9 @@ import java.util.Map;
  * composer-scaled seconds; negative playback is unsupported. 1D blends clamp at
  * endpoints, blend adjacent samples, and synchronize normalized phase using the
  * longest clip's duration. Missing tracks use the pose captured at construction.
+ * Zero-duration clips (for example a single-frame T-pose) hold their time-zero
+ * pose, with or without looping. They can blend with moving clips and leave via
+ * the same elapsed-time/parameter transitions; no synthetic duration is added.
  * Transform and morph tracks are supported; unknown track types fail validation.
  * Root motion remains ordinary transform animation, without physics extraction.
  * <pre>{@code
@@ -240,7 +243,12 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         for (String clip : state.clips) {
             length = Math.max(length, composer.getAnimClip(clip).getLength());
         }
-        double phase = state.loop ? (seconds % length) / length : Math.min(1, seconds / length);
+        // A zero-duration state holds its first pose, including looping T-poses.
+        // Transition exit times still use elapsed seconds, not normalized phase.
+        double phase = 0;
+        if (length > 0) {
+            phase = state.loop ? (seconds % length) / length : Math.min(1, seconds / length);
+        }
         float value = state.clips.size() == 1 ? state.threshold(0) : values.get(state.parameter);
         int lower = 0;
         while (lower + 1 < state.clips.size() && value >= state.threshold(lower + 1)) {

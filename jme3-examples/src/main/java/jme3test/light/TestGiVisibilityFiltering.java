@@ -49,6 +49,11 @@ import java.nio.ByteBuffer;
  * sky visibility are unchanged. This smooths directional contrast, not spatial
  * occlusion. Bounce capture bypasses the window to avoid repeated filtering.
  * Raw CPU evaluateProbeIrradiance remains the unwindowed data diagnostic.
+ * Optional compact receiver-plane projection fades with interpolated mesh-normal
+ * variation over the angular moment footprint. Planar receivers retain their
+ * correction; material normal maps do not control the fade. This heuristic is
+ * not exact curved-surface transport and requires smooth mesh normals. Strict
+ * zero-visibility rejection and the four moment reads are retained.
  * The compact path retains four moment reads per probe. Increasing the filter
  * to sixteen taps was rejected for its frame cost and remaining scene artifacts.
  * A passing synthetic test does not establish correctness of the baked field.
@@ -70,6 +75,13 @@ import java.nio.ByteBuffer;
  * 第十二步：加载旧烘焙数据即可使用四采样可见性过滤，无需改变密度或重烘焙。
  *         几何平面只参与遮挡和偏移；材质法线贴图仍参与光照响应。
  *         重建引擎资源后部署到运行程序；此测试不修改场景文件。
+ * 第十三步：默认关闭曲面修正以兼容旧方案；在渲染线程调用
+ *         volume.setCurvedReceiverCorrection(true) 后光滑曲面限制平面投影，无需重烘焙。
+ *         调用 setCurvedReceiverCorrection(false) 恢复旧方案；保存 J3O 保留此选项。
+ *         比较原平面墙体、拱顶和掠射角，保留原八探针四采样配置。
+ *         自定义 shader 应传入 giSampleIrradiance(position, shadingNormal, geometryNormal)，
+ *         第三个参数为归一化的原始网格法线；旧二参数入口仍可用。
+ *         恢复旧 shader 资源可撤回此运行时行为，烘焙格式保持兼容。
  * </pre>
  */
 public final class TestGiVisibilityFiltering extends SimpleApplication {

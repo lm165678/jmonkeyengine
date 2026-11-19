@@ -226,7 +226,7 @@ void main(){
     #ifdef GI_PROBES
         if (g_IsFirstLightPass) {
             gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
-                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal) / 3.14159265359;
+                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;
         }
     #endif
     #ifdef ENVIRONMENT_LIGHTING
@@ -273,7 +273,7 @@ void main(){
     #ifdef GI_PROBES
         if (g_IsFirstLightPass) {
             gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
-                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal) / 3.14159265359;
+                    * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;
         }
     #endif
     #ifdef ENVIRONMENT_LIGHTING

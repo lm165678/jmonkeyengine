@@ -125,8 +125,10 @@ public final class AnimationGraph {
                         "Thresholds must increase: " + s.name);
                 if (composer != null) {
                     require(composer.hasAnimClip(s.clips.get(i)), "Missing clip: " + s.clips.get(i));
-                    require(composer.getAnimClip(s.clips.get(i)).getLength() > 0,
-                            "Clip has no duration: " + s.clips.get(i));
+                    double length = composer.getAnimClip(s.clips.get(i)).getLength();
+                    // Single-frame poses are valid clips; sampling holds time zero.
+                    require(Double.isFinite(length) && length >= 0,
+                            "Invalid clip duration: " + s.clips.get(i));
                 }
             }
         }

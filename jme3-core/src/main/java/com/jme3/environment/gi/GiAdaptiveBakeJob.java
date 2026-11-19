@@ -183,6 +183,7 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
                 refinement.setIntensity(target.getIntensity());
                 refinement.setStabilizedBlending(target.isStabilizedBlending());
                 refinement.setWideProbeSampling(target.isWideProbeSampling());
+                refinement.setCurvedReceiverCorrection(target.isCurvedReceiverCorrection());
                 refinement.setSmoothBlending(target.isSmoothBlending());
                 target.attachChild(refinement);
                 ready.add(refinement);

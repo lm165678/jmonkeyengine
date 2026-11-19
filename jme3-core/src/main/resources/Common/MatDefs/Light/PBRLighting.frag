@@ -76,7 +76,7 @@ void main(){
 
     vec3 volumeIrradiance = vec3(0.0);
     #ifdef GI_PROBES
-        volumeIrradiance = giSampleIrradiance(wpos, surface.normal);
+        volumeIrradiance = giSampleIrradiance(wpos, surface.normal, surface.geometryNormal);
     #endif
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);

@@ -90,6 +90,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         int state;
         final Material snapshot;
         final int parameterHash;
+        final com.jme3.material.MatParam[] parameters;
         final Set<Geometry> users = Collections.newSetFromMap(new IdentityHashMap<>());
 
         MaterialWatch(Material material) {
@@ -105,6 +106,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
                 }
             }
             parameterHash = parameterHash(material);
+            parameters = snapshot.getParams().toArray(new com.jme3.material.MatParam[0]);
         }
 
         boolean changed(Material material) {
@@ -120,22 +122,28 @@ public final class GpuScenePipeline implements OpaquePipeline {
             if (snapshot.isTransparent() != material.isTransparent()
                     || snapshot.isReceivesShadows() != material.isReceivesShadows()
                     || snapshot.isBindlessTextures() != material.isBindlessTextures()
-                    || parameterHash != parameterHash(material)
                     || snapshot.getParams().size() != material.getParams().size()) {
                 return true;
             }
-            for (com.jme3.material.MatParam parameter : snapshot.getParams()) {
+            int currentHash = 0;
+            for (com.jme3.material.MatParam parameter : parameters) {
                 com.jme3.material.MatParam current = material.getParam(parameter.getName());
                 if (current == null || parameter.getVarType() != current.getVarType()
                         || !Objects.deepEquals(parameter.getValue(), current.getValue())) {
                     return true;
                 }
+                // Fold the original hash check into the exact-value traversal.
+                // Keep texture identity/mutable hashes and deep array checks.
+                currentHash += current.hashCode();
                 if (parameter.getValue() instanceof com.jme3.texture.Texture
                         || parameter.getValue() instanceof BufferObject) {
                     if (parameter.getValue() != current.getValue() || !parameter.equals(current)) {
                         return true;
                     }
                 }
+            }
+            if (currentHash != parameterHash) {
+                return true;
             }
             revision = material.getContentRevision();
             return false;

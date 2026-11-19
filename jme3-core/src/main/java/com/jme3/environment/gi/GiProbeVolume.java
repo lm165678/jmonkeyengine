@@ -55,6 +55,7 @@ public final class GiProbeVolume extends Node {
     private float intensity = 1;
     private boolean stabilizedBlending;
     private boolean wideProbeSampling;
+    private boolean curvedReceiverCorrection;
     private boolean smoothBlending;
     private boolean surfaceLayout;
     private float fadeDistance;
@@ -213,6 +214,36 @@ public final class GiProbeVolume extends Node {
         for (com.jme3.scene.Spatial child : getChildren()) {
             if (child instanceof GiProbeVolume) {
                 ((GiProbeVolume) child).setWideProbeSampling(enabled);
+            }
+        }
+    }
+
+    /** Whether curved receivers limit plane extrapolation; defaults false for old lighting. */
+    public boolean isCurvedReceiverCorrection() {
+        return curvedReceiverCorrection;
+    }
+
+    /**
+     * Opt-in compact GI curved-receiver correction. Default/missing-field false
+     * preserves the previous plane algorithm. Applies to eight-probe grids only;
+     * wide/surface layouts keep their existing algorithms. No rebake is needed.
+     * Smooth mesh normals are required; this is a heuristic, not exact transport.
+     * Call on the owning render thread after attachment; save J3O to retain it.
+     * <pre>{@code
+     * // 第一步：先用默认 false 对照旧的墙面、墙脚和遮挡效果。
+     * volume.setCurvedReceiverCorrection(false);
+     * // 第二步：拱顶出现 GI 分面亮条时开启；自动场景服务下一帧更新绑定。
+     * volume.setCurvedReceiverCorrection(true);
+     * // 第三步：关闭立即恢复旧算法，无需修改或重新烘焙探针资源。
+     * volume.setCurvedReceiverCorrection(false);
+     * }</pre>
+     * @param enabled true to limit plane projection on smooth curved receivers
+     */
+    public void setCurvedReceiverCorrection(boolean enabled) {
+        curvedReceiverCorrection = enabled;
+        for (com.jme3.scene.Spatial child : getChildren()) {
+            if (child instanceof GiProbeVolume) {
+                ((GiProbeVolume) child).setCurvedReceiverCorrection(enabled);
             }
         }
     }
@@ -411,6 +442,7 @@ public final class GiProbeVolume extends Node {
         out.write(smoothBlending, "giSmoothBlending", false);
         out.write(stabilizedBlending, "giStabilizedBlending", false);
         out.write(wideProbeSampling, "giWideProbeSampling", false);
+        out.write(curvedReceiverCorrection, "giCurvedReceiverCorrection", false);
         out.write(surfaceLayout, "giSurfaceLayout", false);
         out.write(fadeDistance, "giFadeDistance", 0f);
         out.write(bakedTransform, "giBakeTransform", null);
@@ -431,6 +463,7 @@ public final class GiProbeVolume extends Node {
         setSmoothBlending(in.readBoolean("giSmoothBlending", false));
         setStabilizedBlending(in.readBoolean("giStabilizedBlending", false));
         setWideProbeSampling(in.readBoolean("giWideProbeSampling", false));
+        setCurvedReceiverCorrection(in.readBoolean("giCurvedReceiverCorrection", false));
         setFadeDistance(in.readFloat("giFadeDistance", 0f));
         bakedTransform = (Transform) in.readSavable("giBakeTransform", null);
         getGrid();

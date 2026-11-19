@@ -13,6 +13,35 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AnimationGraphTest {
+    @Test
+    void singleFramePoseHoldsAndTransitions() throws Exception {
+        for (boolean loop : new boolean[]{false, true}) {
+            Node node = model();
+            AnimComposer composer = node.getControl(AnimComposer.class);
+            AnimClip pose = new AnimClip("T-pose");
+            pose.setTracks(new AnimTrack[]{new TransformTrack(node, new float[]{0},
+                new Vector3f[]{new Vector3f(3, 0, 0)}, null, null)});
+            composer.addAnimClip(pose);
+            AnimationGraph definition = new AnimationGraph("T-pose", Collections.emptyList(),
+                    Arrays.asList(state("T-pose", loop), state("Walk", true)),
+                    Collections.singletonList(new Transition("T-pose", "Walk", "",
+                            Operator.ALWAYS, 0, 1, 2)));
+            node.setUserData(AnimationGraph.USER_DATA, definition.encode());
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            new BinaryExporter().save(node, bytes);
+            Node loaded = (Node) new BinaryImporter().load(bytes.toByteArray());
+            AnimationGraphPlayer player = AnimationGraphPlayer.attach(loaded);
+            loaded.updateLogicalState(1);
+            assertEquals(3, loaded.getLocalTranslation().x, 0.001);
+            loaded.updateLogicalState(1);
+            loaded.updateLogicalState(0.5f);
+            assertEquals(6.5, loaded.getLocalTranslation().x, 0.001);
+            loaded.updateLogicalState(0.5f);
+            assertEquals(10, loaded.getLocalTranslation().x, 0.001);
+            player.close();
+        }
+    }
+
     private Node model() {
         Node node = new Node("character");
         AnimComposer composer = new AnimComposer();

@@ -150,7 +150,7 @@ public final class SceneServicesState extends AbstractAppState {
             Source old = sources.get(volume);
             if (old != null && old.data == data && Objects.equals(old.asset, asset)
                     && old.offset.equals(offset)) {
-                gi.setAppearance(old.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling());
+                gi.setAppearance(old.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling(), volume.isCurvedReceiverCorrection());
                 continue;
             }
             if (old != null) {
@@ -180,7 +180,7 @@ public final class SceneServicesState extends AbstractAppState {
                         }));
             }
             sources.put(volume, source);
-            gi.setAppearance(source.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling());
+            gi.setAppearance(source.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling(), volume.isCurvedReceiverCorrection());
         }
         gi.update(app.getCamera().getLocation(), 0, 0, 0);
         for (Material material : catalog.materials) {
