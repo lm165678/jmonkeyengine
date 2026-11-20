@@ -13,8 +13,9 @@ import java.util.Objects;
 
 /**
  * Frame-local graph-native filter builder. Names are scoped to the filter's index
- * and name, so multiple instances do not collide. Sizes are relative to the FPP
- * scene dimensions, never the size left on the camera by a preceding blur pass.
+ * and name, so multiple instances do not collide. Sizes are relative to the
+ * current pipeline phase: render dimensions before upscaling, output dimensions
+ * afterward, never the size left on the camera by a preceding blur pass.
  * Materials follow jME's Texture/NumSamples and DepthTexture/NumSamplesDepth
  * conventions. Use MultiSample.glsllib for sampling multisampled inputs.
  */
@@ -34,6 +35,19 @@ public final class FilterGraphContext {
         this.width = width;
         this.height = height;
         this.depth = depth;
+    }
+
+    /**
+     * Draws a backend-produced texture during a graph pass executor, not during
+     * declaration. The enclosing pass must declare all input reads/output writes.
+     * Intended for native compute adapters whose output is not graph-owned.
+     * <pre>{@code
+     * // 原生重建在 Pass 执行期完成后，复制到本 Pass 已声明的输出目标。
+     * context.drawResolved(copyMaterial, nativeResult, pass.get(output).getFrameBuffer());
+     * }</pre>
+     */
+    public void drawResolved(Material material, Texture2D color, com.jme3.texture.FrameBuffer output) {
+        processor.drawGraphMaterial(material, color, null, output);
     }
 
     /** @return shared graph for custom compute/draw passes; do not execute/close it */

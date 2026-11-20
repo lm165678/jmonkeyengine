@@ -69,7 +69,8 @@ import java.util.List;
 /**
  * A `FilterPostProcessor` is a {@link SceneProcessor} that can apply several
  * {@link Filter}s to a rendered scene. It manages a list of filters that will be
- * applied in the order in which they have been added. This processor handles
+ * applied in insertion order unless an enabled UpscalingStage requests pipeline
+ * phase ordering through Filter.getPipelineOrder(). This processor handles
  * rendering the main scene to an offscreen framebuffer, then applying each enabled
  * filter sequentially, optionally with anti-aliasing (multisampling) and depth texture
  * support.
@@ -88,7 +89,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     /**
      * Returns the shared viewport graph after this processor has registered passes.
-     * Filter order is preserved, including custom callback side effects. Targets
+     * Execution follows insertion order, or phase order with active upscaling. Targets
      * from legacy Filter owners are imported; native transient targets are graph-owned.
      * <pre>{@code
      * // 第一步：按原有接口添加 Filter，不需要手动建图。
@@ -123,6 +124,78 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     private boolean useFullscreenTriangle = false;
     private Geometry fsQuad;
     private boolean computeDepth = false;
+    private final List<Filter> effectiveFilters = new ArrayList<>();
+    private final java.util.Set<Filter> suppressedAA = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private UpscalingStage upscalingStage;
+    private float appliedRenderScale = 1;
+    private int appliedUpscalingOrder;
+    private Filter[] pipelineSource;
+    private int pipelineOrder;
+
+    private List<Filter> pipeline() {
+        return effectiveFilters;
+    }
+
+    private boolean active(Filter filter) {
+        return filter.isEnabled() && !suppressedAA.contains(filter);
+    }
+
+    /** Whether temporal upscaling currently bypasses a filter without changing its enabled preference. */
+    public boolean isFilterBypassed(Filter filter) {
+        return suppressedAA.contains(filter);
+    }
+
+    private void refreshPipeline() {
+        Filter[] source = filters.getArray();
+        UpscalingStage selected = null;
+        for (Filter filter : source) {
+            if (filter instanceof UpscalingStage && filter.isEnabled()) {
+                if (selected != null) {
+                    throw new IllegalStateException("Only one upscaling stage may be enabled");
+                }
+                selected = (UpscalingStage) filter;
+            }
+        }
+        int order = selected == null ? 0 : ((Filter) selected).getPipelineOrder();
+        if (pipelineSource == source && selected == upscalingStage && pipelineOrder == order) {
+            return;
+        }
+        pipelineSource = source;
+        pipelineOrder = order;
+        upscalingStage = selected;
+        effectiveFilters.clear();
+        java.util.Collections.addAll(effectiveFilters, source);
+        suppressedAA.retainAll(effectiveFilters);
+        if (upscalingStage != null) {
+            effectiveFilters.sort(java.util.Comparator.comparingInt(Filter::getPipelineOrder));
+        }
+        for (Filter filter : filters.getArray()) {
+            boolean bypass = upscalingStage != null && upscalingStage.replacesAntiAliasing()
+                    && filter.isAntiAliasingFilter();
+            boolean old = suppressedAA.contains(filter);
+            if (bypass != old) {
+                if (bypass) {
+                    suppressedAA.add(filter);
+                } else {
+                    suppressedAA.remove(filter);
+                }
+                filter.onPipelineBypass(bypass);
+            }
+        }
+    }
+
+    private boolean afterUpscaling(Filter filter) {
+        return upscalingStage != null && pipeline().indexOf(filter) > pipeline().indexOf((Filter) upscalingStage);
+    }
+
+    private int filterWidth(Filter filter) {
+        return afterUpscaling(filter) ? Math.max(1, Math.round(originalWidth * Math.abs(right - left))) : width;
+    }
+
+    private int filterHeight(Filter filter) {
+        return afterUpscaling(filter) ? Math.max(1, Math.round(originalHeight * Math.abs(top - bottom))) : height;
+    }
+
     private FrameBuffer outputBuffer;
     private int width;
     private int height;
@@ -147,6 +220,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     private AppProfiler prof;
 
     private Format fbFormat = null;
+    private Format configuredFbFormat;
     private Format depthFormat = Format.Depth;
 
     /**
@@ -179,7 +253,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     /**
      * Adds a filter to the list of filters to be applied. Filters are applied
-     * in the order they are added. If the processor is already initialized,
+     * in insertion order unless upscaling is active (see Filter.getPipelineOrder()).
+     * If the processor is already initialized,
      * the filter is immediately initialized as well.
      *
      * @param filter The filter to add (not null).
@@ -292,10 +367,10 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
                 renderFrameBuffer.setDepthTarget(FrameBufferTarget.newTarget(depthTexture));
             }
             computeDepth = true; // Mark that depth texture is needed
-            filter.init(assetManager, renderManager, vp, width, height);
+            filter.init(assetManager, renderManager, vp, filterWidth(filter), filterHeight(filter));
             filter.setDepthTexture(depthTexture);
         } else {
-            filter.init(assetManager, renderManager, vp, width, height);
+            filter.init(assetManager, renderManager, vp, filterWidth(filter), filterHeight(filter));
         }
     }
 
@@ -349,8 +424,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     @Override
     public void postQueue(RenderQueue rq) {
         for (int i = 0; i <= lastFilterIndex; i++) {
-            Filter filter = filters.get(i);
-            if (filter.isEnabled()) {
+            Filter filter = pipeline().get(i);
+            if (active(filter)) {
                 if (prof != null) {
                     prof.spStep(SpStep.ProcPostQueue, FPP, filter.getName());
                 }
@@ -363,9 +438,9 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     public void appendPostQueuePasses(FrameGraph graph, RenderQueue queue) {
         filterGraph = graph;
         for (int index = 0; index <= lastFilterIndex; index++) {
-            Filter filter = filters.get(index);
+            Filter filter = pipeline().get(index);
             graph.addExpansionPass("Filter[" + index + "]:" + filter.getName(), current -> {
-                if (filter.isEnabled()) {
+                if (active(filter)) {
                     if (prof != null) {
                         prof.spStep(SpStep.ProcPostQueue, FPP, filter.getName());
                     }
@@ -386,8 +461,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      */
     private void appendFilterChain(FrameGraph graph, Renderer r, FrameBuffer sceneFb) {
         for (int i = 0; i <= lastFilterIndex; i++) {
-            Filter filter = filters.get(i);
-            if (filter.isEnabled() && filter instanceof FrameGraphFilter) {
+            Filter filter = pipeline().get(i);
+            if (active(filter) && filter instanceof FrameGraphFilter) {
                 appendMixedFilterChain(graph, r, sceneFb);
                 return;
             }
@@ -400,8 +475,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         FrameGraph.PassBuilder previous = null;
         for (int i = 0; i <= lastFilterIndex; i++) {
             final int index = i;
-            Filter filter = filters.get(i);
-            if (!filter.isEnabled()) {
+            Filter filter = pipeline().get(i);
+            if (!active(filter)) {
                 continue;
             }
             if (filter.getPostRenderPasses() != null) {
@@ -447,14 +522,14 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         boolean graphOutput = false;
         FilterChainState chain = new FilterChainState();
         for (int i = 0; i <= lastFilterIndex; i++) {
-            Filter filter = filters.get(i);
-            if (!filter.isEnabled()) {
+            Filter filter = pipeline().get(i);
+            if (!active(filter)) {
                 continue;
             }
             String prefix = "Filter[" + i + "]:" + filter.getName();
             ResourceHandle<RenderTarget> input = color;
             if (filter instanceof FrameGraphFilter) {
-                FilterGraphContext builder = new FilterGraphContext(graph, this, prefix, width, height, depth);
+                FilterGraphContext builder = new FilterGraphContext(graph, this, prefix, filterWidth(filter), filterHeight(filter), depth);
                 color = java.util.Objects.requireNonNull(
                     ((FrameGraphFilter) filter).build(builder, input), "Graph filter returned null");
                 graphOutput = true;
@@ -565,7 +640,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     }
 
     private void renderFilterPass(Renderer r, FilterChainState chain, Filter filter, Filter.Pass pass) {
-        if (!filter.isEnabled()) {
+        if (!active(filter)) {
             return;
         }
         boolean msDepth = depthTexture != null && depthTexture.getImage().getMultiSamples() > 1;
@@ -602,7 +677,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         if (prof != null) {
             prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName());
         }
-        if (filter.isEnabled()) {
+        if (active(filter)) {
             if (prof != null) {
                 prof.spStep(SpStep.ProcPostFrame, FPP, filter.getName(), "postFrame");
             }
@@ -687,6 +762,14 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     public void preFrame(float tpf) {
         // Diagnostic mode can change without changing a filter enabled flag.
         updateLastFilterIndex();
+        float scale = upscalingStage == null ? 1 : upscalingStage.getRenderScale();
+        if (!Float.isFinite(scale) || scale <= 0 || scale > 1) {
+            throw new IllegalArgumentException("Upscaling scale must be finite in (0,1]");
+        }
+        int order = upscalingStage == null ? 0 : ((Filter) upscalingStage).getPipelineOrder();
+        if (scale != appliedRenderScale || order != appliedUpscalingOrder) {
+            reshape(viewPort, originalWidth, originalHeight);
+        }
         if (filters.isEmpty() || lastFilterIndex == -1) {
             // If no filters are enabled, restore the output framebuffer and
             // bypass the post-processor.
@@ -709,8 +792,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
         // Do not run callbacks for effects bypassed by a diagnostic output.
         for (int i = 0; i <= lastFilterIndex; i++) {
-            Filter filter = filters.get(i);
-            if (filter.isEnabled()) {
+            Filter filter = pipeline().get(i);
+            if (active(filter)) {
                 if (prof != null) {
                     prof.spStep(SpStep.ProcPreFrame, FPP, filter.getName());
                 }
@@ -741,16 +824,17 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      * enabled, the viewport's output framebuffer is restored to its original.
      */
     private void updateLastFilterIndex() {
+        refreshPipeline();
         lastFilterIndex = -1;
         for (int i = 0; i < filters.size(); i++) {
-            Filter filter = filters.get(i);
-            if (filter.isEnabled() && filter.isDiagnosticOutput()) {
+            Filter filter = pipeline().get(i);
+            if (active(filter) && filter.isDiagnosticOutput()) {
                 lastFilterIndex = i;
                 return;
             }
         }
         for (int i = filters.size() - 1; i >= 0 && lastFilterIndex == -1; i--) {
-            if (filters.get(i).isEnabled()) {
+            if (active(pipeline().get(i))) {
                 lastFilterIndex = i;
                 // If the FPP is initialized but the viewport framebuffer is the
                 // original output framebuffer (meaning no filter was enabled
@@ -765,6 +849,37 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         if (isInitialized() && lastFilterIndex == -1) {
             viewPort.setOutputFrameBuffer(outputBuffer);
         }
+    }
+
+    /**
+     * Changes the final destination without rebuilding the filter chain. Call
+     * on the render thread after initialization and before the next frame.
+     * The caller owns the target; null restores the backend main framebuffer.
+     * This does not resize the filters: call reshape when dimensions change.
+     * <pre>{@code
+     * // 第一步：建立新的呈现目标，保留原目标直到所有 FPP 完成重定向。
+     * fpp.setFinalOutputFrameBuffer(presentation.getCompositionTarget());
+     * // 第二步：尺寸改变时通知 FPP，随后才能释放原目标。
+     * fpp.reshape(viewPort, width, height);
+     * // 第三步：恢复窗口输出；不修改过滤器参数或颜色编码。
+     * fpp.setFinalOutputFrameBuffer(null);
+     * }</pre>
+     * @param target final output, or null for the backend main framebuffer
+     */
+    public void setFinalOutputFrameBuffer(FrameBuffer target) {
+        if (!isInitialized()) {
+            throw new IllegalStateException("Initialize FPP before redirecting its output");
+        }
+        outputBuffer = target;
+        resizeWithDefaultFramebuffer = target == null;
+        if (lastFilterIndex == -1) {
+            viewPort.setOutputFrameBuffer(target);
+        }
+    }
+
+    /** Returns the final destination, or null for the backend main framebuffer. */
+    public FrameBuffer getFinalOutputFrameBuffer() {
+        return outputBuffer;
     }
 
     @Override
@@ -815,11 +930,26 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         originalWidth = w;
         originalHeight = h;
 
+        refreshPipeline();
+        appliedRenderScale = upscalingStage == null ? 1 : upscalingStage.getRenderScale();
+        if (!Float.isFinite(appliedRenderScale) || appliedRenderScale <= 0 || appliedRenderScale > 1) {
+            throw new IllegalArgumentException("Upscaling scale must be finite in (0,1]");
+        }
+        appliedUpscalingOrder = upscalingStage == null ? 0 : ((Filter) upscalingStage).getPipelineOrder();
+        if (upscalingStage != null && numSamples > 1) {
+            throw new IllegalStateException("Upscaling requires FPP samples=1");
+        }
+        for (Filter filter : filters.getArray()) {
+            if (filter instanceof UpscalingStage) {
+                ((UpscalingStage) filter).setOutputSize(Math.max(1, Math.round(w * Math.abs(right - left))),
+                        Math.max(1, Math.round(h * Math.abs(top - bottom))));
+            }
+        }
         // Computing real dimension of the viewport based on its relative size within the canvas
         width = (int) (w * (Math.abs(right - left)));
         height = (int) (h * (Math.abs(bottom - top)));
-        width = Math.max(1, width);
-        height = Math.max(1, height);
+        width = Math.max(1, Math.round(width * appliedRenderScale));
+        height = Math.max(1, Math.round(height * appliedRenderScale));
         logicalViewWidth = Math.max(1, (int) (cameraWidth * Math.abs(right - left)));
         logicalViewHeight = Math.max(1, (int) (cameraHeight * Math.abs(top - bottom)));
 
@@ -1008,12 +1138,21 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     /**
      * Sets the preferred `Image.Format` to be used for the internal frame buffer's color buffer.
      *
+     * Explicit format choices are serialized; automatic selection remains null
+     * in saved configuration and is negotiated on the loading GPU.
+     *
      * @param fbFormat
      *            The desired `Format` for the color buffer or null to let the processor determine the optimal
      *            format based on renderer capabilities.
      */
     public void setFrameBufferFormat(Format fbFormat) {
+        this.configuredFbFormat = fbFormat;
         this.fbFormat = fbFormat;
+    }
+
+    /** Returns configured/current color format; null before automatic negotiation. */
+    public Format getFrameBufferFormat() {
+        return fbFormat;
     }
 
     /**
@@ -1041,6 +1180,8 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     public void write(JmeExporter ex) throws IOException {
         OutputCapsule oc = ex.getCapsule(this);
         oc.write(numSamples, "numSamples", 0);
+        oc.write(configuredFbFormat, "frameBufferFormat", null);
+        oc.write(depthFormat, "depthFormat", Format.Depth);
         oc.write(useFullscreenTriangle, "useFullscreenTriangle", false);
         oc.writeSavableArrayList(new ArrayList(filters), "filters", null);
     }
@@ -1050,6 +1191,9 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
     public void read(JmeImporter im) throws IOException {
         InputCapsule ic = im.getCapsule(this);
         numSamples = ic.readInt("numSamples", 0);
+        configuredFbFormat = ic.readEnum("frameBufferFormat", Format.class, null);
+        fbFormat = configuredFbFormat;
+        depthFormat = ic.readEnum("depthFormat", Format.class, Format.Depth);
         useFullscreenTriangle = ic.readBoolean("useFullscreenTriangle", false);
         filters = new SafeArrayList<>(Filter.class, ic.readSavableArrayList("filters", null));
         for (Filter filter : filters.getArray()) {

@@ -870,7 +870,8 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
         boolean halfFloatSupported = renderer.getCaps().contains(Caps.OpenGL32)
                 || (renderer.getCaps().contains(Caps.HalfFloatColorBufferRGBA)
                 && renderer.getCaps().contains(Caps.HalfFloatTexture));
-        Format colorFormat = !resolve && halfFloatSupported ? Format.RGBA16F : Format.RGBA8;
+        Format colorFormat = halfFloatSupported ? Format.RGBA16F
+                : renderer.getCaps().contains(Caps.FloatColorBufferRGBA) ? Format.RGBA32F : Format.RGBA8;
 
         FrameBuffer frameBuffer = new FrameBuffer(width, height, samples);
         frameBuffer.setName("LWJGL3 Blit FrameBuffer");
@@ -965,7 +966,8 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
     }
 
     private boolean useBlitFramebufferShaderSrgbConversion() {
-        return settings.isGammaCorrection() && renderer != null && !renderer.isMainFrameBufferSrgb();
+        return settings.isGammaCorrection() && renderer != null
+                && (settings.isShaderSrgbOutput() || !renderer.isMainFrameBufferSrgb());
     }
 
     private void destroyBlitFramebuffer() {
@@ -1024,7 +1026,11 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
 
         glRenderer.setMainFrameBufferOverride(null);
         Camera previousCamera = renderManager.getCurrentCamera();
+        boolean previousSrgb = renderer.isMainFrameBufferSrgb();
         try {
+            if (settings.isShaderSrgbOutput()) {
+                renderer.setMainFrameBufferSrgb(false);
+            }
             if (blitResolveFramebuffer != null) {
                 try {
                     renderer.copyFrameBuffer(blitFramebuffer, blitResolveFramebuffer, true, false);
@@ -1049,6 +1055,7 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
             blitGeometry.updateGeometricState();
             renderManager.renderGeometry(blitGeometry);
         } finally {
+            renderer.setMainFrameBufferSrgb(previousSrgb);
             glRenderer.setMainFrameBufferOverride(restoreMainFramebuffer);
             if (previousCamera != null) {
                 renderManager.setCamera(previousCamera, false);

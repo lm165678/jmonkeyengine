@@ -62,6 +62,56 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     private BufferedImage img;
     private FrameBuffer fb;
     private boolean srgb = false;
+    private com.jme3.asset.AssetManager presentationAssets;
+    private java.util.function.Supplier<com.jme3.asset.AssetManager> defaultPresentationAssets;
+    private boolean presentationConfigured;
+
+    void inheritShaderSrgbOutput(java.util.function.Supplier<com.jme3.asset.AssetManager> assets) {
+        defaultPresentationAssets = assets;
+    }
+    private com.jme3.renderer.SrgbPresentation presentation;
+
+    /**
+     * Selects an owned float composition target and shader sRGB encoding before
+     * AWT readback. Direct construction defaults to disabled; application-owned
+     * AwtPanelsContext panels inherit AppSettings at initialization unless overridden.
+     * Null explicitly restores constructor sRGB behavior.
+     * Call on the render thread. Attached processors are reshaped on a switch.
+     * Tonemapping must be supplied by the application. Unsupported GPUs throw.
+     * <pre>{@code
+     * // 第一步：保持颜色纹理的 GammaCorrection 解码，绑定面板视口。
+     * panel.attachTo(false, app.getViewPort());
+     * // 第二步：渲染线程开启；先在线性浮点缓冲完成后处理和 UI 合成。
+     * app.enqueue(() -> panel.setShaderSrgbOutput(app.getAssetManager()));
+     * // 第三步：读回前自动编码一次；传 null 恢复原来的硬件 sRGB 路径。
+     * app.enqueue(() -> panel.setShaderSrgbOutput(null));
+     * }</pre>
+     * @param assets asset manager to enable, or null to disable
+     */
+    public void setShaderSrgbOutput(com.jme3.asset.AssetManager assets) {
+        presentationConfigured = true;
+        if (presentationAssets == assets) {
+            return;
+        }
+        if (assets != null && rm != null
+                && !rm.getRenderer().getCaps().contains(com.jme3.renderer.Caps.HalfFloatColorBufferRGBA)
+                && !rm.getRenderer().getCaps().contains(com.jme3.renderer.Caps.FloatColorBufferRGBA)) {
+            throw new UnsupportedOperationException("Float color targets are required");
+        }
+        presentationAssets = assets;
+        if (isInitialized()) {
+            reshapeInThread(renderedWidth, renderedHeight);
+        }
+    }
+
+    /** Whether shader encoding is configured; inherited defaults apply at initialization. */
+    public boolean isShaderSrgbOutput() {
+        return presentationAssets != null;
+    }
+
+    private FrameBuffer readbackTarget() {
+        return presentation == null ? fb : presentation.encode(rm);
+    }
     private ByteBuffer byteBuf;
     private IntBuffer intBuf;
     private RenderManager rm;
@@ -197,7 +247,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         }
         // Convert screenshot.
         byteBuf.clear();
-        rm.getRenderer().readFrameBuffer(fb, byteBuf);
+        rm.getRenderer().readFrameBuffer(readbackTarget(), byteBuf);
 
         synchronized (lock) {
             // All operations on img must be synchronized
@@ -213,7 +263,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         }
         // Convert screenshot.
         byteBuf.clear();
-        rm.getRenderer().readFrameBuffer(fb, byteBuf);
+        rm.getRenderer().readFrameBuffer(readbackTarget(), byteBuf);
         Screenshots.convertScreenShot2(intBuf, img);
 
         synchronized (lock) {
@@ -291,6 +341,18 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         if (this.rm == null) {
             // First time called in OGL thread
             this.rm = rm;
+            if (!presentationConfigured && defaultPresentationAssets != null) {
+                com.jme3.asset.AssetManager assets = defaultPresentationAssets.get();
+                if (assets != null) {
+                    if (rm.getRenderer().getCaps().contains(com.jme3.renderer.Caps.HalfFloatColorBufferRGBA)
+                            || rm.getRenderer().getCaps().contains(com.jme3.renderer.Caps.FloatColorBufferRGBA)) {
+                        presentationAssets = assets;
+                    } else {
+                        logger.warning("Float presentation unsupported; retaining the AWT target");
+                    }
+                }
+            }
+            defaultPresentationAssets = null;
             reshapeInThread(1, 1);
         }
     }
@@ -299,15 +361,25 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         byteBuf = BufferUtils.ensureLargeEnough(byteBuf, width * height * 4);
         intBuf = byteBuf.asIntBuffer();
 
-        if (fb != null) {
+        if (presentation != null) {
+            presentation.close();
+            presentation = null;
+            fb = null;
+        } else if (fb != null) {
             fb.dispose();
             fb = null;
         }
 
-        fb = new FrameBuffer(width, height, 1);
-        fb.setDepthTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.Depth));
-        fb.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.RGB8));
-        fb.setSrgb(srgb);
+        if (presentationAssets != null) {
+            presentation = new com.jme3.renderer.SrgbPresentation(
+                    presentationAssets, rm.getRenderer(), width, height);
+            fb = presentation.getCompositionTarget();
+        } else {
+            fb = new FrameBuffer(width, height, 1);
+            fb.setDepthTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.Depth));
+            fb.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.RGB8));
+            fb.setSrgb(srgb);
+        }
 
         if (attachAsMain) {
             rm.getRenderer().setMainFrameBufferOverride(fb);
@@ -329,6 +401,10 @@ public class AwtPanel extends Canvas implements SceneProcessor {
             // NOTE: Hack alert. This is done ONLY for custom framebuffers.
             // Main framebuffer should use RenderManager.notifyReshape().
             for (SceneProcessor sp : vp.getProcessors()) {
+                if (!attachAsMain && sp instanceof com.jme3.post.FilterPostProcessor
+                        && sp.isInitialized()) {
+                    ((com.jme3.post.FilterPostProcessor) sp).setFinalOutputFrameBuffer(fb);
+                }
                 sp.reshape(vp, width, height);
             }
         }
@@ -394,6 +470,14 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     @Override
     public void postFrame(FrameBuffer out) {
         if (!attachAsMain && out != fb) {
+            for (ViewPort viewport : viewPorts) {
+                for (SceneProcessor processor : viewport.getProcessors()) {
+                    if (processor instanceof com.jme3.post.FilterPostProcessor
+                            && ((com.jme3.post.FilterPostProcessor) processor).getFinalOutputFrameBuffer() == fb) {
+                        return;
+                    }
+                }
+            }
             throw new IllegalStateException("Why did you change the output framebuffer?");
         }
 

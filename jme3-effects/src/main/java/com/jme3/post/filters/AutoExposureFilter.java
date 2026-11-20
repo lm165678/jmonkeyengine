@@ -42,6 +42,11 @@ import java.util.Map;
  * }</pre>
  */
 public class AutoExposureFilter extends HdrGraphFilter {
+    @Override
+    public int getPipelineOrder() {
+        return 30;
+    }
+
     /** Legacy preserves serialized multiplier-stop behavior; UE4Histogram uses scene luminance. */
     public enum Mode { Legacy, UE4Histogram }
     private Mode mode = Mode.Legacy;

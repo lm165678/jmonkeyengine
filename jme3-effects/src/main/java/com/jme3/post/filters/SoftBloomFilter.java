@@ -67,6 +67,11 @@ import java.util.LinkedList;
  * @author codex
  */
 public class SoftBloomFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 40;
+    }
+
     
     private static final Logger logger = Logger.getLogger(SoftBloomFilter.class.getName());
     

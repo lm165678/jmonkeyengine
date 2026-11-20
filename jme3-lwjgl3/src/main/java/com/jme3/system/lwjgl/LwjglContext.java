@@ -288,7 +288,9 @@ public abstract class LwjglContext implements JmeContext {
 
  
 
-        this.renderer.setMainFrameBufferSrgb(false);
+        this.renderer.setMainFrameBufferSrgb(!settings.isShaderSrgbOutput()
+                && (getType() == Type.Display || getType() == Type.Canvas)
+                && settings.isGammaCorrection() && isDefaultFramebufferSrgb());
         this.renderer.setLinearizeSrgbImages(settings.isGammaCorrection());
 
         if (first) {

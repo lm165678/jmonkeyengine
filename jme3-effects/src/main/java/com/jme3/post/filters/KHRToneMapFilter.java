@@ -47,6 +47,11 @@ import java.io.IOException;
  * Tone-mapping filter that uses khronos neutral pbr tone mapping curve.
  */
 public class KHRToneMapFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 50;
+    }
+
 
     private static final float DEFAULT_EXPOSURE = 0.0f;
     private static final float DEFAULT_GAMMA = 1.0f;

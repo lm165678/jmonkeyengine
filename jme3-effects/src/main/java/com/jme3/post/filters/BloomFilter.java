@@ -57,6 +57,11 @@ import java.util.ArrayList;
  * @author Rémy Bouquet aka Nehon
  */
 public class BloomFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 40;
+    }
+
 
     /**
      * GlowMode specifies if the glow will be applied to the whole scene or to objects that have a glow color or a glow map

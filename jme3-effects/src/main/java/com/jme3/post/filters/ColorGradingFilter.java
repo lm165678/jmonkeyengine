@@ -35,6 +35,11 @@ import java.io.IOException;
  * }</pre>
  */
 public class ColorGradingFilter extends HdrGraphFilter {
+    @Override
+    public int getPipelineOrder() {
+        return 50;
+    }
+
     public enum Curve {
         /** Khronos PBR Neutral, preserving saturated colors before the shoulder. */
         Neutral,

@@ -188,12 +188,26 @@ public class AwtPanelsContext implements JmeContext {
 
     public AwtPanel createPanel(PaintMode paintMode) {
         AwtPanel panel = new AwtPanel(paintMode);
+        panel.inheritShaderSrgbOutput(() -> {
+            if (settings.isShaderSrgbOutput() && settings.isGammaCorrection()
+                    && listener instanceof com.jme3.app.Application) {
+                return ((com.jme3.app.Application) listener).getAssetManager();
+            }
+            return null;
+        });
         panels.add(panel);
         return panel;
     }
 
     public AwtPanel createPanel(PaintMode paintMode, boolean srgb) {
         AwtPanel panel = new AwtPanel(paintMode, srgb);
+        panel.inheritShaderSrgbOutput(() -> {
+            if (settings.isShaderSrgbOutput() && settings.isGammaCorrection()
+                    && listener instanceof com.jme3.app.Application) {
+                return ((com.jme3.app.Application) listener).getAssetManager();
+            }
+            return null;
+        });
         panels.add(panel);
         return panel;
     }

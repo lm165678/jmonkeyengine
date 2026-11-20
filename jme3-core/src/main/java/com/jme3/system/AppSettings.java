@@ -410,6 +410,7 @@ public final class AppSettings extends HashMap<String, Object> {
         defaults.put("MinHeight", 0);
         defaults.put("MinWidth", 0);
         defaults.put("GammaCorrection", true);
+        defaults.put("ShaderSrgbOutput", true);
         defaults.put("Resizable", true);
         defaults.put("GpuScene", true);
         defaults.put("GpuSceneBindless", true);
@@ -1320,6 +1321,39 @@ public final class AppSettings extends HashMap<String, Object> {
     /** @return requested bindless mode; absent keys default to true */
     public boolean isGpuSceneBindlessEnabled() {
         return !containsKey("GpuSceneBindless") || getBoolean("GpuSceneBindless");
+    }
+
+    /**
+     * Selects shader sRGB presentation for LWJGL3 windows and application-owned
+     * AWT panels. Defaults to true, including settings loaded without this key.
+     * Configure before start/restart. False prefers hardware sRGB output where
+     * available; LWJGL3 retains shader fallback on non-sRGB windows. GammaCorrection
+     * still controls linear texture decoding and whether output encoding is used.
+     * OffscreenSurface and explicit framebuffer/readback targets keep raw linear
+     * semantics; they are not automatically encoded. Other backends are unchanged.
+     * Float composition uses RGBA16F, then RGBA32F where supported. Window backends
+     * fall back to RGBA8 when neither is supported; AWT defaults retain the old
+     * target with a warning on unsupported hardware. This does not add Tonemap.
+     * <pre>{@code
+     * // 第一步：应用启动前设置，默认已开启，无需依赖 J3O 中的编辑器选项。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setGammaCorrection(true);
+     * settings.setShaderSrgbOutput(true);
+     * app.setSettings(settings);
+     * // 第二步：正常加载场景并挂到 rootNode；窗口在全部视口合成后编码一次。
+     * // rootNode.attachChild(assetManager.loadModel("Scenes/MyScene.j3o"));
+     * // 第三步：恢复硬件优先输出：启动前设 false；运行中更改需 app.restart()。
+     * // 自建 AWT 面板可在渲染线程用 panel.setShaderSrgbOutput(null) 单独恢复。
+     * }</pre>
+     * @param enabled true for explicit shader encoding, false for hardware preference
+     */
+    public void setShaderSrgbOutput(boolean enabled) {
+        putBoolean("ShaderSrgbOutput", enabled);
+    }
+
+    /** Returns shader presentation policy; absent keys use the new true default. */
+    public boolean isShaderSrgbOutput() {
+        return !Boolean.FALSE.equals(get("ShaderSrgbOutput"));
     }
 
     /**

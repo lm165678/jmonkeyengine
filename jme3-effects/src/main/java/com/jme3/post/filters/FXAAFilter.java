@@ -50,6 +50,16 @@ import java.io.IOException;
  *
  */
 public class FXAAFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 60;
+    }
+
+    @Override
+    public boolean isAntiAliasingFilter() {
+        return true;
+    }
+
 
     private float subPixelShift = 1.0f / 4.0f;
     private float vxOffset = 0.0f;

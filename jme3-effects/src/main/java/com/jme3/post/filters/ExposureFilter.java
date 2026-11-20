@@ -41,6 +41,11 @@ import java.io.IOException;
  * }</pre>
  */
 public class ExposureFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 30;
+    }
+
     private float exposureCompensation;
 
     /** Creates neutral (0 EV) exposure. */

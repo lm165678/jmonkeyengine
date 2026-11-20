@@ -1,0 +1,10 @@
+MaterialDef FSR2 Output {
+    MaterialParameters {
+        Texture2D Texture
+        Texture2D SourceAlpha
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL150: Common/MatDefs/Post/Upscaling/Fsr2Output.frag
+    }
+}

@@ -1,0 +1,13 @@
+MaterialDef Fsr1Easu {
+    MaterialParameters {
+        Texture2D Texture
+        Vector4 Con0
+        Vector4 Con1
+        Vector4 Con2
+        Vector4 Con3
+    }
+    Technique {
+        VertexShader GLSL430: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL430: Common/MatDefs/Post/Upscaling/Fsr1Easu.frag
+    }
+}

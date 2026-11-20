@@ -30,6 +30,11 @@ import java.util.Map;
  * }</pre>
  */
 public class CinematicBloomFilter extends HdrGraphFilter {
+    @Override
+    public int getPipelineOrder() {
+        return 40;
+    }
+
     private float threshold = 1f;
     private float knee = .5f;
     private float intensity = .08f;

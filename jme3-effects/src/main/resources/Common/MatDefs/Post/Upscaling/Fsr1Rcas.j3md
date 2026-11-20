@@ -1,0 +1,10 @@
+MaterialDef Fsr1Rcas {
+    MaterialParameters {
+        Texture2D Texture
+        Float Sharpness
+    }
+    Technique {
+        VertexShader GLSL430: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL430: Common/MatDefs/Post/Upscaling/Fsr1Rcas.frag
+    }
+}

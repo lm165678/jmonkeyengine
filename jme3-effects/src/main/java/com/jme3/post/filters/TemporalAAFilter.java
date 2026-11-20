@@ -50,6 +50,27 @@ import java.util.Map;
  * See jme3test.post.TestTemporalAA for controls and automated checks.
  */
 public final class TemporalAAFilter extends HdrGraphFilter {
+    @Override
+    public int getPipelineOrder() {
+        return -10;
+    }
+
+    @Override
+    public boolean isAntiAliasingFilter() {
+        return true;
+    }
+
+    @Override
+    protected void onPipelineBypass(boolean bypassed) {
+        resetHistory();
+        if (temporal != null) {
+            temporal.restoreCamera();
+            if (view.getTemporalScene() == temporal) {
+                view.setTemporalScene(null);
+            }
+        }
+    }
+
     private boolean basePassOutputsVelocity = true;
     private boolean translucentVelocityEnabled = true;
     private float translucentAlphaThreshold = .5f;

@@ -1105,3 +1105,39 @@ tasks.register('temporalAAStabilitySmoke', JavaExec) {
     args '--verify-stability'
     enableAssertions = true
 }
+
+// Explicit SDR presentation numeric checks; no SDK build.
+tasks.register('srgbPresentationSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestSrgbPresentation'
+    args '--verify'
+    enableAssertions = true
+}
+
+tasks.register('fsr2BackendSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestFsr2Backend'
+    enableAssertions = true
+}
+
+tasks.register('upscalingSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestUpscaling'
+    args '--verify'
+    enableAssertions = true
+}
+
+tasks.register('defaultShaderOutputSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestDefaultShaderOutput'
+    systemProperty 'presentation.samples', project.findProperty('presentationSamples') ?: '0'
+    enableAssertions = true
+}

@@ -49,6 +49,11 @@ import java.io.IOException;
  * @author Kirill Vainer
  */
 public class ToneMapFilter extends Filter {
+    @Override
+    public int getPipelineOrder() {
+        return 50;
+    }
+
 
     private static final Vector3f DEFAULT_WHITEPOINT = new Vector3f(11.2f, 11.2f, 11.2f);
     

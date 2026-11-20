@@ -489,6 +489,29 @@ public abstract class Filter implements Savable {
     }
 
     /**
+     * Ordering key used only while an upscaler is active. Custom filters default
+     * to scene-linear work (0). Built-in keys: temporal AA -10, temporal upscale
+     * 20, exposure 30, bloom 40, tone mapping 50, spatial AA 60, spatial upscale
+     * 70. Without an upscaler the insertion order is unchanged.
+     * <pre>{@code
+     * // 自定义显示空间效果可重写此方法返回 80，在超分后执行；UI 不属于 FPP。
+     * // 自定义 HDR 效果保持默认 0，在曝光与时序超分之前执行。
+     * }</pre>
+     */
+    public int getPipelineOrder() {
+        return 0;
+    }
+
+    /** Whether temporal reconstruction must bypass this anti-aliasing filter. */
+    public boolean isAntiAliasingFilter() {
+        return false;
+    }
+
+    /** Called when upscaling changes bypass state; enabled preferences are retained. */
+    protected void onPipelineBypass(boolean bypassed) {
+    }
+
+    /**
      * returns true if the filter is enabled
      * @return enabled
      */
