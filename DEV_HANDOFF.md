@@ -1,3 +1,8 @@
+## 2026-11-20 compatible shader presentation / FSR publication revisions
+
+- Engine implementation: 85039d25e10b7f5237cf39f084c0e62366483d1f on dev_fix_lightprobe_issue; SDK implementation: 6d2c12e1dcc5154e33f68fac118832cf4ab9052c on master. Documentation-only commits follow. Export/rebuild this pair together; validation limits below remain applicable. No full SDK deployment for publication.
+- Generated SDK archives, extracted/exported libraries/templates and local build revision are excluded and retained locally. Render scale remains bounded to [.25,1]; the user has raised a separate .1-scale question, not modified in this publication.
+
 ## 2026-11-20 default shader presentation and FSR1/FSR2 upscaling (local source)
 
 - Supersedes opt-in/default-Off notes below: AppSettings.ShaderSrgbOutput defaults true, including absent keys. LWJGL3 display/canvas composition uses owned float targets (RGBA16F/RGBA32F, RGBA8 compatibility fallback) and one final shader sRGB encode with hardware writes disabled. False selects hardware preference where available, retaining shader fallback. GammaCorrection still controls decoding/output encoding; raw OffscreenSurface and explicit targets are not automatically encoded. Other backends are unchanged. AwtPanelsContext application panels lazily inherit the policy; explicit panel overrides remain supported. SDK main AWT toggle defaults On; stored explicit Off remains a preview override, not a game window setting.
