@@ -1,5 +1,10 @@
 MaterialDef GPU Scene Culling {
     MaterialParameters {
+        Boolean Temporal
+        Int TemporalFrame
+        Boolean TemporalMarkVisible
+        ShaderStorageBufferObject TemporalHistory
+        ShaderStorageBufferObject PreviousVisible
         ShaderStorageBufferObject Instances
         ShaderStorageBufferObject Visible
         ShaderStorageBufferObject Commands
@@ -35,5 +40,8 @@ MaterialDef GPU Scene Culling {
     }
     Technique {
         ComputeShader GLSL430: Common/MatDefs/GpuScene/Cull.comp
+        Defines {
+            TEMPORAL : Temporal
+        }
     }
 }

@@ -53,6 +53,7 @@ final class DeferredResources {
     private final AssetManager assets;
     private final Renderer renderer;
     FrameBuffer gbuffer;
+    Texture2D velocity;
     final Texture2D[] targets = new Texture2D[6];
     Texture2D lightTexture, tileTexture;
     BufferObject gpuIndices;
@@ -76,6 +77,7 @@ final class DeferredResources {
             targets[i] = target.getColorTexture(i);
         }
         targets[5] = target.getDepthTexture();
+        velocity = gbuffer.getNumColorTargets() > 5 ? target.getColorTexture(5) : null;
     }
     Texture2D storage(Texture2D old, int width, int height, Image.Format format, int bytes) {
         requireOpen();

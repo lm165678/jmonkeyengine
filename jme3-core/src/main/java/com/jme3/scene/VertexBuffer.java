@@ -227,6 +227,11 @@ public class VertexBuffer extends NativeObject implements Savable, Cloneable {
         MorphTarget11,
         MorphTarget12,
         MorphTarget13,
+        /** Previous rendered model-space position; transient temporal rendering input. */
+        PreviousPosition,
+
+        /** GPU Scene previous world transform and temporal validity, four instance attributes. */
+        PreviousInstanceData,
     }
 
     /**
@@ -377,7 +382,7 @@ public class VertexBuffer extends NativeObject implements Savable, Cloneable {
         // Are components between 1 and 4?
 
         // Are components between 1 and 4 and not InstanceData?
-        if (bufType != Type.InstanceData) {
+        if (bufType != Type.InstanceData && bufType != Type.PreviousInstanceData) {
             if (components < 1 || components > 4) {
                 throw new AssertionError();
             }
@@ -660,7 +665,7 @@ public class VertexBuffer extends NativeObject implements Savable, Cloneable {
             throw new IllegalArgumentException("VertexBuffer data cannot be read-only.");
         }
 
-        if (bufType != Type.InstanceData) {
+        if (bufType != Type.InstanceData && bufType != Type.PreviousInstanceData) {
             if (components < 1 || components > 4) {
                 throw new IllegalArgumentException("components must be between 1 and 4");
             }

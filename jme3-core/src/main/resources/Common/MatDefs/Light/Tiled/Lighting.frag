@@ -10,6 +10,9 @@
 #import "Common/ShaderLib/Deferred/UnshadedModel.glsllib"
 
 layout(location = 0) out vec4 outFragColor;
+layout(location = 1) out vec4 outVelocity;
+uniform sampler2D m_TemporalVelocity;
+uniform bool m_TemporalOutput;
 
 // Material-owned functions are inserted after the common access/light APIs.
 // CUSTOM_MODEL_FUNCTIONS
@@ -43,4 +46,5 @@ void main() {
     }
     outFragColor = subfaceShading(shadingId);
     gl_FragDepth = getSurfaceDepth();
+    outVelocity = m_TemporalOutput ? texelFetch(m_TemporalVelocity, ivec2(gl_FragCoord.xy), 0) : vec4(0.0);
 }

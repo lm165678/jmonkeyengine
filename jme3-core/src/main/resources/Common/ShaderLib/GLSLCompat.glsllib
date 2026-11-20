@@ -51,7 +51,11 @@
       out highp vec4 outFragColor;
     #endif
   #else
-    out vec4 outFragColor;
+    #if defined(TEMPORAL_VELOCITY) && !defined(DEFERRED_GBUFFER)
+      layout(location = 0) out vec4 outFragColor;
+    #else
+      out vec4 outFragColor;
+    #endif
   #endif
 #endif
 

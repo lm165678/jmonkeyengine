@@ -67,45 +67,65 @@ final class DeferredLightingPass implements DeferredPass {
         List<Light> lights = frame.lights;
         Vector3f ambient = frame.ambient;
         Shader shader = frame.resources.lightingShader(gpu, frame.models);
-        renderer.setFrameBuffer(vp.getOutputFrameBuffer());
-        rm.setCamera(camera, false);
-        for (int i = 0; i < 6; i++) {
-            bindTexture(renderer, i, frame.resources.targets[i]);
+        com.jme3.texture.FrameBuffer output = vp.getOutputFrameBuffer();
+        boolean temporal = frame.resources.velocity != null && vp.getTemporalScene() != null;
+        boolean multi = output != null && output.isMultiTarget();
+        if (temporal) {
+            output.addColorTarget(com.jme3.texture.FrameBuffer.FrameBufferTarget.newTarget(vp.getTemporalScene().getVelocity()));
+            output.setMultiTarget(true);
         }
-        bindTexture(renderer, 6, frame.resources.lightTexture);
-        if (!gpu) {
-            bindTexture(renderer, 7, frame.resources.tileTexture);
-        } else {
-            shader.getBufferBlock("m_TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
+        renderer.setFrameBuffer(output);
+        try {
+            rm.setCamera(camera, false);
+            for (int i = 0; i < 6; i++) {
+                bindTexture(renderer, i, frame.resources.targets[i]);
+            }
+            bindTexture(renderer, 6, frame.resources.lightTexture);
+            if (!gpu) {
+                bindTexture(renderer, 7, frame.resources.tileTexture);
+            } else {
+                shader.getBufferBlock("m_TileIndices").setBufferObject(com.jme3.shader.ShaderBufferBlock.BufferType.ShaderStorageBufferObject, frame.resources.gpuIndices);
+            }
+            String[] names = {
+                "gbuffer0", "gbuffer1", "gbuffer2", "gbuffer3", "gbuffer4", "gbufferDepth"};
+            for (int i = 0; i < names.length; i++) {
+                uniform(shader, names[i], VarType.Int, i);
+            }
+            uniform(shader, "Lights", VarType.Int, 6);
+            uniform(shader, "Tiles", VarType.Int, 7);
+            bindTexture(renderer,
+                8, frame.batch.colorRamp == null ? frame.resources.targets[0] : frame.batch.colorRamp);
+            uniform(shader, "ColorRamp", VarType.Int, 8);
+            uniform(shader, "Untiled", VarType.Boolean, frame.untiled);
+            uniform(shader, "Columns", VarType.Int, columns);
+            uniform(shader, "TileSize", VarType.Int, tileSize);
+            uniform(shader, "LightCount", VarType.Int, lights.size());
+            uniform(shader, "TileCapacity", VarType.Int, tileCapacity);
+            uniform(shader, "TileTextureWidth", VarType.Int,
+                gpu ? 1 : frame.resources.tileTexture.getImage().getWidth());
+            inverse.set(camera.getViewProjectionMatrix()).invertLocal();
+            uniform(shader, "InverseViewProjection", VarType.Matrix4, inverse);
+            uniform(shader, "CameraPosition", VarType.Vector3, camera.getLocation());
+            uniform(shader, "AmbientColor", VarType.Vector3, ambient);
+            resolution.set(camera.getWidth(), camera.getHeight());
+            uniform(shader, "Resolution", VarType.Vector2, resolution);
+            renderer.applyRenderState(lightingState);
+            int temporalUnit = rm.bindManagedShadows(shader, 9);
+            uniform(shader, "TemporalOutput", VarType.Boolean, temporal);
+            uniform(shader, "TemporalVelocity", VarType.Int, temporal ? temporalUnit : 0);
+            if (temporal) {
+                bindTexture(renderer, temporalUnit, frame.resources.velocity);
+            }
+            renderer.setShader(shader);
+            renderer.renderMesh(frame.resources.quad, 0, 1, null);
+            return true;
+        } finally {
+            if (temporal) {
+                output.removeColorTarget(output.getNumColorTargets() - 1);
+                output.setMultiTarget(multi);
+                renderer.setFrameBuffer(output);
+            }
         }
-        String[] names = {
-            "gbuffer0", "gbuffer1", "gbuffer2", "gbuffer3", "gbuffer4", "gbufferDepth"};
-        for (int i = 0; i < names.length; i++) {
-            uniform(shader, names[i], VarType.Int, i);
-        }
-        uniform(shader, "Lights", VarType.Int, 6);
-        uniform(shader, "Tiles", VarType.Int, 7);
-        bindTexture(renderer,
-            8, frame.batch.colorRamp == null ? frame.resources.targets[0] : frame.batch.colorRamp);
-        uniform(shader, "ColorRamp", VarType.Int, 8);
-        uniform(shader, "Untiled", VarType.Boolean, frame.untiled);
-        uniform(shader, "Columns", VarType.Int, columns);
-        uniform(shader, "TileSize", VarType.Int, tileSize);
-        uniform(shader, "LightCount", VarType.Int, lights.size());
-        uniform(shader, "TileCapacity", VarType.Int, tileCapacity);
-        uniform(shader, "TileTextureWidth", VarType.Int,
-            gpu ? 1 : frame.resources.tileTexture.getImage().getWidth());
-        inverse.set(camera.getViewProjectionMatrix()).invertLocal();
-        uniform(shader, "InverseViewProjection", VarType.Matrix4, inverse);
-        uniform(shader, "CameraPosition", VarType.Vector3, camera.getLocation());
-        uniform(shader, "AmbientColor", VarType.Vector3, ambient);
-        resolution.set(camera.getWidth(), camera.getHeight());
-        uniform(shader, "Resolution", VarType.Vector2, resolution);
-        renderer.applyRenderState(lightingState);
-        rm.bindManagedShadows(shader, 9);
-        renderer.setShader(shader);
-        renderer.renderMesh(frame.resources.quad, 0, 1, null);
-        return true;
     }
     private static void bindTexture(Renderer renderer, int unit, com.jme3.texture.Texture texture) {
         try {

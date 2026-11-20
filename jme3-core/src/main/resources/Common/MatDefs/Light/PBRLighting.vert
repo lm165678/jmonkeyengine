@@ -40,6 +40,8 @@ varying vec4 wTangent;
     uniform vec3 g_CameraPosition;
 #endif
 
+#import "Common/ShaderLib/TemporalVertex.glsllib"
+
 void main(){    
     
     vec4 modelSpacePos = vec4(inPosition, 1.0);
@@ -71,6 +73,9 @@ void main(){
     #endif
 
     gl_Position = TransformWorldViewProjection(modelSpacePos);
+    #ifdef TEMPORAL_VELOCITY
+        temporalPosition(modelSpacePos);
+    #endif
     texCoord = inTexCoord;
     #ifdef SEPARATE_TEXCOORD
        texCoord2 = inTexCoord2;

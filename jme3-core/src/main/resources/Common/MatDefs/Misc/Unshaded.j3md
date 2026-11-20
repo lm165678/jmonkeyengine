@@ -2,6 +2,14 @@ MaterialDef Unshaded {
     ShadingId 3
 
     MaterialParameters {
+        // Internal per-view motion inputs; populated by TemporalAAFilter.
+        Boolean TemporalGpuInstances
+        Boolean TemporalVelocity
+        Matrix4 TemporalCurrentVP
+        Matrix4 TemporalPreviousVP
+        Matrix4 TemporalPreviousWorld
+        Boolean TemporalValid
+
         // Opt-in diffuse GI chunk. Unbound materials retain their original lighting.
         // GiProbeData.bind()/Binding.close() install/restore all parameters together.
         Texture2D GiIrradiance -LINEAR
@@ -91,8 +99,8 @@ MaterialDef Unshaded {
     }
 
     Technique {
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100 :   Common/MatDefs/Misc/Unshaded.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100 : Common/MatDefs/Misc/Unshaded.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100 :   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100 : Common/MatDefs/Misc/Unshaded.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -103,6 +111,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             INSTANCING : UseInstancing
@@ -123,8 +133,8 @@ MaterialDef Unshaded {
 
     Technique PreNormalPass {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -135,6 +145,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             COLORMAP_ALPHA : ColorMap
             NUM_BONES : NumberOfBones
@@ -146,8 +158,8 @@ MaterialDef Unshaded {
 
     Technique PreShadow {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -157,6 +169,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             COLOR_MAP : ColorMap
             DISCARD_ALPHA : AlphaDiscardThreshold
@@ -178,8 +192,8 @@ MaterialDef Unshaded {
 
 
     Technique PostShadow {
-        VertexShader    GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.vert
-        FragmentShader  GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -189,6 +203,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             HARDWARE_SHADOWS : HardwareShadows
             FILTER_MODE : FilterMode
@@ -215,8 +231,8 @@ MaterialDef Unshaded {
 
     Technique Glow {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Misc/Unshaded.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/Glow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/Glow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -225,6 +241,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             NEED_TEXCOORD1
             HAS_GLOWMAP : GlowMap
@@ -250,6 +268,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             DEFERRED_GBUFFER
             INSTANCING : UseInstancing
@@ -278,6 +298,8 @@ MaterialDef Unshaded {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             DEFERRED_GBUFFER
             SURFACE_CAPTURE
             SEPARATE_TEXCOORD : SeparateTexCoord

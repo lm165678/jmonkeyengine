@@ -1,0 +1,27 @@
+layout(local_size_x = 64) in;
+struct Instance {
+    mat4 world;
+    vec4 sphere;
+};
+struct TemporalInstance {
+    mat4 previousWorld;
+    uvec4 visibility;
+};
+layout(std430) readonly buffer m_Instances {
+    Instance instances[];
+};
+layout(std430) buffer m_TemporalHistory {
+    TemporalInstance history[];
+};
+uniform int m_Count;
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(m_Count)) {
+        return;
+    }
+    // One commit per viewport frame, after all Hi-Z phases. Never advance history
+    // inside culling: one instance may be culled more than once in a frame.
+    history[id].previousWorld = instances[id].world;
+    history[id].visibility.x = history[id].visibility.y;
+    history[id].visibility.y = 0u;
+}

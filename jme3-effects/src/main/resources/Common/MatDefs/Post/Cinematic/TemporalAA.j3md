@@ -1,0 +1,18 @@
+MaterialDef TemporalAA {
+    MaterialParameters {
+        Texture2D Texture
+        Texture2D DepthTexture
+        Texture2D History
+        Texture2D HistoryDepth
+        Texture2D Velocity
+        Texture2D MotionDepth
+        Vector2 InverseSize
+        Vector2 CurrentJitter
+        Float CurrentWeight
+        Boolean Reset
+    }
+    Technique {
+        VertexShader GLSL330: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL330: Common/MatDefs/Post/Cinematic/TemporalAA.frag
+    }
+}

@@ -2,6 +2,8 @@
 
 更新日期：2026-11-16。本文是开发方案，不是已完成功能列表。
 
+2026-11-20：本地 TAA 新增静态边缘连续帧回归，修正重建坐标、深度量化拒绝和退化颜色裁剪。128×96 单位对比度测试的最坏通道变化从 1.0 降至约 0.189；仍有残余波动，尚非 UE4 画质等价，新增采样开销待测。详见 DEV_HANDOFF.md。
+
 ## 目标与当前状态
 
 用户希望将当前 JME 分支的渲染质量提升到适合商业游戏的水平，重点改善光照、Bloom、AO、Tonemap 和运动时的画面稳定性。参考 UE5 的整体渲染设计，但保持 JME 材质系统、Forward/Deferred 路径和旧项目兼容。不要将通用引擎功能写成仅适用于一个示例的实现。
@@ -210,3 +212,9 @@ AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantic
 - [AMD FSR 1](https://gpuopen.com/fidelityfx-superresolution/)、[FSR 2](https://gpuopen.com/fidelityfx-superresolution-2/)、[FSR 3 集成文档](https://gpuopen.com/manuals/fidelityfx_sdk/techniques/super-resolution-interpolation/)：集成时重新核对选定版本的能力、后端与接口要求。
 
 下次继续时序效果、RHI 或 Vulkan 工作时主动读取本节；此待办不授权自动开始实现。
+
+## 2026-11-19 TAA initial source checkpoint
+
+The user subsequently authorized TAA/velocity implementation. TemporalAAFilter and selectable base-pass/separate opaque velocity plus optional Transparent velocity are now implemented locally; no full Depth Prepass was added. See DEV_HANDOFF.md for usage, tested synthetic cases and limits. This supersedes the earlier plan-only status for this subset, not the remaining roadmap.
+
+Follow-up native GPUScene motion is implemented: rigid instances retain indirect/MDI drawing with GPU-resident previous transforms and visibility, for both opaque velocity modes. Shared-batch/MDI/compaction/Hi-Z and history-edge tests pass; see DEV_HANDOFF.md. CPU deformation snapshots for ordinary animated geometry, single-layer transparent motion and invalid-sky rejection remain initial constraints. Broader scene quality/performance validation, SDK integration and mature temporal reconstruction remain pending. GTAO, FSR, RHI/Vulkan and frame generation are not implemented by this change.

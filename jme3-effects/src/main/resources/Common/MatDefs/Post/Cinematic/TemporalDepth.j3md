@@ -1,0 +1,12 @@
+MaterialDef TemporalDepth {
+    MaterialParameters {
+        Texture2D Texture
+        Vector2 InverseSize
+        Vector2 CurrentJitter
+        Texture2D MotionDepth
+    }
+    Technique {
+        VertexShader GLSL330: Common/MatDefs/Post/Post.vert
+        FragmentShader GLSL330: Common/MatDefs/Post/Cinematic/TemporalDepth.frag
+    }
+}

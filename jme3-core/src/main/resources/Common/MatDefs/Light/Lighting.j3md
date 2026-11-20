@@ -2,6 +2,14 @@ MaterialDef Phong Lighting {
     ShadingId 1
 
     MaterialParameters {
+        // Internal per-view motion inputs; populated by TemporalAAFilter.
+        Boolean TemporalGpuInstances
+        Boolean TemporalVelocity
+        Matrix4 TemporalCurrentVP
+        Matrix4 TemporalPreviousVP
+        Matrix4 TemporalPreviousWorld
+        Boolean TemporalValid
+
         // Opt-in diffuse GI chunk. Unbound materials retain their original lighting.
         // GiProbeData.bind()/Binding.close() install/restore all parameters together.
         Texture2D GiIrradiance -LINEAR
@@ -167,8 +175,8 @@ MaterialDef Phong Lighting {
     Technique {
         LightModel SinglePass
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/SPLighting.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/SPLighting.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Light/SPLighting.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/SPLighting.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -182,6 +190,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer         
@@ -221,8 +231,8 @@ MaterialDef Phong Lighting {
 
         LightModel MultiPass
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100 :   Common/MatDefs/Light/Lighting.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Lighting.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100 :   Common/MatDefs/Light/Lighting.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Lighting.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -236,6 +246,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer
@@ -271,8 +283,8 @@ MaterialDef Phong Lighting {
 
     Technique PreShadow {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Shadow/PreShadow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PreShadow.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Shadow/PreShadow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -282,6 +294,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             DISCARD_ALPHA : AlphaDiscardThreshold
             NUM_BONES : NumberOfBones
@@ -302,8 +316,8 @@ MaterialDef Phong Lighting {
 
 
     Technique PostShadow {
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Shadow/PostShadow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Shadow/PostShadow.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Shadow/PostShadow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -314,6 +328,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             HARDWARE_SHADOWS : HardwareShadows
             FILTER_MODE : FilterMode
@@ -340,8 +356,8 @@ MaterialDef Phong Lighting {
 
   Technique PreNormalPass {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/SSAO/normal.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/SSAO/normal.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/SSAO/normal.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -352,6 +368,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             DIFFUSEMAP_ALPHA : DiffuseMap
             NUM_BONES : NumberOfBones
@@ -364,8 +382,8 @@ MaterialDef Phong Lighting {
 
     Technique Glow {
 
-        VertexShader   GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Misc/Unshaded.vert
-        FragmentShader GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Glow.frag
+        VertexShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100:   Common/MatDefs/Misc/Unshaded.vert
+        FragmentShader GLSL330 GLSL310 GLSL300 GLSL150 GLSL100: Common/MatDefs/Light/Glow.frag
 
         WorldParameters {
             WorldViewProjectionMatrix
@@ -374,6 +392,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             NEED_TEXCOORD1
             HAS_GLOWMAP : GlowMap
@@ -413,6 +433,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
@@ -462,6 +484,8 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            TEMPORAL_VELOCITY : TemporalVelocity
             DEFERRED_GBUFFER
             SURFACE_CAPTURE
             VERTEX_COLOR : UseVertexColor

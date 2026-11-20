@@ -18,6 +18,15 @@ public final class GpuSceneGeometry extends Geometry {
     private final BufferObject transforms;
     private final VertexBuffer attribute = new VertexBuffer(VertexBuffer.Type.InstanceData);
     private final VertexBuffer[] attributes = {attribute};
+    private final VertexBuffer previousAttribute = new VertexBuffer(VertexBuffer.Type.PreviousInstanceData);
+    private final VertexBuffer[] temporalAttributes = {attribute, previousAttribute};
+    private BufferObject previousTransforms;
+
+    // Buffer storage is batch-owned; the attribute is only a view of compacted output.
+    void setTemporalTransforms(BufferObject transforms) {
+        previousTransforms = transforms;
+    }
+
     private final int lod;
     private final int commandIndex;
     private int[] vertexCounts;
@@ -42,6 +51,8 @@ public final class GpuSceneGeometry extends Geometry {
         getMaterial().setBoolean("UseInstancing", true);
         attribute.setupData(VertexBuffer.Usage.Stream, 16, VertexBuffer.Format.Float, BufferUtils.createFloatBuffer(16));
         attribute.setInstanced(true);
+        previousAttribute.setupData(VertexBuffer.Usage.Stream, 16, VertexBuffer.Format.Float, BufferUtils.createFloatBuffer(16));
+        previousAttribute.setInstanced(true);
     }
 
     void enableMultiDraw(com.jme3.scene.Mesh packedMesh, int count, int[] vertexCounts) {
@@ -94,13 +105,22 @@ public final class GpuSceneGeometry extends Geometry {
             attribute.setId(transforms.getId());
         }
         attribute.clearUpdateNeeded();
+        VertexBuffer[] drawAttributes = attributes;
+        if (previousTransforms != null) {
+            if (previousAttribute.getId() != previousTransforms.getId()) {
+                previousAttribute.resetObject();
+                previousAttribute.setId(previousTransforms.getId());
+            }
+            previousAttribute.clearUpdateNeeded();
+            drawAttributes = temporalAttributes;
+        }
         if (compacted != null) {
             renderer.renderMeshCompactedIndirect(getMesh(), compacted, drawCount, commands,
-                    multiDrawCount, attributes, vertexCounts);
+                    multiDrawCount, drawAttributes, vertexCounts);
         } else if (multiDrawCount > 0) {
-            renderer.renderMeshMultiDrawIndirect(getMesh(), commands, 0, multiDrawCount, attributes, vertexCounts);
+            renderer.renderMeshMultiDrawIndirect(getMesh(), commands, 0, multiDrawCount, drawAttributes, vertexCounts);
         } else {
-            renderer.renderMeshIndirect(getMesh(), lod, commands, commandIndex * 20L, attributes);
+            renderer.renderMeshIndirect(getMesh(), lod, commands, commandIndex * 20L, drawAttributes);
         }
     }
 }

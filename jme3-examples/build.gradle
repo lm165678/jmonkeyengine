@@ -1087,3 +1087,21 @@ tasks.register('giMultipleBouncesSmoke', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     enableAssertions = true
 }
+
+// Native temporal motion and history verification (no SDK build).
+tasks.register('temporalAASmoke', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestTemporalAA'
+    args '--verify'
+    enableAssertions = true
+}
+
+// Static edge stability across complete jitter cycles.
+tasks.register('temporalAAStabilitySmoke', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestTemporalAA'
+    args '--verify-stability'
+    enableAssertions = true
+}

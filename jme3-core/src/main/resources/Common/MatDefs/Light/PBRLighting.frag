@@ -32,7 +32,12 @@ uniform vec3 g_CameraPosition;
     #import "Common/ShaderLib/MaterialFog.glsllib"
 #endif
 
+#import "Common/ShaderLib/TemporalFragment.glsllib"
+
 void main(){
+    #ifdef TEMPORAL_VELOCITY
+        outTemporalVelocity = temporalMotion();
+    #endif
     vec3 wpos = PBRLightingUtils_getWorldPosition();
     vec3 worldViewDir = normalize(g_CameraPosition - wpos);
     

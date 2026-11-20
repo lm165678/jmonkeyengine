@@ -1,0 +1,25 @@
+#ifdef TEMPORAL_VELOCITY
+#ifdef TEMPORAL_GPU_INSTANCES
+attribute mat4 inPreviousInstanceData;
+varying float temporalInstanceValid;
+#else
+attribute vec3 inPreviousPosition;
+#endif
+uniform mat4 m_TemporalCurrentVP;
+uniform mat4 m_TemporalPreviousVP;
+uniform mat4 m_TemporalPreviousWorld;
+varying vec4 temporalCurrent;
+varying vec4 temporalPrevious;
+void temporalPosition(vec4 position) {
+    temporalCurrent = m_TemporalCurrentVP * TransformWorld(position);
+    #ifdef TEMPORAL_GPU_INSTANCES
+        // The affine bottom-right component carries history validity, not position.
+        mat4 previousWorld = inPreviousInstanceData;
+        temporalInstanceValid = previousWorld[3].w;
+        previousWorld[3].w = 1.0;
+        temporalPrevious = m_TemporalPreviousVP * previousWorld * position;
+    #else
+        temporalPrevious = m_TemporalPreviousVP * m_TemporalPreviousWorld * vec4(inPreviousPosition, 1.0);
+    #endif
+}
+#endif

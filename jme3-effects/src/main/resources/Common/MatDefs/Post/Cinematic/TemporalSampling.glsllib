@@ -1,0 +1,27 @@
+// Current scene inputs are jittered; resolved color/depth history is unjittered.
+uniform sampler2D m_MotionDepth;
+uniform vec2 m_InverseSize;
+uniform vec2 m_CurrentJitter;
+ivec2 temporalClampPixel(ivec2 p) {
+    return clamp(p, ivec2(0), textureSize(m_MotionDepth, 0) - ivec2(1));
+}
+ivec2 temporalScenePixel(vec2 outputUV) {
+    return temporalClampPixel(ivec2(floor((outputUV + m_CurrentJitter) / m_InverseSize)));
+}
+ivec2 temporalClosestPixel(ivec2 center) {
+    ivec2 closest = center;
+    float depth = texelFetch(m_MotionDepth, center, 0).r;
+    // Dilate foreground motion through the silhouette footprint. Color and depth
+    // history must use the same selection, otherwise jitter looks like disocclusion.
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 p = temporalClampPixel(center + ivec2(x, y));
+            float candidate = texelFetch(m_MotionDepth, p, 0).r;
+            if (candidate < depth) {
+                closest = p;
+                depth = candidate;
+            }
+        }
+    }
+    return closest;
+}

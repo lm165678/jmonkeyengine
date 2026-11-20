@@ -41,6 +41,22 @@ import java.util.*;
  * // 第三步：真正修改参数仍会刷新受影响的批次，确保代理材质同步。
  * material.setFloat("Shininess", 32f);
  * }</pre>
+ * With TemporalAAFilter active, rigid GPU instances retain native indirect/MDI
+ * submission. Previous world transforms and final visibility stay in GPU buffers;
+ * culling compacts previous/current attributes into the same slots. Batch rebuilds
+ * and newly visible instances invalidate history. Both base-pass and separate
+ * opaque velocity reuse these packets. No CPU transform readback is required.
+ * Temporal culling refreshes each frame even when diagnostic freeze is requested;
+ * normal freeze behavior resumes when TAA is disabled. Skin/morph/transparent
+ * exclusions above are unchanged, not introduced by TAA.
+ * <pre>{@code
+ * // 第一步：保留 GPU Scene；在单采样 FPP 首位添加 TemporalAAFilter。
+ * pipeline.setEnabled(true);
+ * // 第二步：TAA 的 setBasePassOutputsVelocity(true/false) 都保留间接绘制。
+ * // 第三步：正常移动、删除、重新挂载实例；历史随批次和可见性自动失效。
+ * geometry.move(1f, 0f, 0f);
+ * // 第四步：关闭 TAA 释放额外历史缓冲，GPU Scene 本身继续运行。
+ * }</pre>
  * Static instance records stay resident; moving objects invalidate their records.
  * Changed records are scattered by compute into resident storage, without a full
  * static-batch upload. Use normal Spatial setters; directly mutated transforms
@@ -197,6 +213,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
             enqueueDirty(spatial);
         }
     };
+    private int temporalFrame;
     private RenderManager manager;
     private ViewPort viewport;
     private boolean enabled;
@@ -973,6 +990,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
     public void render(RenderQueue queue) {
         prepareQueue(queue);
         shading.render(queue);
+        commitTemporal();
     }
 
     @Override
@@ -985,13 +1003,40 @@ public final class GpuScenePipeline implements OpaquePipeline {
     public void appendPasses(com.jme3.renderer.framegraph.FrameGraph graph, RenderQueue queue) {
         graph.addPass("GpuScene/CullAndCompact", context -> prepareQueue(queue)).sideEffect();
         graph.addExpansionPass("GpuScene/Shading", current -> shading.appendPasses(current, queue));
+        if (viewport.getTemporalScene() != null) {
+            graph.addPass("GpuScene/TemporalCommit", context -> commitTemporal()).sideEffect();
+        }
+    }
+
+    /** Internal temporal capture query; registered instances use GPU history. */
+    public boolean ownsTemporalGeometry(Geometry geometry) {
+        return isActive() && handled.contains(geometry);
+    }
+
+    private void commitTemporal() {
+        if (!isActive() || viewport.getTemporalScene() == null) {
+            return;
+        }
+        for (Batch batch : batches) {
+            if (batch.temporalCommit != null) {
+                batch.temporalCommit.dispatchCompute(manager, (batch.instances.size() + 63) / 64, 1, 1);
+            }
+        }
+        manager.getRenderer().memoryBarrier(0x2000);
     }
 
     private void prepareQueue(RenderQueue queue) {
         if (!isActive()) {
             return;
         }
-        if (!freezeCulling || !frozenSnapshot || !structuralChanges.isEmpty()) {
+        temporalFrame++;
+        if (viewport.getTemporalScene() == null) {
+            for (Batch batch : batches) {
+                batch.releaseTemporal();
+            }
+        }
+        // Temporal attributes must be refreshed even while diagnostic culling is frozen.
+        if (viewport.getTemporalScene() != null || !freezeCulling || !frozenSnapshot || !structuralChanges.isEmpty()) {
             updateVisibility();
             if (freezeCulling) {
                 frozenSnapshot = true;
@@ -1001,6 +1046,18 @@ public final class GpuScenePipeline implements OpaquePipeline {
             hizDiagnostics.poll();
         }
         submitQueue(queue);
+        if (viewport.getTemporalScene() != null) {
+            // Registration is current now: never snapshot CPU vertices for native instances,
+            // including the first frame and newly attached batches.
+            viewport.getTemporalScene().captureScene();
+            List<Geometry> packets = new ArrayList<>();
+            for (Batch batch : batches) {
+                for (int draw = 0; draw < batch.drawPacketCount(); draw++) {
+                    packets.add(batch.proxies.get(draw));
+                }
+            }
+            viewport.getTemporalScene().registerGpuPackets(handled, packets);
+        }
     }
 
     private void updateVisibility() {
@@ -1458,6 +1515,51 @@ public final class GpuScenePipeline implements OpaquePipeline {
         final BufferObject compacted = buffer(6);
         final BufferObject drawCount = buffer(7);
         Material compact;
+        BufferObject temporalHistory;
+        BufferObject previousVisible;
+        Material temporalCommit;
+
+        void prepareTemporal(boolean useHiZ, Matrix4f occlusionProjection) {
+            boolean active = viewport.getTemporalScene() != null;
+            cull.setBoolean("Temporal", active);
+            if (!active) {
+                releaseTemporal();
+                return;
+            }
+            if (temporalHistory == null) {
+                temporalHistory = buffer(6);
+                previousVisible = buffer(7);
+                com.jme3.renderer.framegraph.PackedBufferData.set(temporalHistory, new int[instances.size() * 20]);
+                com.jme3.renderer.framegraph.PackedBufferData.set(previousVisible, new int[plan.visibleCapacity * 16]);
+                cull.setShaderStorageBufferObject("TemporalHistory", temporalHistory);
+                cull.setShaderStorageBufferObject("PreviousVisible", previousVisible);
+                temporalCommit = new Material(assets, "Common/MatDefs/GpuScene/TemporalCommit.j3md");
+                temporalCommit.setShaderStorageBufferObject("Instances", data);
+                temporalCommit.setShaderStorageBufferObject("TemporalHistory", temporalHistory);
+                temporalCommit.setInt("Count", instances.size());
+                for (GpuSceneGeometry packet : proxies) {
+                    packet.setTemporalTransforms(previousVisible);
+                }
+            }
+            cull.setInt("TemporalFrame", temporalFrame);
+            cull.setBoolean("TemporalMarkVisible", !occlusion || !queryOcclusion
+                    || (useHiZ && occlusionProjection != historyViewProjection));
+        }
+
+        void releaseTemporal() {
+            if (temporalHistory != null) {
+                temporalHistory.dispose();
+                previousVisible.dispose();
+                temporalHistory = null;
+                previousVisible = null;
+                temporalCommit = null;
+                cull.clearParam("TemporalHistory");
+                cull.clearParam("PreviousVisible");
+                for (GpuSceneGeometry packet : proxies) {
+                    packet.setTemporalTransforms(null);
+                }
+            }
+        }
 
 
         final Material cull = new Material(assets, "Common/MatDefs/GpuScene/Cull.j3md");
@@ -1475,6 +1577,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
 
         void release() {
+            releaseTemporal();
             data.dispose();
             visible.dispose();
             commands.dispose();
@@ -1595,6 +1698,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
                 dirty.clear();
             }
             Camera camera = viewport.getCamera();
+            prepareTemporal(useHiZ, occlusionViewProjection);
             cull.setMatrix4("ViewProjection", camera.getViewProjectionMatrix());
             cull.setMatrix4("OcclusionViewProjection", occlusionViewProjection);
             cull.setMatrix4("View", camera.getViewMatrix());

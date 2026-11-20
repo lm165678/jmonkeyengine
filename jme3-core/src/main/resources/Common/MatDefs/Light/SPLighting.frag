@@ -93,7 +93,12 @@ varying vec3 giDiffuseReflectance;
 uniform bool g_IsFirstLightPass;
 uniform vec3 g_CameraPosition;
 
+#import "Common/ShaderLib/TemporalFragment.glsllib"
+
 void main(){
+    #ifdef TEMPORAL_VELOCITY
+        outTemporalVelocity = temporalMotion();
+    #endif
     #if !defined(VERTEX_LIGHTING)
         #if defined(NORMALMAP)
             vec3 tbnNormal = normalize(vNormal.xyz);

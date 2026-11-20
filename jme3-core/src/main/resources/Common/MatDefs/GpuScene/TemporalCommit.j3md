@@ -1,0 +1,10 @@
+MaterialDef GPU Scene Temporal Commit {
+    MaterialParameters {
+        ShaderStorageBufferObject Instances
+        ShaderStorageBufferObject TemporalHistory
+        Int Count
+    }
+    Technique {
+        ComputeShader GLSL430: Common/MatDefs/GpuScene/TemporalCommit.comp
+    }
+}

@@ -36,7 +36,12 @@ varying vec4 vertColor;
 varying vec3 capturePosition;
 #endif
 
+#import "Common/ShaderLib/TemporalFragment.glsllib"
+
 void main(){
+    #ifdef TEMPORAL_VELOCITY
+        outTemporalVelocity = temporalMotion();
+    #endif
     vec4 color = vec4(1.0);
 
     #ifdef HAS_COLORMAP

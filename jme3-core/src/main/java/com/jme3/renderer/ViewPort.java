@@ -65,6 +65,24 @@ import com.jme3.util.SafeArrayList;
  * @see Camera
  */
 public class ViewPort {
+    private com.jme3.renderer.temporal.TemporalScene temporalScene;
+
+    /** @return viewport-owned temporal inputs, or null when temporal rendering is inactive */
+    public com.jme3.renderer.temporal.TemporalScene getTemporalScene() {
+        return temporalScene;
+    }
+
+    /**
+     * Internal render-thread installation by TemporalAAFilter. Never share across views.
+     * Applications install the filter in FPP; removing it restores the null default.
+     */
+    public void setTemporalScene(com.jme3.renderer.temporal.TemporalScene scene) {
+        if (scene != null && temporalScene != null && scene != temporalScene) {
+            throw new IllegalStateException("Only one temporal renderer per viewport");
+        }
+        temporalScene = scene;
+    }
+
 
     /**
      * Name for this viewport.

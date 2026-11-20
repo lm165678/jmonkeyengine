@@ -12,6 +12,20 @@ layout(std430) buffer m_Visible {
 layout(std430) buffer m_Commands {
     uint command[];
 };
+#ifdef TEMPORAL
+struct TemporalInstance {
+    mat4 previousWorld;
+    uvec4 visibility; // last visible frame, current final visibility, reserved
+};
+layout(std430) buffer m_TemporalHistory {
+    TemporalInstance history[];
+};
+layout(std430) buffer m_PreviousVisible {
+    mat4 previousVisible[];
+};
+uniform int m_TemporalFrame;
+uniform bool m_TemporalMarkVisible;
+#endif
 uniform mat4 m_ViewProjection;
 uniform mat4 m_OcclusionViewProjection;
 uniform mat4 m_View;
@@ -213,4 +227,14 @@ void main() {
     instanceMatrix[2].w = 0.0;
     instanceMatrix[3].w = 1.0;
     visible[slot] = instanceMatrix;
+    #ifdef TEMPORAL
+        mat4 previous = history[id].previousWorld;
+        bool valid = history[id].visibility.x != 0u
+                && history[id].visibility.x == uint(m_TemporalFrame - 1);
+        previous[3].w = valid ? 1.0 : 0.0;
+        previousVisible[slot] = previous;
+        if (m_TemporalMarkVisible) {
+            history[id].visibility.y = uint(m_TemporalFrame);
+        }
+    #endif
 }

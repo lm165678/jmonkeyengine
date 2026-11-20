@@ -1,0 +1,34 @@
+MaterialDef TemporalVelocity {
+    MaterialParameters {
+        Matrix4 TemporalCurrentVP
+        Matrix4 TemporalPreviousVP
+        Matrix4 TemporalPreviousWorld
+        Boolean TemporalGpuInstances
+        Boolean UseInstancing
+        Boolean TemporalValid
+        Texture2D ColorMap
+        Color Color
+        Boolean VertexColor
+        Float AlphaThreshold
+    }
+    Technique {
+        VertexShader GLSL330: Common/MatDefs/Temporal/Velocity.vert
+        FragmentShader GLSL330: Common/MatDefs/Temporal/Velocity.frag
+        WorldParameters {
+            ViewProjectionMatrix
+            WorldViewProjectionMatrix
+            WorldMatrix
+        }
+        Defines {
+            INSTANCING : UseInstancing
+            TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
+            HAS_COLORMAP : ColorMap
+            VERTEX_COLOR : VertexColor
+        }
+        RenderState {
+            DepthTest On
+            DepthWrite On
+            Blend Off
+        }
+    }
+}

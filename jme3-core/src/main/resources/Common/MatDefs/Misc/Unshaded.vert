@@ -29,6 +29,8 @@ varying vec4 vertColor;
     uniform float m_PointSize;
 #endif
 
+#import "Common/ShaderLib/TemporalVertex.glsllib"
+
 void main(){
     #ifdef NEED_TEXCOORD1
         texCoord1 = inTexCoord;
@@ -75,4 +77,7 @@ void main(){
         giWorldNormal = TransformWorldNormal(giModelNormal);
     #endif
     gl_Position = TransformWorldViewProjection(modelSpacePos);
+    #ifdef TEMPORAL_VELOCITY
+        temporalPosition(modelSpacePos);
+    #endif
 }

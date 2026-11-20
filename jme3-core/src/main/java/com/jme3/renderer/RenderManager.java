@@ -94,6 +94,8 @@ import java.util.logging.Logger;
  * viewports.
  */
 public class RenderManager {
+
+    private com.jme3.renderer.temporal.TemporalScene currentTemporal;
     private final java.util.Map<ViewPort, com.jme3.shadow.ShadowManager> shadowManagers = new java.util.IdentityHashMap<>();
     private com.jme3.shadow.ShadowManager currentShadows;
 
@@ -1158,7 +1160,7 @@ public class RenderManager {
         }
 
         this.renderer.pushDebugGroup(geom.getName());
-        try {
+        try (com.jme3.renderer.temporal.TemporalScene.Draw temporalDraw = currentTemporal == null ? null : currentTemporal.beginGeometry(geom)) {
             if (geom.isIgnoreTransform()) {
                 setWorldMatrix(Matrix4f.IDENTITY);
             } else {
@@ -1887,6 +1889,15 @@ public class RenderManager {
             }
         }).sideEffect().after(sceneQueue);
         FrameGraph.PassBuilder opaquePipeline = graph.addExpansionPass("OpaquePipeline", current -> {
+            current.addPass("BeginTemporalMain", context -> {
+                currentTemporal = vp.getTemporalScene();
+                var temporalPipeline = getPipeline(vp);
+                if (currentTemporal != null
+                        && !(temporalPipeline instanceof com.jme3.renderer.gpuscene.GpuScenePipeline
+                        && ((com.jme3.renderer.gpuscene.GpuScenePipeline) temporalPipeline).isActive())) {
+                    currentTemporal.captureScene();
+                }
+            }).sideEffect();
             pipelines.appendPasses(current, vp);
         }).sideEffect().after(shadowAndPostQueue);
         FrameGraph.PassBuilder forwardAndBuckets = graph.addExpansionPass("ForwardAndBuckets", current -> {
@@ -1900,6 +1911,19 @@ public class RenderManager {
                 appendQueuePasses(current, vp, true);
             }
         }).sideEffect().after(opaquePipeline);
+        FrameGraph.PassBuilder temporalVelocity = graph.addExpansionPass("TemporalVelocity", current -> {
+            current.addPass("OpaqueVelocityPass", context -> {
+                currentTemporal = null;
+                if (vp.getTemporalScene() != null) {
+                    vp.getTemporalScene().renderSupplement(false);
+                }
+            }).sideEffect();
+            current.addPass("TranslucentVelocityPass", context -> {
+                if (vp.getTemporalScene() != null) {
+                    vp.getTemporalScene().renderSupplement(true);
+                }
+            }).sideEffect();
+        }).sideEffect().after(forwardAndBuckets);
         FrameGraph.PassBuilder postProcessing = graph.addExpansionPass("PostProcessing", current -> {
             if (processors != null) {
                 if (prof != null) {
@@ -1917,7 +1941,7 @@ public class RenderManager {
                     prof.vpStep(VpStep.ProcEndRender, vp, null);
                 }
             }
-        }).sideEffect().after(forwardAndBuckets);
+        }).sideEffect().after(temporalVelocity);
         FrameGraph.PassBuilder translucent = graph.addPass("Translucent", context -> {
             renderTranslucentQueue(vp);
         }).sideEffect().after(postProcessing);
@@ -1932,6 +1956,10 @@ public class RenderManager {
             setForcedMaterial(previousMaterial);
             setForcedTechnique(previousTechnique);
             setForcedRenderState(previousState);
+            currentTemporal = null;
+            if (vp.getTemporalScene() != null) {
+                vp.getTemporalScene().restoreCamera();
+            }
             currentShadows.finishFrame();
             currentShadows = previousShadows;
             // Do not retain queued geometry or overridden depth ranges after a failed pass.

@@ -97,6 +97,8 @@ varying vec4 giWorldTangent;
 #endif
 varying vec3 giDiffuseReflectance;
 
+#import "Common/ShaderLib/TemporalVertex.glsllib"
+
 void main(){
    vec4 modelSpacePos = vec4(inPosition, 1.0);
    vec3 modelSpaceNorm = inNormal;
@@ -133,7 +135,10 @@ void main(){
         #ifdef VERTEX_COLOR
             giDiffuseReflectance *= inColor.rgb;
         #endif
-    gl_Position = TransformWorldViewProjection(modelSpacePos);// g_WorldViewProjectionMatrix * modelSpacePos;
+    gl_Position = TransformWorldViewProjection(modelSpacePos);
+    #ifdef TEMPORAL_VELOCITY
+        temporalPosition(modelSpacePos);
+    #endif// g_WorldViewProjectionMatrix * modelSpacePos;
    texCoord = inTexCoord;
    #ifdef SEPARATE_TEXCOORD
       texCoord2 = inTexCoord2;

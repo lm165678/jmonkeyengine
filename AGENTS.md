@@ -50,3 +50,7 @@
 - Keep GLSL source/comments ASCII-compatible with the LWJGL 2 upload path.
   Put detailed Chinese shader usage/call-chain explanations in the corresponding
   Java example comments; retain equivalent English explanations in shader files.
+
+## Comment style
+
+- Match the surrounding author style. Keep comments concise and focused on purpose, non-obvious reasons and constraints; avoid template-like narration and redundant descriptions.

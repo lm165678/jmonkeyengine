@@ -401,8 +401,12 @@ public final class DeferredPipeline implements OpaquePipeline {
         String name = "Batch[" + index + "]/";
         boolean[] ready = {false};
         ResourceHandle<RenderTarget> surfaces = graph.createResource(name + "GBuffer",
-            new RenderTargetDefinition(1f, 1, Image.Format.Depth24, Image.Format.RGBA32F,
-                Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F));
+            new RenderTargetDefinition(1f, 1, Image.Format.Depth24,
+                vp.getTemporalScene() != null && vp.getTemporalScene().isBasePass()
+                ? new Image.Format[]{Image.Format.RGBA32F, Image.Format.RGBA16F, Image.Format.RGBA16F,
+                    Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F}
+                : new Image.Format[]{Image.Format.RGBA32F, Image.Format.RGBA16F, Image.Format.RGBA16F,
+                    Image.Format.RGBA16F, Image.Format.RGBA16F}));
         ResourceHandle<FrameBuffer> output = graph.importResource(name + "Output",
             FrameBuffer.class, () -> vp.getOutputFrameBuffer());
         graph.addPass(name + "LightCulling", context -> {

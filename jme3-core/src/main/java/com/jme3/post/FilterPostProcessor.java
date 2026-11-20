@@ -973,6 +973,9 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
      * Removes all filters currently added to this processor.
      */
     public void removeAllFilters() {
+        // Temporal filters own viewport hooks as well as GPU history.
+        // Removing the chain must release them just like removeFilter().
+        cleanupFilterResources();
         filters.clear();
         updateLastFilterIndex();
     }
