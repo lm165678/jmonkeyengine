@@ -1,3 +1,8 @@
+## 2026-11-23 ColorGrading profiler attribution
+
+- The older DetailedProfiler starts each row at its callback and closes it at the next callback. In the FrameGraph path the last PostQueue filter marker can include the subsequent OpaquePipeline before FlushQueue. ColorGrading has an empty PostQueue callback. It executes its full-screen Filmic shader in PostProcessing under the LegacyGrade pass.
+- Separate GL timestamp pairs around the actual pass callbacks on TestScene5 confirmed Filmic and GI off. RTX 5080/OpenGL 4.3, fixed default camera, offscreen. At 1440×900 and 1920×1080, LegacyGrade GPU medians were 0.0116 and 0.0166 ms (100 samples), while its PostQueue callback was 0.0008 ms at both sizes. Logs under `build/giscene5-check/grade-timing-*.log`. The screenshot's exact camera and renderer settings were not reproduced. Base `9b03eaff2` with temporary timing hooks. No production render or profiler code changed for this diagnosis.
+
 ## 2026-11-23 Managed shadow indirect drawing
 
 - The managed viewport shadow passes continue to fit each light-space camera and collect its casters once. They now submit compatible indexed casters using multi-draw indirect from that list. A per-viewport packed mesh holds positions, UVs and source LOD indices. Alpha-cutout groups share the original texture and cutoff. The existing per-geometry PreShadow path handles animation, custom techniques and unsupported inputs. Packed data is invalidated on caster catalog changes or submitted source buffer edits. Directional cascades, point faces and spot maps share the submission mechanism.
