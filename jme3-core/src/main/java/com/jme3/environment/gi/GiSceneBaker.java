@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
- * Frame-budgeted render-thread scene baker for static diffuse GI. Captures linear
+ * Bakes static diffuse GI on the render thread within a per-frame budget. Captures linear
  * HDR color and hardware depth through six 90-degree cameras per probe. The
  * material's actual alpha discard, skinning, instancing and emission participate.
  * Existing GI bindings are disabled only in the private capture, preventing
@@ -78,7 +78,7 @@ public final class GiSceneBaker {
     private GiSceneBaker() {
     }
 
-    /** Explicit quality/budget settings; use smaller volumes instead of a world-sized atlas. */
+    /** Bake quality and resource limits. Split large areas into smaller volumes to stay within the atlas budget. */
     public static final class Settings {
         public int captureSize = 64;
         public int radianceSamples = 1024;
@@ -114,11 +114,11 @@ public final class GiSceneBaker {
         public int visibilityResolution = 16;
         public int visibilitySamples = 64;
         public int maxProbes = 4096;
-        /** Conservative CPU working-set budget, including capture and output copies. */
+        /** CPU memory budget, including capture buffers and output copies. */
         public long maxWorkingBytes = 128L * 1024 * 1024;
         public float near = 0.05f;
         public float far = 200f;
-        /** Cone radius in radians used to prefilter directional distance moments. */
+        /** Angular radius, in radians, for filtering distance moments. */
         public float visibilityCone = 0.15f;
         public ColorRGBA background = ColorRGBA.Black.clone();
         /** Prefer half-float storage; surface layouts always use full precision
@@ -150,10 +150,10 @@ public final class GiSceneBaker {
          * }</pre>
          */
         public float relativeProbeClearance = 0.02f;
-        /** Content revision including geometry, lighting and validator; required for checkpoints. */
+        /** Checkpoint revision. Include geometry, lighting and the placement validator. */
         public String sceneRevision = "";
         public ProbeValidator validator;
-        /** Capture direct-light shadowing by default; respects Spatial ShadowMode. */
+        /** Captures direct-light shadows by default, using each spatial's ShadowMode. */
         public boolean captureShadows = true;
         public int shadowMapSize = 512;
         public int maxShadowLights = 16;
@@ -203,13 +203,13 @@ public final class GiSceneBaker {
         }
     }
 
-    /** Optional signed-SDF/application policy; write the relocated world position into store. */
+    /** Optional placement validator. Write the adjusted world position into store. */
     @FunctionalInterface
     public interface ProbeValidator {
         boolean place(Spatial scene, Vector3f position, Vector3f spacing, float clearance, Vector3f store);
     }
 
-    /** Blocking convenience wrapper. Editors should use start() and step() each frame. */
+    /** Runs the bake to completion. Editors can call {@code start()} and step the job each frame. */
     public static GiProbeData bake(RenderManager manager, Spatial scene, GiProbeVolume volume,
             Settings settings, Consumer<ViewPort> configureCapture, BooleanSupplier cancelled,
             IntConsumer completedProbes) {
@@ -221,7 +221,7 @@ public final class GiSceneBaker {
         }
     }
 
-    /** Creates a render-thread job. See GiBakeJob for budgeting, cancellation and resume usage. */
+    /** Creates a render-thread job. {@link GiBakeJob} describes budgeting, cancellation and resume. */
     public static GiBakeJob start(RenderManager manager, Spatial scene, GiProbeVolume volume,
             Settings settings, Consumer<ViewPort> configureCapture, BooleanSupplier cancelled,
             IntConsumer completedProbes) {
@@ -289,8 +289,8 @@ public final class GiSceneBaker {
                     }
                 }
             });
-            // Background rendering does not apply SkyLight intensity. Only sky
-            // pixels need this scale; captured surfaces already applied it.
+            // The background shader does not apply SkyLight intensity. Scale sky
+            // pixels here; the captured surfaces already include that intensity.
             backgroundSkyScale = skyScale[0] >= 0f ? skyScale[0] : hasSky[0] ? 0f : 1f;
             camera = new Camera(settings.captureSize, settings.captureSize);
             camera.setFrustumPerspective(90, 1, settings.near, settings.far);
@@ -365,10 +365,10 @@ public final class GiSceneBaker {
             return depths[face].getFloat(pixel(direction, face) * 4) >= 0.999999f ? 1f : 0f;
         }
 
-        // Hardware depth is affine across a projected plane. Filtering depth
-        // before unprojection reconstructs that plane instead of stamping the
-        // nearest capture pixel into the visibility atlas. Never interpolate
-        // across sky or a large depth discontinuity (which invents occluders).
+        // Depth varies linearly across a projected plane. Interpolate it before
+        // unprojecting so visibility follows that plane instead of the pixel grid.
+        // Skip interpolation across sky or large depth changes, where it would
+        // create occluders between unrelated surfaces.
         float distance(Vector3f direction) {
             int face = face(direction);
             float scale = direction.dot(forward[face]);

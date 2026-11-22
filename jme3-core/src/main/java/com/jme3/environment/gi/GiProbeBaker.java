@@ -62,7 +62,7 @@ public final class GiProbeBaker {
         }
     }
 
-    /** Projects one captured probe; use this on a worker only with a CPU radiance snapshot. */
+    /** Projects one captured probe. Worker threads must receive a CPU copy of the radiance. */
     public static float[] project(Vector3f position, int samples, RadianceSource source, BooleanSupplier cancelled) {
         if (samples < 32 || !Vector3f.isValidVector(position)) {
             throw new IllegalArgumentException("Valid position and at least 32 samples required");

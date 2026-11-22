@@ -116,7 +116,7 @@ public class RenderManager {
         }
     }
 
-    /** Current viewport's managed record index, or -1 outside managed drawing. */
+    /** Index of the active managed draw record, or -1 outside that path. */
     public int getShadowLightIndex(com.jme3.light.Light light) {
         return currentShadows == null ? -1 : currentShadows.getLightIndex(light);
     }

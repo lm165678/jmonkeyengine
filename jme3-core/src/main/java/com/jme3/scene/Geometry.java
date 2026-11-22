@@ -247,6 +247,9 @@ public class Geometry extends Spatial {
         }
 
         this.mesh = mesh;
+        if (lodLevel >= mesh.getNumLodLevels()) {
+            lodLevel = 0;
+        }
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
         setBoundRefresh();
 

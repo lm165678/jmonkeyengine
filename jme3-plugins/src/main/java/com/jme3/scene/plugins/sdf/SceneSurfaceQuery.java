@@ -60,7 +60,7 @@ public final class SceneSurfaceQuery {
         NO_HIT
     }
 
-    /** Borrowed diagnostic result. Do not mutate its vectors or retain across scene changes. */
+    /** Borrowed diagnostic result. Use its vectors read-only until the scene changes. */
     public static final class Hit {
         public final HitStatus status;
         public final Geometry geometry;

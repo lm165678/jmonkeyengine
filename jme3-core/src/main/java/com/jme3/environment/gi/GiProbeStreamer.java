@@ -85,7 +85,7 @@ public final class GiProbeStreamer implements AutoCloseable {
             }
         }
     }
-    /** Metadata-only directory entry. x/y/z are double-precision absolute chunk offsets. */
+    /** Chunk metadata. The x, y and z offsets are absolute and stored as doubles. */
     public static final class Chunk {
         final String id;
         final double x;
@@ -273,7 +273,7 @@ public final class GiProbeStreamer implements AutoCloseable {
         setAppearance(id, intensity, fadeDistance, stabilized, false);
     }
 
-    /** Compatibility overload: smooth is ignored. Render-thread only, with the same lifecycle as the four-argument overload. */
+    /** Legacy overload. The smooth argument is ignored. Call on the render thread, as with the four-argument overload. */
     public void setAppearance(String id, float intensity, float fadeDistance, boolean stabilized, boolean smooth) {
         setAppearance(id, intensity, fadeDistance, stabilized, smooth, false);
     }

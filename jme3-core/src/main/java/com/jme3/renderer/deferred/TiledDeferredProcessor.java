@@ -40,7 +40,7 @@ import com.jme3.texture.FrameBuffer;
 import java.util.Objects;
 
 /**
- * Backward-compatible SceneProcessor facade. New integrations may install
+ * Adapts tiled deferred rendering to the SceneProcessor API. New integrations may install
  * DeferredPipeline directly through RenderManager.setPipeline(viewport, pipeline).
  * Use this facade when integrating through the existing SceneProcessor API:
  * <pre>{@code

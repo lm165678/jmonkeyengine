@@ -60,7 +60,7 @@ public final class LightShadowSettings implements com.jme3.export.Savable, Clone
         return cascadeCount;
     }
 
-    /** Directional lights only; point and spot lights ignore this preference. */
+    /** Applies to directional lights. Point and spot lights ignore this setting. */
     public void setCascadeCount(int count) {
         if (count < 1 || count > 4) {
             throw new IllegalArgumentException("Directional cascade count must be 1..4");

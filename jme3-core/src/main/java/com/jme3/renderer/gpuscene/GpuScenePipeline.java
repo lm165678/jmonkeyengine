@@ -15,7 +15,7 @@ import com.jme3.shader.VarType;
 import java.util.*;
 
 /**
- * Indexed GPU instance culling and indirect drawing. Manually constructed
+ * Culls indexed mesh instances and draws the visible set indirectly on the GPU. Manually constructed
  * decorators start disabled; LegacyApplication's automatic AppSettings policy
  * requests enabled GPU Scene and Bindless by default on capable main viewports.
  * GPU visibility produces the existing instance-attribute ABI. Original material
@@ -132,9 +132,9 @@ public final class GpuScenePipeline implements OpaquePipeline {
             if (revision == material.getContentRevision()) {
                 return false;
             }
-            // Temporary editor bindings are restored and reapplied between frames.
-            // Compare effective parameters before rebuilding packed mesh buffers.
-            // Active techniques are selected internally by individual render passes.
+            // The editor restores its temporary material bindings after each frame.
+            // Compare the effective values so reapplying them does not rebuild the mesh buffers.
+            // Each render pass selects its own active technique.
             if (snapshot.isTransparent() != material.isTransparent()
                     || snapshot.isReceivesShadows() != material.isReceivesShadows()
                     || snapshot.isBindlessTextures() != material.isBindlessTextures()
@@ -148,8 +148,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
                         || !Objects.deepEquals(parameter.getValue(), current.getValue())) {
                     return true;
                 }
-                // Fold the original hash check into the exact-value traversal.
-                // Keep texture identity/mutable hashes and deep array checks.
+                // Check the hash while walking the values so we only traverse them once.
+                // Texture identity is significant; array values are compared by content.
                 currentHash += current.hashCode();
                 if (parameter.getValue() instanceof com.jme3.texture.Texture
                         || parameter.getValue() instanceof BufferObject) {
@@ -251,7 +251,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** @return whether value-equivalent materials may share an instance batch */
+    /** @return whether the materials can share an instance batch based on their values */
     public boolean isMaterialMerging() {
         return materialMerging;
     }
@@ -306,7 +306,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** @return requested mode; MDI and IndirectDrawCount are also required */
+    /** @return requested mode; activation also requires MDI and IndirectDrawCount */
     public boolean isCommandCompaction() {
         return commandCompaction;
     }
@@ -375,7 +375,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** @return requested bindless mode, not a guarantee that every texture uses a handle */
+    /** @return whether bindless was requested; individual textures can still use units */
     public boolean isBindlessTextures() {
         return bindlessTextures;
     }
@@ -544,12 +544,12 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** @return whether a requested frozen snapshot has actually been captured */
+    /** @return whether the requested frozen snapshot is ready */
     public boolean isCullingSnapshotFrozen() {
         return frozenSnapshot;
     }
 
-    /** @return a copy of the capture camera, or null before capture; viewing camera is unaffected */
+    /** @return copy of the capture camera, or null until capture; independent of the viewing camera */
     public Camera getFrozenCullingCamera() {
         return frozenCamera == null ? null : frozenCamera.clone();
     }
@@ -698,7 +698,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         return shading;
     }
 
-    /** Enables the opt-in pipeline; false releases exclusive GPU resources immediately. */
+    /** Enables GPU Scene. Disabling releases the resources owned by this pipeline immediately. */
     public void setEnabled(boolean enabled) {
         if (this.enabled != enabled) {
             this.enabled = enabled;
@@ -746,7 +746,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         return batchBuildCount;
     }
 
-    /** @return explicit request; hardware support is reported by isActive */
+    /** @return requested GPU Scene setting; call {@link #isActive()} for the actual backend state */
     public boolean isEnabled() {
         return enabled;
     }
@@ -892,7 +892,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** @param distance world-space cutoff, zero disables; default zero */
+    /** @param distance world-space cutoff; zero disables it and is the default */
     public void setMaxDistance(float distance) {
         if (!Float.isFinite(distance) || distance < 0) {
             throw new IllegalArgumentException("Invalid distance");
@@ -900,7 +900,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         maxDistance = distance;
     }
 
-    /** @param pixels minimum projected sphere diameter; zero disables, default zero */
+    /** @param pixels minimum projected sphere diameter; zero disables it and is the default */
     public void setMinPixels(float pixels) {
         if (!Float.isFinite(pixels) || pixels < 0) {
             throw new IllegalArgumentException("Invalid pixel cutoff");
@@ -1008,7 +1008,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    /** Internal temporal capture query; registered instances use GPU history. */
+    /** Checks whether the registered instance already has GPU history. */
     public boolean ownsTemporalGeometry(Geometry geometry) {
         return isActive() && handled.contains(geometry);
     }
@@ -1035,7 +1035,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
                 batch.releaseTemporal();
             }
         }
-        // Temporal attributes must be refreshed even while diagnostic culling is frozen.
+        // Frozen culling still needs fresh motion attributes.
         if (viewport.getTemporalScene() != null || !freezeCulling || !frozenSnapshot || !structuralChanges.isEmpty()) {
             updateVisibility();
             if (freezeCulling) {
@@ -1047,8 +1047,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
         submitQueue(queue);
         if (viewport.getTemporalScene() != null) {
-            // Registration is current now: never snapshot CPU vertices for native instances,
-            // including the first frame and newly attached batches.
+            // Registration is ready by now. Use GPU history and skip CPU vertex copies for
+            // native instances, even on the first frame or in a newly attached batch.
             viewport.getTemporalScene().captureScene();
             List<Geometry> packets = new ArrayList<>();
             for (Batch batch : batches) {
@@ -1122,8 +1122,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
             }
             try {
                 for (Batch batch : batches) {
-                    // Query-exempt batches retain the first cull/LOD output.
-                    // Do not repeat their dispatch or command-buffer reset.
+                    // Query-exempt batches keep the first cull and LOD results.
+                    // Leave their command buffers intact.
                     if (batch.queryOcclusion) {
                         batch.prepare(true);
                     }
@@ -1184,8 +1184,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
         }
     }
 
-    // Rebuild only touched batches, not unrelated resident world chunks. This
-    // handles attach/detach/reparent coalesced within a frame using final ancestry.
+    // Rebuild touched batches using the final scene ancestry; several moves
+    // or attachments can have been queued in the same frame.
     private void applyStructuralChanges() {
         if (structuralChanges.isEmpty()) {
             return;
@@ -1225,8 +1225,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
             }
             batches.set(position, replacement);
         }
-        // Re-evaluate only ancestor paths. Static descendant subtrees retain their
-        // ownership cache; no full-world registration scan is performed.
+        // Walk the ancestor paths that changed and leave cached ownership
+        // in unchanged descendant subtrees.
         List<Spatial> ancestors = new ArrayList<>(ownershipChanges);
         ancestors.sort((a, b) -> Integer.compare(depth(b), depth(a)));
         for (Spatial ancestor : ancestors) {
@@ -1251,7 +1251,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         ownershipChanges.clear();
         structuralChanges.clear();
         changedBatches.clear();
-        // Forget unloaded material objects without rescanning the resident scene.
+        // Drop cached references to unloaded materials without walking the live scene.
         canonicalMaterials.clear();
         materialRepresentatives.clear();
     }
@@ -1350,8 +1350,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
     }
 
     private void enqueueDirty(Spatial spatial) {
-        // A parent transform setter also invalidates every descendant. Queue the
-        // subtree once; do not recursively rediscover it for every child event.
+        // A parent transform also dirties all descendants. Queue the whole
+        // subtree once so each child event does not queue the same work.
         for (Spatial ancestor = spatial; ancestor != null; ancestor = ancestor.getParent()) {
             if (dirtySpatials.contains(ancestor)) {
                 return;
@@ -1369,7 +1369,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
             owned &= handled.contains(spatial);
         } else if (spatial instanceof Node) {
             for (Spatial child : ((Node) spatial).getChildren()) {
-                // Visit every child even after finding a fallback branch.
+                // A fallback branch can still have eligible siblings.
                 boolean childOwned = indexOwnedSubtrees(child);
                 owned &= childOwned;
             }
@@ -1382,8 +1382,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
         return owned;
     }
 
-    // Check mesh deformation data, not only late-bound material animation uniforms.
-    // Skeletons, morphs and transparency deliberately retain the traditional path.
+    // The mesh can carry skinning data before its material receives animation uniforms.
+    // Leave skinned, morphed and transparent geometry on the regular draw path.
     static boolean supportsGeometry(Geometry geometry) {
         return !(geometry.isGrouped()
                     || geometry instanceof com.jme3.scene.instancing.InstancedGeometry

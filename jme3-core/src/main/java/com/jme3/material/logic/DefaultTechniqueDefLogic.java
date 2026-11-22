@@ -49,6 +49,7 @@ import java.util.EnumSet;
 public class DefaultTechniqueDefLogic implements TechniqueDefLogic {
 
     protected final TechniqueDef techniqueDef;
+    protected final ColorRGBA effectiveLightColor = new ColorRGBA();
 
     public DefaultTechniqueDefLogic(TechniqueDef techniqueDef) {
         this.techniqueDef = techniqueDef;
@@ -83,7 +84,11 @@ public class DefaultTechniqueDefLogic implements TechniqueDefLogic {
         for (int j = 0; j < lightList.size(); j++) {
             Light l = lightList.get(j);
             if (l instanceof AmbientLight) {
-                ambientLightColor.addLocal(l.getColor());
+                ColorRGBA color = l.getColor();
+                float intensity = l.getIntensity();
+                ambientLightColor.r += color.r * intensity;
+                ambientLightColor.g += color.g * intensity;
+                ambientLightColor.b += color.b * intensity;
                 if (removeLights) {
                     lightList.remove(l);
                 }

@@ -392,7 +392,7 @@ public final class AppSettings extends HashMap<String, Object> {
         defaults.put("Height", 900);
         defaults.put("WindowWidth", Integer.MIN_VALUE);
         defaults.put("WindowHeight", Integer.MIN_VALUE);
-        defaults.put("BitsPerPixel", 24);
+        defaults.put("BitsPerPixel", 32);
         defaults.put("Frequency", 0);
         defaults.put("DepthBits", 24);
         defaults.put("StencilBits", 0);
@@ -411,6 +411,8 @@ public final class AppSettings extends HashMap<String, Object> {
         defaults.put("MinWidth", 0);
         defaults.put("GammaCorrection", true);
         defaults.put("ShaderSrgbOutput", true);
+        defaults.put("SrgbOutputDithering", false);
+        defaults.put("HdrDisplayOutput", false);
         defaults.put("Resizable", true);
         defaults.put("GpuScene", true);
         defaults.put("GpuSceneBindless", true);
@@ -1148,11 +1150,22 @@ public final class AppSettings extends HashMap<String, Object> {
     }
 
     /**
-     * Set the bits per pixel for the display. Appropriate
-     * values are 16 for RGB565 color format, or 24 for RGB8 color format.
+     * Requests a display pixel depth before context creation. Windowed options
+     * are 32 bpp (default), RGB8 (24), and RGB565 (16). Fullscreen choices come
+     * from the display. The backend selects the actual format, alpha bits are
+     * configured separately, and the operating system controls display HDR.
      *
-     * @param value The bits per pixel to set
-     * (Default: 24)
+     * <pre>{@code
+     * // 第一步：创建窗口设置，默认 32 bpp。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setFullscreen(false);
+     * settings.setBitsPerPixel(32);
+     * app.setSettings(settings);
+     * // 第二步：启动；如需恢复 24 bpp，下次创建窗口前设为 24。
+     * app.start();
+     * }</pre>
+     *
+     * @param value The requested display depth in bits per pixel (default: 32)
      */
     public void setBitsPerPixel(int value) {
         putInteger("BitsPerPixel", value);
@@ -1354,6 +1367,69 @@ public final class AppSettings extends HashMap<String, Object> {
     /** Returns shader presentation policy; absent keys use the new true default. */
     public boolean isShaderSrgbOutput() {
         return !Boolean.FALSE.equals(get("ShaderSrgbOutput"));
+    }
+
+    /**
+     * Enables ordered dithering after shader sRGB encoding for an 8-bit SDR
+     * destination. Defaults to false, including old settings. Requires shader
+     * sRGB encoding; alpha and the linear composition buffer are unchanged.
+     * <pre>{@code
+     * // 第一步：启动前使用 shader sRGB，启用输出抖动。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setGammaCorrection(true);
+     * settings.setShaderSrgbOutput(true);
+     * settings.setSrgbOutputDithering(true);
+     * app.setSettings(settings);
+     * app.start();
+     * // 第二步：LWJGL3 窗口中可在渲染线程关闭，下帧恢复原输出。
+     * app.enqueue(() -> app.getContext().getSettings().setSrgbOutputDithering(false));
+     * }</pre>
+     *
+     * @param enabled true to enable final-output dithering
+     */
+    public void setSrgbOutputDithering(boolean enabled) {
+        putBoolean("SrgbOutputDithering", enabled);
+    }
+
+    /** Returns whether SDR output dithering is requested (default false). */
+    public boolean isSrgbOutputDithering() {
+        return getBoolean("SrgbOutputDithering");
+    }
+
+    /**
+     * Requests native HDR display output for a standalone LWJGL3 OpenGL window
+     * on Windows. The default is false. With gamma correction enabled and an
+     * active HDR display, the window can present its linear composition as
+     * FP16 scRGB through an OpenGL/D3D11 shared texture. Keep scene highlights
+     * above linear white if they should appear in HDR. If the display, context
+     * or driver lacks the required HDR or WGL interop support, the window uses
+     * its usual SDR output.
+     *
+     * <pre>{@code
+     * // 第一步：启动前启用线性渲染和 HDR 显示输出。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setGammaCorrection(true);
+     * settings.setHdrDisplayOutput(true);
+     * app.setSettings(settings);
+     * app.start();
+     *
+     * // 第二步：需要恢复 SDR 时，在渲染线程关闭这个开关。
+     * app.enqueue(() -> app.getContext().getSettings().setHdrDisplayOutput(false));
+     * }</pre>
+     *
+     * @param enabled true to request native HDR presentation
+     */
+    public void setHdrDisplayOutput(boolean enabled) {
+        putBoolean("HdrDisplayOutput", enabled);
+    }
+
+    /**
+     * Tests whether native HDR presentation was requested.
+     *
+     * @return true if requested, even if the display currently uses SDR
+     */
+    public boolean isHdrDisplayOutput() {
+        return getBoolean("HdrDisplayOutput");
     }
 
     /**

@@ -137,7 +137,7 @@ public final class StaticPassLightingLogic extends DefaultTechniqueDefLogic {
 
         int index = 0;
         for (DirectionalLight light : tempDirLights) {
-            ColorRGBA color = light.getColor();
+            ColorRGBA color = light.getEffectiveColor(effectiveLightColor);
             tempDirection.set(light.getDirection());
             transformDirection(viewMatrix, tempDirection);
             lightData.setVector4InArray(color.r, color.g, color.b, 1f, index++);
@@ -145,7 +145,7 @@ public final class StaticPassLightingLogic extends DefaultTechniqueDefLogic {
         }
 
         for (PointLight light : tempPointLights) {
-            ColorRGBA color = light.getColor();
+            ColorRGBA color = light.getEffectiveColor(effectiveLightColor);
             tempPosition.set(light.getPosition());
             float invRadius = light.getInvRadius();
             transformPosition(viewMatrix, tempPosition);
@@ -154,7 +154,7 @@ public final class StaticPassLightingLogic extends DefaultTechniqueDefLogic {
         }
 
         for (SpotLight light : tempSpotLights) {
-            ColorRGBA color = light.getColor();
+            ColorRGBA color = light.getEffectiveColor(effectiveLightColor);
             Vector3f pos = light.getPosition();
             Vector3f dir = light.getDirection();
 

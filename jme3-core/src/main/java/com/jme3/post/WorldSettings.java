@@ -12,7 +12,7 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Serializable scene-owned post-processing configuration, not GPU state.
+ * Post-processing settings saved with the scene. GPU resources are created at runtime.
  * SimpleApplication scene services apply the highest-priority attached settings
  * to the main viewport. Equal priorities use scene traversal order. Existing
  * application-owned FPPs take precedence; disabling scene services restores
@@ -37,12 +37,47 @@ import java.util.*;
  * }</pre>
  */
 public final class WorldSettings extends AbstractControl {
+    /** Selects the standalone game window's display output while the scene is attached. */
+    public enum DisplayOutput {
+        Application,
+        Sdr,
+        Hdr
+    }
+
     private byte[] postProcessing = new byte[0];
     private Map<String, Double> options = new LinkedHashMap<>();
     private int priority;
     private long revision;
+    private DisplayOutput displayOutput = DisplayOutput.Hdr;
 
-    /** Snapshots filter configuration atomically; never retains live GPU objects. */
+    /**
+     * Selects display output independently of the scene's post-processing filters.
+     * New settings default to HDR; older files without an output field follow
+     * AppSettings. HDR requires a supported Windows LWJGL3
+     * window and falls back to SDR when unavailable. SimpleApplication uses the
+     * highest-priority world and restores the application setting on detach.
+     * Change the mode on the application thread.
+     *
+     * <pre>{@code
+     * // 第一步：加载 SDK 保存的场景并挂载，自动应用其中的输出模式。
+     * Spatial world = assetManager.loadModel("Scenes/World.j3o");
+     * rootNode.attachChild(world);
+     * // 第二步：需要恢复应用设置时，在渲染线程切回 Application。
+     * world.getControl(WorldSettings.class).setDisplayOutput(WorldSettings.DisplayOutput.Application);
+     * }</pre>
+     *
+     * @param displayOutput requested output mode
+     */
+    public void setDisplayOutput(DisplayOutput displayOutput) {
+        this.displayOutput = Objects.requireNonNull(displayOutput, "displayOutput");
+    }
+
+    /** @return the display output stored with the scene */
+    public DisplayOutput getDisplayOutput() {
+        return displayOutput;
+    }
+
+    /** Copies the filter settings as a unit. The snapshot holds no GPU objects. */
     public void setPostProcessing(FilterPostProcessor processor, Map<String, Double> editorOptions)
             throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -53,7 +88,7 @@ public final class WorldSettings extends AbstractControl {
         revision++;
     }
 
-    /** Returns a fresh processor with independent filter histories for this viewport. */
+    /** Creates a processor with fresh filter histories for this viewport. */
     public FilterPostProcessor createPostProcessor(AssetManager assets) throws IOException {
         if (postProcessing.length == 0) {
             return null;
@@ -100,6 +135,7 @@ public final class WorldSettings extends AbstractControl {
         OutputCapsule capsule = exporter.getCapsule(this);
         capsule.write(postProcessing, "postProcessing", new byte[0]);
         capsule.write(priority, "priority", 0);
+        capsule.write(displayOutput, "displayOutput", DisplayOutput.Application);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -115,6 +151,7 @@ public final class WorldSettings extends AbstractControl {
         InputCapsule capsule = importer.getCapsule(this);
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
+        displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);
         String[] names = capsule.readStringArray("optionNames", new String[0]);
         double[] values = capsule.readDoubleArray("optionValues", new double[0]);
         if (names.length != values.length) {

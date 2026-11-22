@@ -10,7 +10,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Application-thread lifecycle for one main viewport's WorldSettings chain.
+ * Applies scene post-processing settings to the main viewport on the application thread.
  * Never use this for baking/capture viewports. One instance per viewport.
  * <pre>{@code
  * // 第一步：非 SimpleApplication 创建管理器；SimpleApplication 已自动管理。

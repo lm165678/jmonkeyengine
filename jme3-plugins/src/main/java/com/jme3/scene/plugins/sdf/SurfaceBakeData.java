@@ -141,7 +141,7 @@ public final class SurfaceBakeData implements Savable {
         invalidated = true;
     }
 
-    /** @return explicit editor invalidation; not a substitute for validate(model, revision) */
+    /** @return whether the editor invalidated the bake; still validate the model and revision */
     public boolean isInvalidated() {
         return invalidated;
     }

@@ -127,7 +127,7 @@ public class TestUpscaling extends SimpleApplication {
         fpp = new FilterPostProcessor(assetManager);
         fpp.setFrameBufferFormat(Image.Format.RGBA16F);
         fpp.setNumSamples(1);
-        // Deliberately add in reverse order; active reconstruction establishes stage order.
+        // Add the filters in reverse order to exercise FPP's stage ordering.
         fpp.addFilter(upscale);
         fpp.addFilter(fxaa);
         fpp.addFilter(taa);

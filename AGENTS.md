@@ -19,6 +19,10 @@
   commits may follow those revisions. Do not claim a push succeeded until verified.
 - Commit handoff documents with the related work. Never store credentials,
   private keys or access tokens in them. Preserve unrelated working-tree changes.
+- For new desktop JNI bindings, follow the Bullet distribution model. Build
+  per-platform binaries ahead of time, bundle the supported OS and architecture
+  variants and licenses, and select the bundled library at runtime. Verify
+  completeness at release packaging and record target-specific test coverage.
 
 ## Source documentation
 

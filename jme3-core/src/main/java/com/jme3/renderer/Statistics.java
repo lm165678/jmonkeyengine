@@ -239,7 +239,7 @@ public class Statistics {
         return indirect ? (sampledFrame < 0 ? -1 : (int) Math.min(Integer.MAX_VALUE, frame - sampledFrame)) : 0;
     }
 
-    /** Renderer snapshot hook: current frame sequence, incremented by clearFrame. */
+    /** Frame number used by renderer snapshots. Incremented by {@code clearFrame}. */
     public long getFrameSequence() {
         return frame;
     }

@@ -54,7 +54,11 @@ import java.nio.ByteBuffer;
  * // 第三步：所有相关视口完成后调用 output.encode(renderManager)，再读回或呈现。
  * // 编码目标关闭硬件 sRGB 写转换；之后不得再混合未经编码的颜色。
  * // 第四步：恢复视口输出后关闭 output；resize 时重新创建并通知 FPP。
+ * // 可选：在渲染线程启用 SDR 输出抖动，传 false 恢复。
+ * output.setOutputDithering(true);
  * }</pre>
+ * The native srgbPresentationSmoke task also verifies sub-code shadow steps
+ * with output dithering on and off.
  */
 public class TestSrgbPresentation extends SimpleApplication {
     private SrgbPresentation output;
@@ -134,9 +138,13 @@ public class TestSrgbPresentation extends SimpleApplication {
             output.close();
             output = null;
             com.jme3.system.awt.AwtPanelsContext panels = new com.jme3.system.awt.AwtPanelsContext();
-            panels.setSettings(getContext().getSettings());
+            AppSettings panelSettings = new AppSettings(true);
+            panelSettings.copyFrom(getContext().getSettings());
+            panelSettings.setBitsPerPixel(32);
+            panels.setSettings(panelSettings);
             panels.setSystemListener(this);
             panel = panels.createPanel(com.jme3.system.awt.PaintMode.OnRequest, true);
+            panel.setSize(16, 16);
             panel.attachTo(false, viewPort);
             com.jme3.post.FilterPostProcessor fpp = new com.jme3.post.FilterPostProcessor(assetManager);
             fpp.setFrameBufferFormat(com.jme3.texture.Image.Format.RGBA16F);
@@ -152,14 +160,24 @@ public class TestSrgbPresentation extends SimpleApplication {
                 if (!panel.isShaderSrgbOutput()) {
                     throw new AssertionError("AWT did not inherit the default shader output policy");
                 }
+                java.lang.reflect.Method endFrame = panel.getClass().getDeclaredMethod("onFrameEnd");
+                endFrame.setAccessible(true);
+                endFrame.invoke(panel);
                 panel.setShaderSrgbOutput(assetManager);
                 return;
             }
             java.lang.reflect.Method readback = panel.getClass().getDeclaredMethod("readbackTarget");
             readback.setAccessible(true);
             FrameBuffer target = (FrameBuffer) readback.invoke(panel);
+            if (target.getColorTarget().getFormat() != com.jme3.texture.Image.Format.RGBA8) {
+                throw new AssertionError("32 bpp panel must read from RGBA8");
+            }
             ByteBuffer pixel = BufferUtils.createByteBuffer(target.getWidth() * target.getHeight() * 4);
             renderer.readFrameBuffer(target, pixel);
+            if (frame >= 9) {
+                verifyDither(pixel, target.getWidth());
+                return;
+            }
             int[] expected = {118, 10, 188};
             for (int i = 0; i < 3; i++) {
                 if (Math.abs((pixel.get(i) & 255) - expected[i]) > 2) {
@@ -171,8 +189,10 @@ public class TestSrgbPresentation extends SimpleApplication {
             } else if (frame == 7) {
                 panel.setShaderSrgbOutput(assetManager);
             } else {
-                System.out.println("SRGB_PRESENTATION_GPU_PASS");
-                stop();
+                // Put the encoded neutral value one quarter of an 8-bit code above zero.
+                float nearBlack = .25f / (255f * 12.92f);
+                viewPort.setBackgroundColor(new ColorRGBA(nearBlack, nearBlack, nearBlack, 1f));
+                panel.setSrgbOutputDithering(true);
             }
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError(exception);
@@ -187,4 +207,30 @@ public class TestSrgbPresentation extends SimpleApplication {
         }
         super.destroy();
     }
+    private void verifyDither(ByteBuffer pixels, int width) {
+        int lit = 0;
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                int i = 4 * (y * width + x);
+                int luma = pixels.get(i) & 255;
+                if (luma > 1 || pixels.get(i + 1) != luma || pixels.get(i + 2) != luma) {
+                    throw new AssertionError("Output dithering must keep the test ramp neutral and within one code");
+                }
+                lit += luma;
+            }
+        }
+        if (frame == 9) {
+            if (lit < 3 || lit > 5) {
+                throw new AssertionError("Expected about four nonzero pixels in a quarter-code 4x4 block: " + lit);
+            }
+            panel.setSrgbOutputDithering(false);
+        } else {
+            if (lit != 0) {
+                throw new AssertionError("Disabling output dithering did not restore the input quantization");
+            }
+            System.out.println("SRGB_PRESENTATION_GPU_PASS");
+            stop();
+        }
+    }
+
 }

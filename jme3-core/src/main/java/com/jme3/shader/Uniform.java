@@ -75,7 +75,7 @@ public class Uniform extends ShaderVariable {
         return textureHandleSet;
     }
 
-    /** @return renderer-owned resident handle; valid only when hasTextureHandle is true */
+    /** @return renderer-owned resident handle; check {@link #hasTextureHandle()} before using it */
     public long getTextureHandle() {
         return textureHandle;
     }
@@ -196,7 +196,7 @@ public class Uniform extends ShaderVariable {
 
             multiData.clear();
             // Matrix equality must describe the uploaded data, which is now zero.
-            // Otherwise A(matrix) -> B(no matrix) -> A(same matrix) keeps zeros.
+            // A matrix set on A must be uploaded again after B clears it, even if A's value is unchanged.
             if (varType == VarType.Matrix3 || varType == VarType.Matrix4) {
                 value = null;
             }

@@ -10,8 +10,8 @@ MaterialDef PBR Lighting {
         Matrix4 TemporalPreviousWorld
         Boolean TemporalValid
 
-        // Opt-in diffuse GI chunk. Unbound materials retain their original lighting.
-        // GiProbeData.bind()/Binding.close() install/restore all parameters together.
+        // Bind these parameters to enable baked diffuse GI.
+        // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiMoments -LINEAR
         Texture2D GiSkyVisibility -LINEAR

@@ -7,7 +7,7 @@ MaterialDef AdaptExposure {
         Vector4 Settings
         Vector2 Speeds
         Float DeltaTime
-        Boolean UE4Mode
+        Boolean SceneHistogram
         Vector2 Brightness
         Float TransitionDistance
         Boolean Reset

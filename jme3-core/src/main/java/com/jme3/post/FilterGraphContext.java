@@ -12,7 +12,7 @@ import com.jme3.texture.Texture2D;
 import java.util.Objects;
 
 /**
- * Frame-local graph-native filter builder. Names are scoped to the filter's index
+ * Lets a filter add passes to the graph for this frame. Names are scoped to the filter's index
  * and name, so multiple instances do not collide. Sizes are relative to the
  * current pipeline phase: render dimensions before upscaling, output dimensions
  * afterward, never the size left on the camera by a preceding blur pass.
@@ -38,7 +38,7 @@ public final class FilterGraphContext {
     }
 
     /**
-     * Draws a backend-produced texture during a graph pass executor, not during
+     * Draws a texture produced by the backend. Call during pass execution, not during
      * declaration. The enclosing pass must declare all input reads/output writes.
      * Intended for native compute adapters whose output is not graph-owned.
      * <pre>{@code

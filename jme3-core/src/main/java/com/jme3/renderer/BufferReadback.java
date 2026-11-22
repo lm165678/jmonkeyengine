@@ -3,7 +3,7 @@ package com.jme3.renderer;
 import java.nio.ByteBuffer;
 
 /**
- * Owned asynchronous snapshot of a GPU buffer range. All methods require the
+ * An asynchronous readback of a GPU buffer range. The caller owns the snapshot. All methods require the
  * owning render thread/context. Closing releases the snapshot, not its source.
  * Polling never waits. The caller must close completed or abandoned requests.
  * <pre>{@code

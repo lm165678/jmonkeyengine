@@ -95,7 +95,7 @@ float Inner_PBR_ComputeDirectLight(
     float specular =(D* fresnel * G) /(4 * ndotv);
    */
  
-    // UE4 way to optimise Schlick GGX Geometry shadowing term
+    // Optimized Schlick-GGX geometry shadowing term
     //http://graphicrants.blogspot.co.uk/2013/08/specular-brdf-reference.html
     float G_V = ndotv + sqrt( (ndotv - ndotv * k) * ndotv + k );
     float G_L = ndotl + sqrt( (ndotl - ndotl * k) * ndotl + k );    

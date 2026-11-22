@@ -176,7 +176,7 @@ final class DeferredResources {
     }
 
     private static String legacyModelAdapter(int id) {
-        // This layout applies ONLY to the legacy deferredModelN per-light API.
+        // The legacy deferredModelN API uses this per-light layout.
         // Preferred deferredSurfaceModelN functions decode their own channels.
         return "vec4 shadeLegacyModel" + id + "() {\n"
             + "    vec4 record0 = getGBuffer0();\n"
@@ -197,7 +197,7 @@ final class DeferredResources {
     }
 
     void releaseTargets() {
-        // Graph owns disposal/pooling; only clear these borrowed references.
+        // The graph releases or recycles these resources.
         gbuffer = null;
         java.util.Arrays.fill(targets, null);
     }

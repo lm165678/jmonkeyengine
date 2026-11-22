@@ -124,6 +124,7 @@ public final class AWTSettingsDialog extends JFrame {
     // UI components
     private JCheckBox vsyncBox = null;
     private JCheckBox gammaBox = null;
+    private JCheckBox hdrDisplayOutputBox;
     private JCheckBox fullscreenBox = null;
     private JCheckBox x11PlatformPreferredBox = null;
     private JComboBox<String> displayResCombo = null;
@@ -485,6 +486,10 @@ public final class AWTSettingsDialog extends JFrame {
         gammaBox = new JCheckBox(resourceBundle.getString("checkbox.gamma"));
         gammaBox.setSelected(source.isGammaCorrection());
 
+        hdrDisplayOutputBox = new JCheckBox(resourceBundle.getString("checkbox.hdrDisplayOutput"));
+        hdrDisplayOutputBox.setToolTipText(resourceBundle.getString("tooltip.hdrDisplayOutput"));
+        hdrDisplayOutputBox.setSelected(source.isHdrDisplayOutput());
+
         x11PlatformPreferredBox = new JCheckBox(resourceBundle.getString("checkbox.x11PlatformPreferred"));
         x11PlatformPreferredBox.setSelected(source.isX11PlatformPreferred());
         boolean linux = JmeSystem.getPlatform().getOs() == Platform.Os.Linux;
@@ -598,6 +603,15 @@ public final class AWTSettingsDialog extends JFrame {
         gbc.anchor = GridBagConstraints.WEST;
         mainPanel.add(displayScaleModeCombo, gbc);
 
+        if (JmeSystem.getPlatform().getOs() == Platform.Os.Windows) {
+            gbc = new GridBagConstraints();
+            gbc.gridx = 0;
+            gbc.gridy = 6;
+            gbc.gridwidth = 4;
+            gbc.anchor = GridBagConstraints.CENTER;
+            mainPanel.add(hdrDisplayOutputBox, gbc);
+        }
+
         // Set the button action listeners. Cancel disposes without saving, OK
         // saves.
         ok.addActionListener(new ActionListener() {
@@ -632,14 +646,14 @@ public final class AWTSettingsDialog extends JFrame {
         gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridwidth = 2;
-        gbc.gridy = 6;
+        gbc.gridy = 7;
         gbc.anchor = GridBagConstraints.EAST;
         mainPanel.add(ok, gbc);
         gbc = new GridBagConstraints();
         gbc.insets = new Insets(4, 16, 4, 4);
         gbc.gridx = 2;
         gbc.gridwidth = 2;
-        gbc.gridy = 6;
+        gbc.gridy = 7;
         gbc.anchor = GridBagConstraints.WEST;
         mainPanel.add(cancel, gbc);
 
@@ -771,6 +785,7 @@ public final class AWTSettingsDialog extends JFrame {
             source.setFullscreen(fullscreen);
             source.setVSync(vsync);
             source.setGammaCorrection(gamma);
+            source.setHdrDisplayOutput(hdrDisplayOutputBox.isSelected());
             source.setX11PlatformPreferred(x11PlatformPreferredBox.isSelected());
             DisplayScaleModeOption displayScaleMode
                     = (DisplayScaleModeOption) displayScaleModeCombo.getSelectedItem();
@@ -939,7 +954,10 @@ public final class AWTSettingsDialog extends JFrame {
             if (displayResCombo.getItemCount() > 0) {
                 displayResCombo.setSelectedIndex(displayResCombo.getItemCount() - 1);
             }
-            colorDepthCombo.setModel(new DefaultComboBoxModel<>(new String[] { "24 bpp", "16 bpp" }));
+            String colorDepth = (String) colorDepthCombo.getSelectedItem();
+            // Windowed pixel format is independent of exclusive monitor modes.
+            colorDepthCombo.setModel(new DefaultComboBoxModel<>(new String[] { "32 bpp", "24 bpp", "16 bpp" }));
+            colorDepthCombo.setSelectedItem(colorDepth != null ? colorDepth : source.getBitsPerPixel() + " bpp");
             displayFreqCombo.setModel(new DefaultComboBoxModel<>(new String[] { resourceBundle.getString("refresh.na") }));
             displayFreqCombo.setEnabled(false);
         } else {

@@ -2,7 +2,7 @@
 
 更新日期：2026-11-16。本文是开发方案，不是已完成功能列表。
 
-2026-11-20：本地 TAA 新增静态边缘连续帧回归，修正重建坐标、深度量化拒绝和退化颜色裁剪。128×96 单位对比度测试的最坏通道变化从 1.0 降至约 0.189；仍有残余波动，尚非 UE4 画质等价，新增采样开销待测。详见 DEV_HANDOFF.md。
+2026-11-20：本地 TAA 新增静态边缘连续帧回归，修正重建坐标、深度量化拒绝和退化颜色裁剪。128×96 单位对比度测试的最坏通道变化从 1.0 降至约 0.189；仍有残余波动，新增采样开销待测。详见 DEV_HANDOFF.md。
 
 ## 目标与当前状态
 
@@ -42,10 +42,20 @@
 - 明确 Tonemap 与显示编码的边界，各执行一次；检查重复 Gamma、场景捕获被二次处理等问题。
 - 先提供可重复的手动曝光，再加入亮度直方图、自动曝光上下限、曝光补偿、测光与适应速度。
 - 将 Tonemap 曲线选择、曝光和艺术调色分开。仅替换为一个 ACES 近似公式不等于完整的 UE 色彩管线。
-- 先确保 SDR 输出可靠，HDR 显示输出作为后续明确目标，不默认宣称已经支持。
+- 保留现有 SDR 输出。Windows 独立 LWJGL3 窗口的 FP16 scRGB 输出默认关闭，开启时使用 OpenGL/D3D11 共享纹理；互操作不可用时继续呈现 SDR。已验证范围见 DEV_HANDOFF.md。
 - 预曝光不是简单乘一个系数：若采用，必须统一历史帧、Bloom、反射、GI 和捕获的数据尺度，并提供调试视图。
 
 验收：相同材质、光照和曝光下，对比 Forward/Deferred 与场景捕获；检查灰阶、饱和高亮、黑位、亮部渐变、亮度连续性和重复编码。原有低质量/兼容路径应可恢复。
+
+#### HDR 显示输出后续清单
+
+下次继续 HDR 显示输出或 Vulkan 后端时，先提醒用户查看本清单。Windows 共享纹理已经接入，原生 Vulkan 呈现留到 Vulkan 渲染后端具备接入条件时。
+
+- [x] 在 RTX 5080 上通过 `WGL_NV_DX_interop2` 将最终 OpenGL 帧写进 SDL 的 D3D11 FP16 纹理，共用现有 HDR 开关和 scRGB 交换链。
+- [x] 比较共享路径和旧路径的近黑灰阶、高于参考白的高光和朝向。在 TestScene2 原相机位置验证窗口和全屏的 HDR/SDR 切换。
+- [ ] 构建后验证 Windows 内嵌 3DViewer 的原生 HDR 预览，覆盖同一场景的 HDR/SDR 切换、缩放、拖靠和鼠标操作。原生子窗口与 AWT 命中测试探针已通过。
+- [ ] 补测其他显卡、混合显卡、焦点切换及跨 SDR/HDR 显示器移动，测量 GPU 帧时间和互操作同步等待。
+- [ ] Vulkan 渲染后端具备接入条件后，验证原生 HDR 交换链可用的格式与色彩空间组合、参考白与高光映射，以及 SDR 回退。
 
 ### 阶段二：公共时序能力
 
@@ -169,9 +179,9 @@ git pull --ff-only origin dev_feature_lightprobe
 
 复现相机：位置(5.7239,2.0553,-3.7907)，朝向(-.9887,-.1464,.0332)，FOV45。验收重点是平滑，不是偏黑就是错。诊断见DEV_HANDOFF；build产物为本机临时文件，跨机器需重新生成。
 
-## 2026-11-19 UE4-style SDR implementation checkpoint
+## 2026-11-19 histogram and film SDR implementation checkpoint
 
-AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantics; ColorGradingFilter offers opt-in AP1 Film and cached CombineLUTs/ApplyColorLUT. Old modes remain defaults for compatibility. Targeted native numeric tests passed; see DEV_HANDOFF.md for limitations (sparse metering, approximate tint, no EV100/pre-exposure/PQ, partial tonal grading) and commands. Full UE visual parity, physical-camera exposure and later TAA remain pending.
+AutoExposureFilter now offers opt-in SceneHistogram brightness/adaptation semantics; ColorGradingFilter offers opt-in AP1 Film and cached CombineLUTs/ApplyColorLUT. Old modes remain defaults for compatibility. Targeted native numeric tests passed; see DEV_HANDOFF.md for limitations (sparse metering, approximate tint, no EV100/pre-exposure/PQ, partial tonal grading) and commands. Full UE visual parity, physical-camera exposure and later TAA remain pending.
 
 ## 待办：中立碰撞资产与物理后端适配（2026-11-19）
 
@@ -188,15 +198,36 @@ AutoExposureFilter now offers opt-in UE4Histogram brightness/adaptation semantic
 
 背景：TestGame 引用了 JBullet，而 SDK 使用 Minie 9.0.3；现有碰撞对象反序列化产生 BVH 异常及后续空指针。此待办不表示现有资产已自动兼容，也不授权本轮实现。
 
+## 待办：图形 API 重构与 RHI（2026-11-22）
+
+参考 [UE4.27 的 RHI 命令列表与后端命令上下文](https://dev.epicgames.com/documentation/en-us/unreal-engine/parallel-rendering-overview?application_version=4.27) 划分引擎和图形后端的职责。保留 jME 的 Renderer、FrameGraph 和材质体系，按现有渲染线程模型逐步迁移。
+
+```text
+Renderer / FrameGraph / 渲染 Pass
+                  ↓
+          RHI 资源与命令接口
+              ↙       ↘
+       OpenGL 后端    Vulkan 后端
+              ↓           ↓
+      LWJGL 或其他库   LWJGL 或其他库
+```
+
+- [ ] **确定 RHI 边界。** 定义资源描述与句柄、纹理与缓冲区上传/读回、绘制与计算命令、管线绑定、资源访问与同步、能力查询及呈现。FrameGraph 声明依赖和资源用途，后端将其转换为 OpenGL barrier 或 Vulkan 的访问状态、图像布局与同步。GL/Vulkan 的常量、原生句柄和绑定库类型留在各自后端。首版沿用现有渲染线程，独立 RHI 线程和并行命令录制等有测量依据后再评估。
+- [ ] **先迁移 OpenGL。** 复用现有 GLRenderer 和 LWJGL 适配代码实现 OpenGL RHI。按清屏和基础绘制、纹理和离屏目标、计算和间接提交的顺序迁移。随后逐步收口 FrameGraph、GPU Scene、阴影、后处理、FSR OpenGL 后端、窗口呈现和 SDK 预览中绕过边界的 GL 调用。迁移阶段保留默认 OpenGL 路径及兼容回退。每一批先通过现有回归，再迁移下一批。
+- [ ] **实现 Vulkan RHI。** 首先打通设备与交换链、清屏、带纹理绘制和离屏读回。再补齐描述符、管线与 shader 变体、命令提交、图像布局、队列同步、延迟释放与交换链重建。深度和坐标差异由后端或共享 shader 契约处理。独立窗口与 SDK 的 AWT 嵌入分别验收。
+- [ ] **验收两套后端。** 同一个材质、场景和 FrameGraph Pass 能在两套 RHI 上运行，后端差异通过能力查询和明确回退处理。先用同一个示例验证绘制、纹理上传、离屏读回、窗口 resize 和资源释放，再覆盖 Forward、Deferred、GPU Scene 与后处理。用模块依赖或源码检查约束上层不直接引用 LWJGL 的 GL/Vulkan 接口，并记录 OpenGL 迁移前后的画面、帧时间与显存。
+
+本节是计划，RHI 和 Vulkan 尚未实现。时序效果的现有 OpenGL 实现和后续依赖见下一节。
+
 ## 待办：TAA / GTAO / FSR 与 LWJGL Vulkan 后端（2026-11-19）
 
 用户要求记录以下路线，本轮仅更新文档，不实现功能。FSR 2 是时序超分辨率，不含帧生成；FSR 3 才引入帧生成。不要因版本混淆，把 TAA 或 FSR 2 的全部开发依赖于插帧呈现框架。
 
 建议顺序：必要 RHI 边界 → 公共时序基础与 TAA → GTAO → FSR 1 → 完整 Vulkan 后端 → 官方 FSR 2 → FSR 3 帧生成。FSR 1 不依赖时序基础，可按需求提前；GTAO 空间采样可先独立验证。无需等待完整 RHI 才开始效果开发，以 OpenGL 验证效果，再由 Vulkan 验证后端抽象。
 
-- [ ] 整理现有 Renderer/FrameGraph 的后端边界：资源描述、访问状态、同步、能力查询、渲染/输出尺寸及资源生命周期。逐步消除上层 GLFence、OpenGL barrier 位等依赖，保留现有 OpenGL 行为。RHI 不等于逐项包装 LWJGL 调用；避免一次性重写成熟路径。
+- [ ] 整理现有 Renderer/FrameGraph 的后端边界；图形 API 迁移步骤与验收见[图形 API 重构与 RHI](#待办图形-api-重构与-rhi2026-11-22)。
 - [ ] 建立公共时序契约：明确速度单位、方向、坐标空间与 jitter 约定；保存相机/对象前帧矩阵、骨骼/Morph 前帧形变；覆盖 GPU Scene 与传统提交。历史按视口管理，定义切场景、相机切换/瞬移、resize、动态分辨率、曝光变化和效果启停的失效/恢复规则。
-- [ ] TAA 主要参考 UE4 的公开技术资料和完整时序管线设计：重投影、深度/遮挡显露拒绝、历史裁剪、抗闪烁和清晰度控制。Three.js TRAANode 可辅助核对实现；传统 TAARenderPass 不含重投影，不能作为动态场景成熟 TAA 的基础。明确透明、粒子、Alpha Test、形变和无速度材质的处理/回退，不把静态累积当作完成。
+- [ ] TAA 主要参考公开技术资料和完整时序管线设计：重投影、深度/遮挡显露拒绝、历史裁剪、抗闪烁和清晰度控制。Three.js TRAANode 可辅助核对实现；传统 TAARenderPass 不含重投影，不能作为动态场景成熟 TAA 的基础。明确透明、粒子、Alpha Test、形变和无速度材质的处理/回退，不把静态累积当作完成。
 - [ ] GTAO 主要参考原论文和 Intel XeGTAO，Three.js GTAOPass 用于辅助理解/调试。先验证深度预处理、空间采样和边缘滤波，再按需复用速度/历史进行时序稳定。明确 Forward/Deferred 输入及中性 GBuffer 的模型解码，AO 按光照分量合成，避免整体压暗直接光/发光，以及与 GI/天空已有遮挡重复计暗。
 - [ ] FSR 1：在 OpenGL 上先实现空间升采样，分离渲染与输出分辨率，明确抗锯齿、Tonemap、EASU/RCAS 和 UI 的执行顺序与色彩约定；UI 按输出分辨率绘制。保留原生分辨率及关闭后的恢复路径，不要求速度或历史。
 - [ ] 基于 LWJGL 完成 Vulkan 后端：资源/描述符绑定、pipeline 状态、shader 编译与变体、命令提交、队列/图像布局同步、延迟释放及 swapchain resize/out-of-date 生命周期。处理 OpenGL/Vulkan 深度和坐标差异，采用同一组效果/场景回归；SDK 原生窗口/AWT 嵌入兼容单独评估，不默认随 GLFW 窗口支持完成。
@@ -224,6 +255,32 @@ Follow-up native GPUScene motion is implemented: rigid instances retain indirect
 User subsequently authorized default shader output and immediate FSR2 OpenGL integration. Working source now adds AppSettings.ShaderSrgbOutput (default On for LWJGL3 windows/application AWT panels), UpscalingPass with FSR1 EASU/RCAS and an FP32 FSR2 OpenGL backend, render/output dimension separation, native-size GUI, and FSR2 AA bypass/restoration. FPP phases distinguish spatial reconstruction after Tonemap from temporal HDR reconstruction before exposure/Tonemap; custom filters must declare their phase. Explicit FPP format and upscaling configuration round-trip in J3O. This supersedes plan-only status for this subset, not the RHI/Vulkan/GTAO/frame-generation backlog.
 
 GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge regressions pass on RTX5060Ti; core/effects serialization and independent SDK controls/settings tests pass. See DEV_HANDOFF.md for source provenance, entry points and exact limits. Reactive masks can be supplied; automatic transparent-color difference capture, broader animation/particle/multi-GPU/real-scene quality and production memory/performance evaluation remain pending. No full SDK deployment or claim of UE/AMD cross-platform quality parity. Preserve these limits when continuing on another machine.
+
+## 待办：多光源阴影容量与性能（2026-11-22）
+
+- [ ] 目前多光源阴影容量有限，需要优化，重点覆盖 PointLight 和 SpotLight。用户报告 `Packed shadow atlas exceeds texture size or byte budget`；源码默认预算 128 MiB，另有 64 个活跃阴影灯限制。本次异常来自图集尺寸/预算检查，不等同于命中 64 灯限制；未取得运行时尺寸和预算，不能确定两个条件中的具体触发项。
+- [ ] 优先评估共享深度图集直接绘制、按屏幕影响范围分配分辨率、更紧凑且稳定的分配器以及明确的超预算策略。当前各灯独立深度贴图再复制到 RGBA32F 图集，存在重复存储、复制和打包空隙开销。
+- [ ] 参考本机 `H:/MyFiles/Sources/TileBasedShadows`：四叉树图集、屏幕范围自适应分辨率、GPU mesh/light 相交筛选及间接绘制值得移植设计；点光源四面体投影作为独立候选。示例只实现点光源，聚光灯需补投影/锥体筛选。分配失败使用 assert，每帧重新分配，不能视为已有缓存或稳健降级。
+- [ ] 分阶段接入 ShadowManager、FrameGraph、阴影采样及 GPU Scene；保留普通几何体、骨骼/Morph、Alpha Test、双面材质和不支持 GPU 能力时的兼容路径。不要将主相机可见物体列表直接作为投影物体列表。保持现有偏移/接触缝修复。
+- [ ] 比较等画质下 CPU/GPU 时间、显存、复制量、灯数量与分辨率；覆盖密集重叠灯、相机运动、动态投影物体、分配溢出、四条渲染路径和 Lighting/PBR。四面体的几何放大、接缝与过滤成本需实测，不能承诺固定加速比例。
+
+本轮仅源码评估和待办记录，未移植、未运行外部示例、无性能实测。直接复用外部源码前确认授权。建议先优化现有六面点光源/单面聚光灯图集，再实现 GPU 批量提交，最后对比四面体方案；不依赖先完成 Vulkan/RHI。
+
+讨论结论与实施顺序：完整集成预计属于中到大型改造，以下规模是源码评估，不是工期或性能承诺。
+
+1. 共享深度图集直接绘制、动态分辨率、稳定分配与明确超预算策略：中等改动，优先解决当前容量与复制开销；先保留点光源六面、聚光灯单面投影。
+2. GPU mesh/light 筛选与批量间接提交：较大改动，复用现有 GPU Scene 基础，减少 CPU 遍历与提交；聚光灯需补锥体筛选、投影及采样。
+3. 四面体点光源：较大改动，作为可选方案独立验证；不能以四面替代六面或一次提交就推断等画质下必然更快。
+
+提醒约定：用户要求记得提醒优化。下次继续阴影、PointLight/SpotLight、多光源性能或阴影图集溢出问题时，主动提醒本节待办并先读取上述评估。此为接续工作时的提醒，不是定时通知；记录计划不授权自动开始实现。
+
+讨论结论与实施顺序：完整集成预计属于中到大型改造，以下规模是源码评估，不是工期或性能承诺。
+
+1. 共享深度图集直接绘制、动态分辨率、稳定分配与明确超预算策略：中等改动，优先解决当前容量与复制开销；先保留点光源六面、聚光灯单面投影。
+2. GPU mesh/light 筛选与批量间接提交：较大改动，复用现有 GPU Scene 基础，减少 CPU 遍历与提交；聚光灯需补锥体筛选、投影及采样。
+3. 四面体点光源：较大改动，作为可选方案独立验证；不能以四面替代六面或一次提交就推断等画质下必然更快。
+
+提醒约定：用户要求记得提醒优化。下次继续阴影、PointLight/SpotLight、多光源性能或阴影图集溢出问题时，主动提醒本节待办并先读取上述评估。此为接续工作时的提醒，不是定时通知；记录计划不授权自动开始实现。
 
 ## 待办：虚拟纹理（VT）模块重构（2026-11-22）
 

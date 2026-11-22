@@ -134,7 +134,7 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
         }
     }
 
-    /** Advances a single brick within the soft budget, then atomically publishes the batch. */
+    /** Processes one brick within the soft budget and publishes the batch atomically. */
     public boolean step(long budgetNanos) {
         if (published != null) {
             return true;

@@ -10,7 +10,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Surface-demand-driven adaptive probe bricks. Surface patches are sampled on
+ * Plans adaptive probe bricks where surfaces need more samples. Surface patches are sampled on
  * both sides, rejecting solid interiors and unsafe clearance. Candidate bricks
  * are credited only when their actual relocated interpolation neighbors can see
  * a patch; bounding-box overlap alone is not coverage. Greedy allocation fills
@@ -79,7 +79,7 @@ public final class GiAdaptiveProbeLayout {
         }
     }
 
-    /** Immutable diagnostics plus a read-only list of mutable, unattached generated volumes in source-local coordinates. */
+    /** Diagnostics and an unmodifiable list of generated volumes. The volumes are editable, detached, and in source-local coordinates. */
     public static final class Plan {
         private final List<GiProbeVolume> volumes;
         private final int targets;

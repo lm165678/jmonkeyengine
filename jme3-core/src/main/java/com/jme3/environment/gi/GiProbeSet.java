@@ -59,7 +59,7 @@ public final class GiProbeSet implements AutoCloseable {
             this(data, worldOffset, fadeDistance, 1f);
         }
 
-        /** Explicit runtime strength; zero fade keeps boundary surfaces fully lit. */
+        /** Sets the runtime strength. With zero fade, the volume contributes fully up to its boundary. */
         public Entry(GiProbeData data, Vector3f worldOffset, float fadeDistance, float intensity) {
             this(data, worldOffset, fadeDistance, intensity, false);
         }

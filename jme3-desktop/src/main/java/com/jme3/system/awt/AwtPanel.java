@@ -61,10 +61,12 @@ public class AwtPanel extends Canvas implements SceneProcessor {
 
     private BufferedImage img;
     private FrameBuffer fb;
+    private final com.jme3.texture.Image.Format colorFormat;
     private boolean srgb = false;
     private com.jme3.asset.AssetManager presentationAssets;
     private java.util.function.Supplier<com.jme3.asset.AssetManager> defaultPresentationAssets;
     private boolean presentationConfigured;
+    private boolean srgbOutputDithering;
 
     void inheritShaderSrgbOutput(java.util.function.Supplier<com.jme3.asset.AssetManager> assets) {
         defaultPresentationAssets = assets;
@@ -104,6 +106,19 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         }
     }
 
+    /**
+     * Applies SDR output dithering when shader sRGB is enabled. Call on the
+     * render thread; false restores the original output without resizing.
+     */
+    public void setSrgbOutputDithering(boolean enabled) {
+        if (srgbOutputDithering != enabled) {
+            srgbOutputDithering = enabled;
+            if (presentation != null) {
+                presentation.setOutputDithering(enabled);
+            }
+        }
+    }
+
     /** Whether shader encoding is configured; inherited defaults apply at initialization. */
     public boolean isShaderSrgbOutput() {
         return presentationAssets != null;
@@ -121,6 +136,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     // Visibility/drawing vars
     private BufferStrategy strategy;
     private final AtomicBoolean hasNativePeer = new AtomicBoolean(false);
+    private volatile int nativePeerRevision;
     private final AtomicBoolean showing = new AtomicBoolean(false);
     private final AtomicBoolean repaintRequest = new AtomicBoolean(false);
 
@@ -137,6 +153,21 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     }
 
     public AwtPanel(PaintMode paintMode, boolean srgb) {
+        this(paintMode, srgb, 24);
+    }
+
+    /**
+     * Creates a panel for context-specific subclasses. Construct on the EDT;
+     * attach viewports on the owning render thread through the context.
+     * The public constructors use 24-bit RGB by default.
+     *
+     * @param paintMode AWT painting mode
+     * @param srgb whether to request an sRGB framebuffer
+     * @param bitsPerPixel 32 for RGBA8; other values use RGB8
+     */
+    protected AwtPanel(PaintMode paintMode, boolean srgb, int bitsPerPixel) {
+        this.colorFormat = bitsPerPixel == 32 ? com.jme3.texture.Image.Format.RGBA8
+                : com.jme3.texture.Image.Format.RGB8;
         this.paintMode = paintMode;
         this.srgb = srgb;
         if (paintMode == PaintMode.Accelerated) {
@@ -201,6 +232,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         updateRenderSize();
 
         synchronized (lock) {
+            nativePeerRevision++;
             hasNativePeer.set(true);
         }
 
@@ -211,6 +243,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     public void removeNotify() {
         synchronized (lock) {
             hasNativePeer.set(false);
+            nativePeerRevision++;
         }
 
         super.removeNotify();
@@ -373,11 +406,12 @@ public class AwtPanel extends Canvas implements SceneProcessor {
         if (presentationAssets != null) {
             presentation = new com.jme3.renderer.SrgbPresentation(
                     presentationAssets, rm.getRenderer(), width, height);
+            presentation.setOutputDithering(srgbOutputDithering);
             fb = presentation.getCompositionTarget();
         } else {
             fb = new FrameBuffer(width, height, 1);
             fb.setDepthTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.Depth));
-            fb.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(com.jme3.texture.Image.Format.RGB8));
+            fb.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(colorFormat));
             fb.setSrgb(srgb);
         }
 
@@ -448,6 +482,10 @@ public class AwtPanel extends Canvas implements SceneProcessor {
             reshapeInThread(width, height);
         } else {
             if (!checkVisibilityState()) {
+                releaseNativePresentation();
+                return;
+            }
+            if (presentation != null && presentNative(rm, presentation)) {
                 return;
             }
 
@@ -465,6 +503,23 @@ public class AwtPanel extends Canvas implements SceneProcessor {
                     break;
             }
         }
+    }
+
+    /**
+     * Presents the panel's completed linear composition on the render thread.
+     * The default returns false and uses the normal AWT paint mode.
+     */
+    protected boolean presentNative(RenderManager manager, com.jme3.renderer.SrgbPresentation output) {
+        return false;
+    }
+
+    /** Releases platform-owned output on the render thread. */
+    protected void releaseNativePresentation() {
+    }
+
+    /** Identifies the current AWT peer across docking, removal and recreation. */
+    protected final int getNativePeerRevision() {
+        return nativePeerRevision;
     }
 
     @Override
@@ -490,6 +545,7 @@ public class AwtPanel extends Canvas implements SceneProcessor {
 
     @Override
     public void cleanup() {
+        releaseNativePresentation();
     }
 
     @Override

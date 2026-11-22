@@ -489,7 +489,7 @@ public abstract class Filter implements Savable {
     }
 
     /**
-     * Ordering key used only while an upscaler is active. Custom filters default
+     * Determines filter order while an upscaler is active. Custom filters default
      * to scene-linear work (0). Built-in keys: temporal AA -10, temporal upscale
      * 20, exposure 30, bloom 40, tone mapping 50, spatial AA 60, spatial upscale
      * 70. Without an upscaler the insertion order is unchanged.

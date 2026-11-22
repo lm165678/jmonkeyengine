@@ -81,7 +81,7 @@ public final class TestGpuDrivenRendering extends SimpleApplication {
     @Override
     public void simpleInitApp() {
         if (simulateNoBindless) {
-            // Test only: exercise unsupported-hardware fallback in this renderer context.
+            // Force the unsupported-hardware path without changing the renderer context.
             renderer.getCaps().remove(com.jme3.renderer.Caps.BindlessTextures);
         }
         if (smoke) {

@@ -41,7 +41,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 /**
- * Render-thread registry; version changes invalidate only lighting programs.
+ * Registers shading models on the render thread. A revision change invalidates lighting programs.
  * Share {@code renderManager.getDeferredShadingModels()} with directly installed
  * pipelines when models should survive pipeline replacement.
  * <p>Ordinary application usage does not load GLSL or register numeric IDs:</p>
@@ -205,7 +205,7 @@ public final class ShadingModelRegistry {
     public boolean supports(int id) {
         return id >= 1 && id <= 3 || sources.containsKey(id);
     }
-    /** @return revision incremented only when registered source actually changes */
+    /** @return revision, incremented when the registered source changes */
     public long getVersion() {
         return version;
     }

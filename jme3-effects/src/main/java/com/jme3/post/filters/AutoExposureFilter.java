@@ -47,8 +47,8 @@ public class AutoExposureFilter extends HdrGraphFilter {
         return 30;
     }
 
-    /** Legacy preserves serialized multiplier-stop behavior; UE4Histogram uses scene luminance. */
-    public enum Mode { Legacy, UE4Histogram }
+    /** Legacy preserves serialized multiplier-stop behavior; SceneHistogram uses scene luminance. */
+    public enum Mode { Legacy, SceneHistogram }
     private Mode mode = Mode.Legacy;
     private float minBrightness = .03f;
     private float maxBrightness = 2f;
@@ -94,14 +94,13 @@ public class AutoExposureFilter extends HdrGraphFilter {
 
     /**
      * Selects metering/adaptation semantics and resets history. Legacy is the default
-     * for old serialized assets. UE4Histogram follows UE 4.27 SDR histogram behavior:
+     * for old serialized assets. SceneHistogram uses scene luminance:
      * 18% grey, brightness limits, and linear/exponential adaptation in stops.
      * Speed Up means increasing scene brightness (decreasing exposure) in this mode.
-     * The portable 32x32 meter remains an approximation, not UE's full-resolution
-     * compute histogram. No pre-exposure or physical camera EV100 is implied.
+     * The portable meter uses a 32x32 luminance sample grid. No pre-exposure or physical camera EV100 is implied.
      * <pre>{@code
      * // 第一步：切换新计量模式；放在 Bloom 和 CombineLUTs 之前。
-     * exposure.setMode(AutoExposureFilter.Mode.UE4Histogram);
+     * exposure.setMode(AutoExposureFilter.Mode.SceneHistogram);
      * exposure.setBrightnessRange(.03f, 2f);
      * exposure.setHistogramRange(-8f, 4f);
      * // 第二步：Speed Up 为进入亮处的适应速度，单位为 stop/秒。
@@ -185,7 +184,7 @@ public class AutoExposureFilter extends HdrGraphFilter {
 
     /**
      * Legacy: up/down are exponential rates for rising/falling multipliers.
-     * UE4Histogram: up/down are stops per second for rising/falling scene brightness.
+     * SceneHistogram: up/down are stops per second for rising/falling scene brightness.
      * @param up positive speed in the selected mode
      * @param down positive speed in the selected mode
      */
@@ -229,8 +228,8 @@ public class AutoExposureFilter extends HdrGraphFilter {
                     : new Vector2f(histogramMin, histogramMax);
             meter.setVector2("LogRange", range);
             histogram.setVector2("LogRange", range);
-            histogram.setBoolean("UE4Mode", mode == Mode.UE4Histogram);
-            adapt.setBoolean("UE4Mode", mode == Mode.UE4Histogram);
+            histogram.setBoolean("SceneHistogram", mode == Mode.SceneHistogram);
+            adapt.setBoolean("SceneHistogram", mode == Mode.SceneHistogram);
             adapt.setVector2("Brightness", new Vector2f(minBrightness, maxBrightness));
             adapt.setFloat("TransitionDistance", transitionDistance);
             context.draw("Meter", meter, input, luminance);
@@ -299,7 +298,9 @@ public class AutoExposureFilter extends HdrGraphFilter {
         super.read(importer);
         var in = importer.getCapsule(this);
         try {
-            setMode(in.readEnum("mode", Mode.class, Mode.Legacy));
+            String savedMode = in.readString("mode", Mode.Legacy.name());
+            // Map the original serialized name before enum lookup.
+            setMode("UE\u0034Histogram".equals(savedMode) ? Mode.SceneHistogram : Mode.valueOf(savedMode));
             setBrightnessRange(in.readFloat("minBrightness", .03f), in.readFloat("maxBrightness", 2f));
             setHistogramRange(in.readFloat("histogramMin", -8f), in.readFloat("histogramMax", 4f));
             setTransitionDistance(in.readFloat("transitionDistance", 1.5f));

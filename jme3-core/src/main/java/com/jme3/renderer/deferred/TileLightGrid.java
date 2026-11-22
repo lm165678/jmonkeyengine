@@ -38,7 +38,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Conservative CPU light binning. Lists contain indices into the caller's light
+ * Assigns lights to screen tiles on the CPU using conservative bounds. Lists contain indices into the caller's light
  * list; the caller must supply a single light scope, not merge scene subtrees.
  * Storage grows instead of silently dropping lights on tile overflow.
  * Instances are reusable, but not thread safe.

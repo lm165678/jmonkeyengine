@@ -53,7 +53,7 @@ final class BindlessTextureCache {
             return cached;
         }
         for (Shader.ShaderSource source : original.getSources()) {
-            // Explicit bound-only declarations are an application contract.
+            // Honor material declarations that require texture units.
             if (source.getSource().contains("bound_sampler")) {
                 return original;
             }
@@ -79,7 +79,7 @@ final class BindlessTextureCache {
     }
 
     boolean supports(Uniform uniform) {
-        // Macro-generated or explicitly unsupported declarations keep ordinary units.
+        // Use texture units for declarations we cannot rewrite, including macros.
         return uniform.isBindlessSampler();
     }
 
@@ -192,7 +192,7 @@ final class BindlessTextureCache {
         bytes -= entry.bytes;
         if (!contextLost) {
             renderer.setTextureHandleResident(entry.handle, false);
-            // Image.clone borrows CPU buffers. Dispose GPU storage only.
+            // The clone shares CPU buffers with the source image.
             entry.snapshot.getImage().setData(new ArrayList<ByteBuffer>());
             entry.snapshot.getImage().dispose();
         }

@@ -12,8 +12,7 @@ import java.io.IOException;
 /**
  * SDR tone mapping and scene-linear grading, separate from exposure and display
  * encoding. Neutral uses the engine's Khronos PBR Neutral function; Filmic uses
- * the existing filmic shoulder with a configurable white point. Neither is an
- * implementation of UE's full ACES/color-management pipeline. UE4 adds AP1 Film,
+ * the existing filmic shoulder with a configurable white point. FilmLut uses AP1 Film,
  * glow/red shaping, blue correction, white balance and cached 32^3 CombineLUTs.
  * This SDR approximation omits HDR/PQ output and full
  * per-tonal-range correction vectors. Tint is a chromaticity approximation.
@@ -45,8 +44,8 @@ public class ColorGradingFilter extends HdrGraphFilter {
         Neutral,
         /** Filmic shoulder normalized by the configured white point. */
         Filmic,
-        /** AP1 film response and cached SDR color LUT, compatible in intent with UE 4.27. */
-        UE4
+        /** AP1 film response and cached SDR color LUT, for SDR output. */
+        FilmLut
     }
     private com.jme3.math.Vector4f film = new com.jme3.math.Vector4f(.88f, .55f, .26f, 0f);
     private float whiteClip = .04f;
@@ -182,8 +181,8 @@ public class ColorGradingFilter extends HdrGraphFilter {
      * data (no hardware sRGB decoding); values represent encoded display colors.
      * Null removes it. Weight [0,1]. Caller must resubmit after changing pixels.
      * <pre>{@code
-     * // 第一步：设置 UE4 风格模式；生成 LUT 与采样自动接入当前 FrameGraph。
-     * grade.setCurve(ColorGradingFilter.Curve.UE4);
+     * // 第一步：设置 FilmLut 模式；生成 LUT 与采样自动接入当前 FrameGraph。
+     * grade.setCurve(ColorGradingFilter.Curve.FilmLut);
      * grade.setFilm(.88f, .55f, .26f, 0f, .04f);
      * // 第二步：LUT 作为数据加载，关闭 sRGB 自动解码，避免双重转换。
      * Texture2D lut = (Texture2D) assetManager.loadTexture("Textures/Grade.png");
@@ -229,7 +228,7 @@ public class ColorGradingFilter extends HdrGraphFilter {
             return input;
         }
         var output = context.createColor("Graded", 1f, format);
-        if (curve != Curve.UE4) {
+        if (curve != Curve.FilmLut) {
             releaseLut();
             material.setInt("Curve", curve.ordinal());
             material.setFloat("Saturation", saturation);
@@ -332,7 +331,9 @@ public class ColorGradingFilter extends HdrGraphFilter {
                     (Vector3f) in.readSavable("midtoneGain",new Vector3f(1,1,1)),
                     (Vector3f) in.readSavable("highlightGain",new Vector3f(1,1,1)));
             setColorLut((com.jme3.texture.Texture2D) in.readSavable("userLut",null),in.readFloat("lutWeight",0f));
-            setCurve(in.readEnum("curve", Curve.class, Curve.Neutral));
+            String savedCurve = in.readString("curve", Curve.Neutral.name());
+            // Map the original serialized name before enum lookup.
+            setCurve("UE\u0034".equals(savedCurve) ? Curve.FilmLut : Curve.valueOf(savedCurve));
             setSaturation(in.readFloat("saturation", 1f));
             setContrast(in.readFloat("contrast", 1f));
             setWhitePoint(in.readFloat("whitePoint", 11.2f));

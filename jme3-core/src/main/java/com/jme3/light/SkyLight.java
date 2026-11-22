@@ -32,7 +32,6 @@ import com.jme3.util.TempVars;
  * shadowing, dynamic occlusion, or multi-bounce solution is implied.
  */
 public class SkyLight extends Light {
-    private float intensity = 1f;
     private Vector3f[] shCoefficients;
     private com.jme3.texture.TextureCubeMap prefilteredEnvMap;
     private int nbMipMaps;
@@ -129,7 +128,7 @@ public class SkyLight extends Light {
         return diffuseEnabled;
     }
 
-    /** Disable only sky diffuse; specular remains available. Render thread only. */
+    /** Disables diffuse sky lighting and leaves reflections active. Call on the render thread. */
     public void setDiffuseEnabled(boolean value) {
         diffuseEnabled = value;
     }
@@ -146,14 +145,6 @@ public class SkyLight extends Light {
 
 
     /**
-     * Returns the environment lighting multiplier, default 1 (unscaled).
-     * @return nonnegative lighting intensity
-     */
-    public float getIntensity() {
-        return intensity;
-    }
-
-    /**
      * Scales sky diffuse and fallback specular lighting, independently of the
      * visible background and local reflection probes. No environment recapture
      * is needed. Existing baked GI is not recomputed. Call on the render thread.
@@ -168,18 +159,15 @@ public class SkyLight extends Light {
      * @param intensity finite, nonnegative multiplier
      * @throws IllegalArgumentException for negative or non-finite values
      */
+    @Override
     public void setIntensity(float intensity) {
-        if (!Float.isFinite(intensity) || intensity < 0f) {
-            throw new IllegalArgumentException("Sky intensity must be finite and nonnegative");
-        }
-        this.intensity = intensity;
+        super.setIntensity(intensity);
     }
 
     @Override
     public void write(com.jme3.export.JmeExporter exporter) throws java.io.IOException {
         super.write(exporter);
         com.jme3.export.OutputCapsule out = exporter.getCapsule(this);
-        out.write(intensity, "intensity", 1f);
         out.write(shCoefficients, "shCoeffs", null);
         out.write(prefilteredEnvMap, "prefilteredEnvMap", null);
         out.write(nbMipMaps, "nbMipMaps", 0);
@@ -204,8 +192,6 @@ public class SkyLight extends Light {
         ready = in.readBoolean("ready", false) && values != null && values.length == 9;
         diffuseEnabled = in.readBoolean("diffuseEnabled", true);
         captureRevision = in.readString("captureRevision", "legacy");
-        float stored = in.readFloat("intensity", 1f);
-        intensity = Float.isFinite(stored) && stored >= 0f ? stored : 1f;
     }
 
     public SkyLight() {

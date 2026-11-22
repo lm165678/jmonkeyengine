@@ -3,7 +3,7 @@ MaterialDef Histogram {
         Int BoundDrawBuffer
         Int NumSamples
         Vector2 LogRange
-        Boolean UE4Mode
+        Boolean SceneHistogram
         Texture2D Texture
     }
     Technique {

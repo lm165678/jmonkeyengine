@@ -2738,7 +2738,7 @@ public final class GLRenderer implements Renderer {
 
     @Override
     public FrameBuffer getCurrentFrameBuffer() {
-        // The presentation override only substitutes setFrameBuffer(null).
+        // The presentation override is applied by setFrameBuffer(null).
         // Offscreen captures may currently bind a different target; returning
         // the override here sends nested shadow-pass restoration to the SDK
         // display instead of back to the probe capture framebuffer.
@@ -4594,7 +4594,7 @@ public final class GLRenderer implements Renderer {
     @Override
     public void deleteProfilingTasks(int... taskIds) {
         for (int id : taskIds) {
-            // Renderer cleanup owns final deletion while the context is current.
+            // Delete these during renderer cleanup, with the GL context still current.
             // Application/pipeline cleanup may run later on the LWJGL 2 display path.
             if (profilingQueries.remove(id)) {
                 intBuf1.clear();

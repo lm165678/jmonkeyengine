@@ -196,8 +196,8 @@ public class JmeDesktopSystem extends JmeSystemDelegate {
 
             Class<? extends JmeContext> contextClass = settings.getCustomRendererClass();
             if (contextClass == null) {
-                // Saved settings contain only a name. Prefer the host loader,
-                // then preserve the original engine-loader fallback.
+                // Settings store the class name. Try the host class loader first,
+                // then fall back to the engine class loader.
                 try {
                     contextClass = Class.forName(className, true,
                             Thread.currentThread().getContextClassLoader()).asSubclass(JmeContext.class);

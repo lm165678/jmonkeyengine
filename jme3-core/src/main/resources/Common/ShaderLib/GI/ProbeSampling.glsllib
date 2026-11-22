@@ -2,12 +2,12 @@
 
 // Set once per surface before evaluating environment and material response.
 float giEnvironmentDiffuseWeight = 1.0;
-// Inverse-world-length normal variation; set once per receiver, before coverage branches.
+// Normal variation per world unit. Set this before branching on coverage.
 float giReceiverCurvature = 0.0;
 float giSkyDiffuseWeight = 1.0;
-// Geometric coverage of total-light volumes, independent of the SH direction.
+// Geometric coverage of total-light volumes, regardless of SH direction.
 float giTotalSkyCoverage = 0.0;
-// First angular moment of visibility, not radiance or an extra GI term.
+// The first angular moment of visibility describes direction, not radiance.
 vec3 giSkyBentMoment = vec3(0.0);
 vec3 giSkyDirection(vec3 normal) {
     float anisotropy = clamp(length(giSkyBentMoment), 0.0, 1.0);
@@ -15,8 +15,8 @@ vec3 giSkyDirection(vec3 normal) {
         return normal;
     }
     vec3 bent = normalize(giSkyBentMoment);
-    // Low-frequency bent-normal approximation, not full radiance transfer.
-    // Keep the direction in the receiving hemisphere and preserve open sky.
+    // Approximate the bent normal using low-frequency visibility.
+    // Keep the bent direction above the surface, including at open-sky receivers.
     float amount = anisotropy * (1.0 - giSkyDiffuseWeight)
             * max(dot(bent, normal), 0.0);
     return normalize(mix(normal, bent, amount));
@@ -45,8 +45,8 @@ vec4 giReadCoefficient(float probe, float coefficient, vec4 atlasInfo, vec4 dime
     return texture2D(m_GiIrradiance, pixel / dimensions.xy);
 }
 
-// Mirror the octahedral edge before accessing a neighboring texel. No samples
-// may bleed into another probe tile; atlases deliberately use nearest filtering.
+// Mirror taps across the octahedral edge. With nearest filtering,
+// a lookup cannot pull samples from the next probe's tile.
 vec2 giWrapMomentPixel(vec2 pixel, float size) {
     if (pixel.x < 0.0) {
         pixel.x = -pixel.x - 1.0;
@@ -97,21 +97,21 @@ float giVisibilityTap(float probe, vec2 pixel, vec3 direction, vec3 normal,
     }
     tapDistance *= numerator / denominator;
     vec2 moments = giMomentTexel(probe, pixel, atlasInfo, dimensions);
-    // Roundoff tolerance only, not a visibility or variance floor.
+    // Tolerance for roundoff in this comparison.
     float tolerance = 1.0e-6 * max(abs(tapDistance), abs(moments.x));
     return giVisibilityFromVariance(moments, max(0.0, tapDistance - tolerance));
 }
-// Filter visibility, not depth distributions. Mixing foreground and background
-// moments first invents variance and lets a blocked foreground tap borrow the
-// background depth. Evaluate each distribution independently, then interpolate
-// the resulting probabilities, like percentage-closer filtering.
+// Blending depth moments would let a blocked foreground tap borrow
+// background depth and introduce variance at silhouettes.
+// Test each distribution first, then blend the visibility
+// probabilities as in percentage-closer filtering.
 float giReadVisibility(float probe, vec3 direction, vec3 normal, float distanceToProbe,
         vec4 atlasInfo, vec4 dimensions) {
     vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * floor(atlasInfo.w) - 0.5;
     vec2 a = fract(p);
     vec2 b = floor(p);
-    // Positive cubic B-spline weights: no ringing or negative probabilities.
-    // Four taps per axis overlap continuously across octahedral texel borders.
+    // B-spline weights remain positive, so the filter cannot ring.
+    // Four taps per axis overlap across octahedral texel boundaries.
     vec2 a2 = a * a;
     vec2 a3 = a2 * a;
     vec2 w0 = (1.0 - 3.0 * a + 3.0 * a2 - a3) / 6.0;
@@ -395,12 +395,12 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
     float blend = fade > 0.0 ? giOverlapWindow(edge, vec3(fade)) : 1.0;
     skyResult = vec3(separated && total > 0.0 ? skySum / total : 0.0, blend, separated ? 0.0 : 1.0);
     bentResult = total > 0.0 ? bentSum / total : vec3(0.0);
-    // Prefer dense volumes, smoothly; keep endpoints defined even at exact borders.
+    // Favor denser volumes and keep the weights defined at their borders.
     // Relative overlap weights must not attenuate the only available volume.
     // Zero outer fade keeps room boundary surfaces lit while still smoothly
     // transitioning between overlapping probe grids.
     float overlap = fade > 0.0 ? blend : giOverlapWindow(edge, spacing);
-    // Hierarchical grids prefer geometric-mean sampling density, not one axis.
+    // Compare grid density across all three axes using the geometric mean.
     // Using full volumetric density makes a 2x refinement eight times stronger
     // and produces an excessively steep transition at its boundary.
     // The halo smoothly restores coarse data at brick edges; unusable fine

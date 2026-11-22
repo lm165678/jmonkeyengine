@@ -423,7 +423,7 @@ public final class GlobalDistanceField implements AutoCloseable {
         } catch (UnsupportedOperationException unsupported) {
             image.setUpdateNeeded();
         } catch (RuntimeException failure) {
-            // CPU payload remains authoritative; retry/restoration must not retain a partial GPU update.
+            // Keep the CPU copy so a retry cannot start from a partially updated GPU texture.
             image.setUpdateNeeded();
             throw failure;
         }
@@ -492,7 +492,7 @@ public final class GlobalDistanceField implements AutoCloseable {
         return levels[level].min.clone();
     }
 
-    /** @return owned texture; consumers must not dispose it or retain it after close */
+    /** @return owned texture; valid until close and must not be disposed by the caller */
     public Texture3D getTexture(int level) {
         checkOpen();
         return levels[level].texture;

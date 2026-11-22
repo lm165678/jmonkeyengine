@@ -40,10 +40,9 @@ import com.jme3.texture.Texture2D;
 import com.jme3.ui.Picture;
 
 /**
- * Owns a linear floating-point composition target and an encoded SDR readback
- * target. No tone mapping is performed: the caller must tone map HDR scene
- * radiance before presentation. UI and transparency must be composited before
- * encoding. Neither target enables hardware sRGB writes. Alpha is unchanged.
+ * Composites into a linear floating-point target and encodes SDR into a separate
+ * target for readback. Tone map HDR in the caller and finish compositing UI and
+ * transparency before encoding. Hardware sRGB writes are disabled on both targets. Alpha is unchanged.
  * All methods, including close, belong to the owning render thread.
  * Unsupported floating-point targets fail explicitly; callers may keep their
  * existing output path instead. Recreate after resize; close after detaching
@@ -103,6 +102,15 @@ public final class SrgbPresentation implements AutoCloseable {
         camera = new Camera(width, height);
     }
 
+    /**
+     * Selects ordered dithering for the encoded SDR output. Default off.
+     * On the render thread, call with true before encode() to dither RGB,
+     * or false to restore undithered output. No target recreation is required.
+     */
+    public void setOutputDithering(boolean enabled) {
+        quad.getMaterial().setBoolean("OutputDithering", enabled);
+    }
+
     /** Linear composition target; owns its depth and color attachments. */
     public FrameBuffer getCompositionTarget() {
         return composition;
@@ -135,6 +143,33 @@ public final class SrgbPresentation implements AutoCloseable {
         if (target == composition || (target != null && target.isSrgb())) {
             throw new IllegalArgumentException("Output must be a distinct non-sRGB target");
         }
+        present(manager, target, 0);
+    }
+
+    /**
+     * Draws the linear composition with HDR highlight mapping into a native
+     * output framebuffer already bound by the backend. The target must be
+     * single-sample, linear and the same size as the composition. The backend
+     * owns binding, synchronization and presentation on the render thread.
+     * <pre>{@code
+     * // 第一步：完成场景与工具叠加的线性合成，再绑定共享浮点帧缓冲。
+     * // 第二步：按显示器报告的 HDR 余量绘制最终画面。
+     * output.presentHdr(renderManager, headroom);
+     * // 第三步：恢复原帧缓冲并释放共享纹理锁；回到 SDR 时调用 encode。
+     * }</pre>
+     *
+     * @param manager owning render manager
+     * @param headroom finite display peak as a multiple of SDR white, greater than one
+     */
+    public void presentHdr(RenderManager manager, float headroom) {
+        if (!Float.isFinite(headroom) || headroom <= 1f) {
+            throw new IllegalArgumentException("HDR headroom must be finite and greater than one");
+        }
+        present(manager, null, headroom);
+    }
+
+    private void present(RenderManager manager, FrameBuffer target, float headroom) {
+        boolean hdr = headroom > 1f;
         Renderer renderer = manager.getRenderer();
         FrameBuffer previous = renderer.getCurrentFrameBuffer();
         Camera previousCamera = manager.getCurrentCamera();
@@ -143,12 +178,20 @@ public final class SrgbPresentation implements AutoCloseable {
         String previousTechnique = manager.getForcedTechnique();
         com.jme3.material.RenderState previousState = manager.getForcedRenderState();
         try {
-            if (target == null) {
-                renderer.setMainFrameBufferSrgb(false);
-            }
-            renderer.setFrameBuffer(target);
-            if (target != null) {
-                camera.resize(target.getWidth(), target.getHeight(), false);
+            if (hdr) {
+                quad.getMaterial().setBoolean("HdrOutput", true);
+                quad.getMaterial().setFloat("HdrHeadroom", headroom);
+                if (camera.getWidth() != composition.getWidth() || camera.getHeight() != composition.getHeight()) {
+                    camera.resize(composition.getWidth(), composition.getHeight(), false);
+                }
+            } else {
+                if (target == null) {
+                    renderer.setMainFrameBufferSrgb(false);
+                }
+                renderer.setFrameBuffer(target);
+                if (target != null) {
+                    camera.resize(target.getWidth(), target.getHeight(), false);
+                }
             }
             manager.setCamera(camera, true);
             manager.setForcedMaterial(null);
@@ -159,8 +202,12 @@ public final class SrgbPresentation implements AutoCloseable {
             manager.setForcedMaterial(previousMaterial);
             manager.setForcedTechnique(previousTechnique);
             manager.setForcedRenderState(previousState);
-            renderer.setMainFrameBufferSrgb(previousSrgb);
-            renderer.setFrameBuffer(previous);
+            if (hdr) {
+                quad.getMaterial().clearParam("HdrOutput");
+            } else {
+                renderer.setMainFrameBufferSrgb(previousSrgb);
+                renderer.setFrameBuffer(previous);
+            }
             if (previousCamera != null) {
                 manager.setCamera(previousCamera, previousCamera.isParallelProjection());
             }

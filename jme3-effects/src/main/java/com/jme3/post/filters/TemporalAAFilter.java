@@ -13,7 +13,7 @@ import java.io.IOException;
 import java.util.Map;
 
 /**
- * Native-resolution temporal AA inspired by UE4's reprojection and YCoCg history
+ * Native-resolution temporal AA with reprojection and YCoCg history
  * clipping. Not a port of Epic shader code or a temporal upscaler. Install FIRST
  * in a single-sample HDR FPP, before exposure, bloom and tone mapping. Render thread
  * only; never share an instance between viewports. Defaults: base-pass velocity on,
@@ -118,7 +118,7 @@ public final class TemporalAAFilter extends HdrGraphFilter {
         translucentAlphaThreshold = bounded(value, 0, 1, "Translucent alpha threshold");
         resetHistory();
     }
-    /** Current sample contribution [0.01,1]; larger values reduce ghosting/accumulation. */
+    /** Weight of the current frame, from 0.01 to 1. Higher values use less history and reduce ghosting. */
     public void setCurrentFrameWeight(float value) {
         currentFrameWeight = bounded(value, .01f, 1, "Current frame weight");
     }

@@ -106,7 +106,7 @@ public final class MultiPassLightingLogic extends DefaultTechniqueDefLogic {
             ColorRGBA tmpLightColor = vars.color;
             Vector4f tmpVec = vars.vect4f1;
 
-            ColorRGBA color = l.getColor();
+            ColorRGBA color = l.getEffectiveColor(effectiveLightColor);
             shader.getUniform("g_ShadowIndex").setValue(VarType.Float, (float) renderManager.getShadowLightIndex(l));
             tmpLightColor.set(color);
             tmpLightColor.a = l.getType().getId();

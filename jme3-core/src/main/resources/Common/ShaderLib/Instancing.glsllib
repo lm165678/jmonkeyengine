@@ -65,7 +65,7 @@ vec3 TransformWorldNormal(vec3 vec) {
     vec3 c = inInstanceData[2].xyz;
     float determinant = dot(a, cross(b, c));
     // Cofactor inverse transpose supports rotation, nonuniform and mirrored scale.
-    // Singular transforms have no defined normal; avoid propagating NaNs.
+    // Skip singular normal transforms so they cannot produce NaNs.
     if (abs(determinant) < 1e-20) {
         return vec3(0.0);
     }

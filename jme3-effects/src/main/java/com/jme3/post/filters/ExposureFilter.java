@@ -10,7 +10,7 @@ import com.jme3.renderer.ViewPort;
 import java.io.IOException;
 
 /**
- * Manual scene-linear exposure: RGB *= 2^EV; alpha is preserved. Default 0 EV
+ * Multiplies scene-linear RGB by 2^EV and leaves alpha unchanged. The default of 0 EV
  * is identity. No gamma, tone curve, automatic metering or temporal pre-exposure.
  * Install after scene compositing, before scene-color Bloom and tone mapping.
  * Separate glow-map captures are not exposed. Never install in GI bake captures.

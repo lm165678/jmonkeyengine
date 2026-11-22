@@ -33,6 +33,8 @@
 package com.jme3.scene.mesh;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.jme3.bounding.BoundingBox;
 import com.jme3.collision.CollisionResults;
@@ -43,6 +45,8 @@ import org.junit.jupiter.api.Test;
 
 import com.jme3.scene.Mesh;
 import com.jme3.scene.VertexBuffer;
+import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 
 /**
  * Tests selected methods of the Mesh class.
@@ -59,6 +63,30 @@ public class MeshTest {
         final Mesh mesh = new Mesh();
 
         assertEquals(-1, mesh.getVertexCount());
+    }
+
+    @Test
+    public void testHardwareSkinningPreparesInMemoryMeshWithoutPlaceholders() {
+        Mesh mesh = new Mesh();
+        mesh.setBuffer(VertexBuffer.Type.Position, 3, new float[]{1, 2, 3});
+        mesh.setBuffer(VertexBuffer.Type.BoneIndex, 4, new short[]{7, 2, 0, 0});
+        mesh.setBuffer(VertexBuffer.Type.BoneWeight, 4, new float[]{0.75f, 0.25f, 0, 0});
+        mesh.setMaxNumWeights(2);
+        mesh.generateBindPose();
+
+        mesh.prepareForAnim(false);
+        VertexBuffer indices = mesh.getBuffer(VertexBuffer.Type.HWBoneIndex);
+        VertexBuffer weights = mesh.getBuffer(VertexBuffer.Type.HWBoneWeight);
+        assertEquals(VertexBuffer.Format.UnsignedShort, indices.getFormat());
+        assertTrue(indices.getData().isDirect());
+        assertTrue(weights.getData().isDirect());
+        assertEquals(7, ((ShortBuffer) indices.getData()).get(0));
+        assertEquals(0.25f, ((FloatBuffer) weights.getData()).get(1));
+
+        mesh.prepareForAnim(true);
+        mesh.prepareForAnim(false);
+        assertSame(indices, mesh.getBuffer(VertexBuffer.Type.HWBoneIndex));
+        assertSame(weights, mesh.getBuffer(VertexBuffer.Type.HWBoneWeight));
     }
 
     @Test

@@ -48,7 +48,7 @@ public interface GL3 extends GL2 {
             long writeOffset, long size) {
         throw new UnsupportedOperationException("GPU buffer copy unavailable");
     }
-    /** Returns the bound buffer parameter; used to validate readback bounds. */
+    /** Reads the bound buffer parameter so readback can check its bounds. */
     default int glGetBufferParameter(int target, int parameter) {
         throw new UnsupportedOperationException("Buffer parameter queries are unavailable");
     }

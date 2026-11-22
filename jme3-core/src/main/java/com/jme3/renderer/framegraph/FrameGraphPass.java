@@ -32,7 +32,7 @@
 package com.jme3.renderer.framegraph;
 
 /**
- * Render-thread pass body. Declare every resource read/write when adding the pass;
+ * Runs a pass on the render thread. When adding the pass, declare all of its reads and writes;
  * access it with context.get(handle). Restore temporary renderer overrides in a
  * finally block. Explicit ResourceAccess.STORAGE_BUFFER/STORAGE_IMAGE writes enable
  * automatic GPU barriers based on consumer usages. Legacy read/write declarations
@@ -41,6 +41,6 @@ package com.jme3.renderer.framegraph;
  */
 @FunctionalInterface
 public interface FrameGraphPass {
-    /** @param context borrowed context valid only during this callback */
+    /** @param context pass context; valid until this callback returns */
     void execute(FrameGraphContext context);
 }

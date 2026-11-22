@@ -227,6 +227,9 @@ public class AnimLayer implements JmeCloneable, Savable {
         } else {
             time = (animationTime % length) + length;
         }
+        if (currentAction instanceof com.jme3.anim.graph.AnimationGraphPlayer) {
+            ((com.jme3.anim.graph.AnimationGraphPlayer) currentAction).synchronizeLayerClock(time);
+        }
     }
 
     /**
@@ -263,6 +266,12 @@ public class AnimLayer implements JmeCloneable, Savable {
 
         double speedup = action.getSpeed() * globalSpeed;
         double scaledDeltaTime = speedup * appDeltaTimeInSeconds;
+        if (scaledDeltaTime < 0 && action instanceof com.jme3.anim.graph.AnimationGraphPlayer
+                && ((com.jme3.anim.graph.AnimationGraphPlayer) action).hasRootMotion()) {
+            // Root-motion graphs advance forward only. Avoid wrapping a
+            // reversed graph to its unbounded nominal action length.
+            scaledDeltaTime = 0;
+        }
         time += scaledDeltaTime;
 
         // wrap negative times to the [0, length] range:

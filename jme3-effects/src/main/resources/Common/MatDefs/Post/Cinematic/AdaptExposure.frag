@@ -7,7 +7,7 @@ uniform vec4 m_Settings;
 uniform vec2 m_Speeds;
 uniform float m_DeltaTime;
 uniform bool m_Reset;
-uniform bool m_UE4Mode;
+uniform bool m_SceneHistogram;
 uniform vec2 m_Brightness;
 uniform float m_TransitionDistance;
 void main() {
@@ -26,7 +26,7 @@ void main() {
         cumulative += count;
     }
     float target = clamp(log2(0.18) - sum / max(total, 0.00001), m_Settings.x, m_Settings.y);
-    if (m_UE4Mode) {
+    if (m_SceneHistogram) {
         float average = clamp(exp2(sum / max(total, 0.00001)), m_Brightness.x, m_Brightness.y);
         target = log2(0.18 / average);
     }
@@ -34,7 +34,7 @@ void main() {
     if (!m_Reset) {
         float previous = texture2D(m_History, vec2(0.5)).r;
         float speed = target > previous ? m_Speeds.x : m_Speeds.y;
-        if (m_UE4Mode) {
+        if (m_SceneHistogram) {
             // Exposure multiplier changes opposite to the metered scene brightness.
             speed = target < previous ? m_Speeds.x : m_Speeds.y;
             float distance = abs(target - previous);

@@ -187,7 +187,29 @@ public class AwtPanelsContext implements JmeContext {
     public AwtPanelsContext() {}
 
     public AwtPanel createPanel(PaintMode paintMode) {
-        AwtPanel panel = new AwtPanel(paintMode);
+        return createPanel(paintMode, false);
+    }
+
+    /**
+     * Creates an AWT panel with the current context's color depth. At 32 bpp,
+     * direct readback uses RGBA8. Other values retain the RGB8 target. The
+     * shader presentation path uses its own float composition and RGBA8 output.
+     * Set context settings before creating the panel; to change its format,
+     * recreate the panel. The AWT image is presented as opaque SDR.
+     *
+     * <pre>{@code
+     * // 第一步：创建面板前设置 32 bpp（AppSettings 默认）。
+     * settings.setBitsPerPixel(32);
+     * context.setSettings(settings);
+     * // 第二步：在 EDT 创建面板，在渲染线程绑定视口。
+     * AwtPanel panel = context.createPanel(PaintMode.Accelerated, true);
+     * app.enqueue(() -> panel.attachTo(true, app.getViewPort()));
+     * // 需要 RGB8 时设置 24 并重建面板。
+     * }</pre>
+     */
+    public AwtPanel createPanel(PaintMode paintMode, boolean srgb) {
+        AwtPanel panel = newPanel(paintMode, srgb, settings.getBitsPerPixel());
+        panel.setSrgbOutputDithering(settings.isSrgbOutputDithering());
         panel.inheritShaderSrgbOutput(() -> {
             if (settings.isShaderSrgbOutput() && settings.isGammaCorrection()
                     && listener instanceof com.jme3.app.Application) {
@@ -199,17 +221,9 @@ public class AwtPanelsContext implements JmeContext {
         return panel;
     }
 
-    public AwtPanel createPanel(PaintMode paintMode, boolean srgb) {
-        AwtPanel panel = new AwtPanel(paintMode, srgb);
-        panel.inheritShaderSrgbOutput(() -> {
-            if (settings.isShaderSrgbOutput() && settings.isGammaCorrection()
-                    && listener instanceof com.jme3.app.Application) {
-                return ((com.jme3.app.Application) listener).getAssetManager();
-            }
-            return null;
-        });
-        panels.add(panel);
-        return panel;
+    /** Creates the panel on the AWT thread before it is attached on the render thread. */
+    protected AwtPanel newPanel(PaintMode paintMode, boolean srgb, int bitsPerPixel) {
+        return new AwtPanel(paintMode, srgb, bitsPerPixel);
     }
 
     private void initInThread() {
@@ -250,6 +264,9 @@ public class AwtPanelsContext implements JmeContext {
     }
 
     private void destroyInThread() {
+        for (AwtPanel panel : panels) {
+            panel.releaseNativePresentation();
+        }
         listener.destroy();
     }
 

@@ -546,7 +546,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
         }).sideEffect();
     }
 
-    // Managed shadows own raster bias; legacy processors retain material state.
+    // Use managed raster bias here. Legacy processors leave the material bias in effect.
     boolean managedRasterState;
 
     protected void renderShadowMap(int shadowMapIndex) {
@@ -633,7 +633,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             setMatParams(lightReceivers);
 
             Camera cam = viewPort.getCamera();
-            // Some materials in the scene do not have a post shadow technique, so we're using the fallback material.
+            // Use the fallback for materials without a post-shadow technique.
             if (needsfallBackMaterial) {
                 renderManager.setForcedMaterial(postshadowMat);
             }

@@ -69,7 +69,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Deferred opaque pipeline. Passes operate on borrowed frame data; resources
+ * Draws opaque geometry with deferred lighting. Passes operate on borrowed frame data; resources
  * belong to this viewport alone. Culling policy is separate from pipeline type.
  * GBuffer allocation and light tiles use physical render-target pixels, including
  * HiDPI outputs, while preserving the application's logical camera dimensions.

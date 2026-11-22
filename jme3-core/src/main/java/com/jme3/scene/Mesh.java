@@ -400,10 +400,15 @@ public class Mesh implements Savable, Cloneable, JmeCloneable {
     }
 
     /**
-     * Prepares the mesh for software skinning by converting the bone index
-     * and weight buffers to heap buffers.
+     * Prepares a skinned mesh for the selected skinning method. Software
+     * skinning uses heap buffers. Hardware skinning creates or fills its
+     * buffers from the CPU bone data, including for meshes built in memory
+     * that have not passed through a J3O loader.
+     * <p>
+     * 第一步：为网格设置 BoneIndex、BoneWeight 并调用 generateBindPose()。
+     * 第二步：挂载 SkinningControl，由渲染线程为所选蒙皮方式准备缓冲。
      *
-     * @param forSoftwareAnim Should be true to enable the conversion.
+     * @param forSoftwareAnim true for software skinning, false for hardware
      */
     public void prepareForAnim(boolean forSoftwareAnim) {
         if (forSoftwareAnim) {
@@ -449,9 +454,12 @@ public class Mesh implements Savable, Cloneable, JmeCloneable {
                 tangents.setUsage(Usage.Stream);
             }
         } else {
-            //if HWBoneIndex and HWBoneWeight are empty, we setup them as direct
-            //buffers with software anim buffers data
+            // Mesh.read() supplies placeholders; in-memory importers need not.
             VertexBuffer indicesHW = getBuffer(Type.HWBoneIndex);
+            if (indicesHW == null) {
+                indicesHW = new VertexBuffer(Type.HWBoneIndex);
+                setBuffer(indicesHW);
+            }
             Buffer result;
             if (indicesHW.getData() == null) {
                 VertexBuffer indices = getBuffer(Type.BoneIndex);
@@ -476,6 +484,10 @@ public class Mesh implements Savable, Cloneable, JmeCloneable {
             }
 
             VertexBuffer weightsHW = getBuffer(Type.HWBoneWeight);
+            if (weightsHW == null) {
+                weightsHW = new VertexBuffer(Type.HWBoneWeight);
+                setBuffer(weightsHW);
+            }
             if (weightsHW.getData() == null) {
                 VertexBuffer weights = getBuffer(Type.BoneWeight);
                 FloatBuffer originalWeight = (FloatBuffer) weights.getData();

@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.BitSet;
 
-/** Runtime-only dirty-child index and balanced bound reduction tree for one Node. */
+/** Tracks dirty children and reduces their bounds for a single Node. */
 final class NodeUpdateIndex implements SceneChangeListener {
     private final Node owner;
     private final Map<Spatial, Integer> positions = new IdentityHashMap<>();

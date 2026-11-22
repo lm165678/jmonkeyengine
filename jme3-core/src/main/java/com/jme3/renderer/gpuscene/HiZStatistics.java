@@ -1,7 +1,7 @@
 package com.jme3.renderer.gpuscene;
 
 /**
- * Immutable completed Hi-Z sample, obtained from GpuScenePipeline.getHiZStatistics.
+ * Completed Hi-Z counters from GpuScenePipeline.getHiZStatistics.
  * Counts are geometry instances, not model roots. Before/after counts and GPU
  * timings belong to the same sampled frame. See setHiZDiagnosticsEnabled for usage.
  */

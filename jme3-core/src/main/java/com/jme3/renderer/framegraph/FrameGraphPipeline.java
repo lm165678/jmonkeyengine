@@ -39,7 +39,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Installs a graph at jME's opaque Pipeline extension point:
+ * Runs a frame graph in place of the viewport's opaque pipeline.
  * <pre>{@code
  * FrameGraph graph = new FrameGraph();
  * graph.addPass("Opaque", context -> {
@@ -66,10 +66,10 @@ public final class FrameGraphPipeline implements OpaquePipeline {
         this.frameBuilder = null;
     }
     /**
-     * Creates a dynamic graph pipeline. Before every render, resets declarations
-     * (not allocations), handles resize, invokes the builder, then compiles and
-     * executes. The builder runs on the render thread and must not retain handles
-     * between calls. Failures are propagated; renderer state is restored.
+     * Rebuilds the graph each frame while keeping its allocations. The pipeline
+     * handles resize, calls the builder, then compiles and runs the graph. The
+     * render-thread builder must get fresh handles on each call. A failure
+     * restores renderer state before it propagates.
      * <pre>{@code
      * // 第一步：只安装一次；回调每帧执行，不必每帧 new Pipeline。
      * FrameGraphPipeline pipeline = new FrameGraphPipeline(graph -> {

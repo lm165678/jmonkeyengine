@@ -731,7 +731,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
 
     @Override
     public void postFrame(FrameBuffer out) {
-        // Direct legacy invocation only; RenderManager appends to its own graph.
+        // RenderManager contributes its passes directly to the viewport graph.
         try (FrameGraph graph = new FrameGraph()) {
             graph.addExpansionPass("Post", current -> appendPostFramePasses(current, viewPort));
             graph.execute(renderManager, viewPort, viewPort.getQueue());
@@ -1150,7 +1150,7 @@ public class FilterPostProcessor implements SceneProcessor, Savable {
         this.fbFormat = fbFormat;
     }
 
-    /** Returns configured/current color format; null before automatic negotiation. */
+    /** Returns the configured or negotiated color format. Null until a format is chosen automatically. */
     public Format getFrameBufferFormat() {
         return fbFormat;
     }

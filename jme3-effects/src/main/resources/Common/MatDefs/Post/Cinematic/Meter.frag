@@ -3,7 +3,7 @@
 uniform COLORTEXTURE m_Texture;
 varying vec2 texCoord;
 uniform vec2 m_LogRange;
-uniform bool m_UE4Mode;
+uniform bool m_SceneHistogram;
 void main() {
     // Four stratified samples per metering cell. Store log luminance, not RGB.
     float value = 0.0;

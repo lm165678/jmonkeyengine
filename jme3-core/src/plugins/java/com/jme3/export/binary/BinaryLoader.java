@@ -2,6 +2,7 @@ package com.jme3.export.binary;
 
 import com.jme3.asset.AssetInfo;
 import com.jme3.asset.AssetLoader;
+import com.jme3.scene.Spatial;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -33,7 +34,11 @@ public class BinaryLoader implements AssetLoader {
         }
 
         try {
-            return importer.load(assetInfo);
+            Object asset = importer.load(assetInfo);
+            if (asset instanceof Spatial) {
+                AnimationLinkResolver.resolveModel(assetInfo.getManager(), assetInfo.getKey().getName(), (Spatial) asset);
+            }
+            return asset;
         } finally {
             importers.addLast(importer);
         }

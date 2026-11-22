@@ -6,6 +6,7 @@ import com.jme3.asset.AssetKey;
 import com.jme3.environment.gi.*;
 import com.jme3.material.Material;
 import com.jme3.math.Vector3f;
+import com.jme3.post.WorldSettings.DisplayOutput;
 import com.jme3.renderer.Limits;
 import com.jme3.scene.*;
 import java.io.FileNotFoundException;
@@ -20,6 +21,7 @@ import java.util.concurrent.*;
  * chain; manual FPPs take precedence. Removing the scene releases the owned chain.
  * Serialized GI volumes create a lazy page streamer; PhysicsControl instances
  * create/reuse a BulletAppState when an optional Bullet implementation is present.
+ * A selected {@link Start} supplies the initial main camera transform.
  * Existing physics-space assignments are never stolen. Custom controls, sounds
  * and animation clips are not automatically started. SkyLightControl and managed
  * light shadows retain their own existing renderer lifecycle.
@@ -64,7 +66,10 @@ import java.util.concurrent.*;
  */
 public final class SceneServicesState extends AbstractAppState {
     private SimpleApplication app;
+    private Start activeStart;
+    private boolean startCameraEnabled = true;
     private final com.jme3.post.WorldSettingsRuntime worldSettings = new com.jme3.post.WorldSettingsRuntime();
+    private DisplayOutput displayOutput = DisplayOutput.Application;
     private final ScenePhysicsBridge physics = new ScenePhysicsBridge();
     private final SceneServiceCatalog catalog = new SceneServiceCatalog();
     private final Map<GiProbeVolume, Source> sources = new IdentityHashMap<>();
@@ -86,7 +91,7 @@ public final class SceneServicesState extends AbstractAppState {
         app = (SimpleApplication) application;
     }
 
-    /** Lazy runtime instance, or null when no valid volume is attached. Never owns scene bake data. */
+    /** Created when a valid volume is attached. The scene keeps ownership of the bake data. */
     public GiProbeStreamer getGiStreamer() {
         return gi;
     }
@@ -102,19 +107,63 @@ public final class SceneServicesState extends AbstractAppState {
             }
         }
         worldSettings.sync(selected, app.getAssetManager(), app.getViewPort(), app.getRenderer().getCaps());
+        displayOutput = selected == null ? DisplayOutput.Application : selected.getDisplayOutput();
     }
 
-    /** Internal SimpleApplication render hook, after geometric updates. */
+    /**
+     * Returns the attached world's display mode after scene services update.
+     * With no configured world or disabled services, use the application's launch setting.
+     *
+     * @return current scene display mode on the application thread
+     * @see com.jme3.post.WorldSettings#setDisplayOutput(DisplayOutput)
+     */
+    public DisplayOutput getDisplayOutput() {
+        return displayOutput;
+    }
+
+    /**
+     * Controls camera placement from attached Start nodes on the render thread.
+     * Enabled by default. A different winning Start is applied once, before
+     * drawing. Re-enabling applies the current winner on the next render.
+     * See {@link com.jme3.scene.Start} for the editor and Java usage.
+     */
+    public void setStartCameraEnabled(boolean enabled) {
+        if (startCameraEnabled != enabled) {
+            startCameraEnabled = enabled;
+            activeStart = null;
+        }
+    }
+
+    private void updateStartCamera() {
+        if (!startCameraEnabled) {
+            return;
+        }
+        Start selected = null;
+        for (Start candidate : catalog.starts) {
+            if (selected == null || candidate.getPriorityId() >= selected.getPriorityId()) {
+                selected = candidate;
+            }
+        }
+        if (selected != activeStart) {
+            activeStart = selected;
+            if (selected != null) {
+                selected.positionCamera(app.getCamera());
+            }
+        }
+    }
+
+    /** Called by SimpleApplication after the scene's geometric update. */
     void prepareRender() {
         if (!isEnabled() || !isInitialized()) {
             return;
         }
+        catalog.refresh(app.getRootNode());
+        updateStartCamera();
         Integer textureLimit = app.getRenderer().getLimits().get(Limits.TextureSize);
         if (textureLimit == null || textureLimit < 16) {
             closeGi();
             return;
         }
-        catalog.refresh(app.getRootNode());
         Set<GiProbeVolume> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (GiProbeVolume volume : catalog.volumes) {
             if (volume.getData() != null || volume.getStreamAsset() != null) {
@@ -226,20 +275,24 @@ public final class SceneServicesState extends AbstractAppState {
     @Override
     public void setEnabled(boolean enabled) {
         if (!enabled) {
+            displayOutput = DisplayOutput.Application;
             worldSettings.close();
             closeGi();
             physics.close();
             catalog.close();
+            activeStart = null;
         }
         super.setEnabled(enabled);
     }
 
     @Override
     public void cleanup() {
+        displayOutput = DisplayOutput.Application;
         worldSettings.close();
         closeGi();
         physics.close();
         catalog.close();
+        activeStart = null;
         app = null;
         super.cleanup();
     }

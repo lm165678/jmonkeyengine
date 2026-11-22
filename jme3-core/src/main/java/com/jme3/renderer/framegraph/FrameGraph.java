@@ -39,8 +39,9 @@ import java.util.function.Supplier;
 import java.util.function.Consumer;
 
 /**
- * Render-thread resource dependency graph with stable topological scheduling,
- * dead-pass elimination, lazy allocation and lifetime-based object pooling.
+ * Schedules passes on the render thread in dependency order. Unused passes
+ * are skipped. Resources are allocated when needed and recycled when their
+ * last consumer is done.
  * Build once, compile once, execute repeatedly. Configuration is frozen by compile;
  * call beginFrame() to rebuild topology while retaining allocations. Dynamic imported suppliers
  * are evaluated once per execution. See package documentation for a full example.
@@ -88,7 +89,7 @@ public final class FrameGraph implements AutoCloseable {
         int width;
         int height;
     }
-    /** Fluent access declaration returned by addPass; configure before compile. */
+    /** Pass declaration returned by {@code addPass}. Set up its accesses before compiling. */
     public static final class PassBuilder {
         final FrameGraph graph;
         final String name;
@@ -202,7 +203,7 @@ public final class FrameGraph implements AutoCloseable {
             dependencies.add(prior.index);
             return this;
         }
-        /** @return this declaration, retained even without an exported output */
+        /** @return this declaration; the pass runs even without an exported result */
         public PassBuilder sideEffect() {
             checkActive();
             sideEffect = true;
@@ -246,8 +247,8 @@ public final class FrameGraph implements AutoCloseable {
         int[][] ordering;
     }
 
-    // Expansions revisit several prefixes of one graph every frame. Keep a
-    // bounded per-graph cache: no static scene/resource retention or hash-only hits.
+    // Expansions revisit several prefixes of the graph in one frame.
+    // Cache exact keys on this graph so the cache cannot retain another scene.
     private final Map<TopologyKey, CompiledTopology> compiledTopologies =
             new LinkedHashMap<TopologyKey, CompiledTopology>(8, 0.75f, true) {
                 @Override
@@ -298,8 +299,8 @@ public final class FrameGraph implements AutoCloseable {
                 declaration(pass.writeAccess.get(write).ordinal());
             }
         }
-        // Lookup may borrow scratch storage only until this synchronous compile
-        // returns. Stored keys always own a copy (see rememberTopology).
+        // This lookup can use scratch storage until compile returns.
+        // rememberTopology copies the key before keeping it.
         return new TopologyKey(declarationScratch, declarationCount);
     }
 
@@ -316,7 +317,7 @@ public final class FrameGraph implements AutoCloseable {
             resource.first = cached.lifetimes[i * 3 + 1];
             resource.last = cached.lifetimes[i * 3 + 2];
         }
-        // Recreate compiler-added anti-dependencies, needed by later expansions.
+        // Later expansions need the anti-dependencies created during compilation.
         for (int i = 0; i < passes.size(); i++) {
             for (int prior : cached.ordering[i]) {
                 passes.get(i).orderingDependencies.add(prior);
@@ -661,17 +662,17 @@ public final class FrameGraph implements AutoCloseable {
         return removed;
     }
 
-    /** Immutable allocation counters; counts objects, not estimated GPU bytes. */
+    /** Allocation counters. These count objects rather than bytes. */
     public static final class PoolStats {
-        /** Current pooled physical objects, including retained exports. */
+        /** Returns the number of pooled allocations, including retained exports. */
         public final int transientAllocations;
-        /** Physical objects still retained by live handles (normally exports after execution). */
+        /** Allocations still reachable through live handles, usually exported results. */
         public final int retainedTransientAllocations;
-        /** Allocated persistent objects; excludes registered but not yet allocated histories. */
+        /** Number of allocated persistent objects. Unallocated histories are excluded. */
         public final int persistentAllocations;
-        /** Cumulative physical transient creations over this graph instance lifetime. */
+        /** Number of transient allocations created since this graph was constructed. */
         public final long totalTransientAllocations;
-        /** Cumulative acquisitions satisfied by an existing free physical allocation. */
+        /** Number of acquisitions that reused a free allocation. */
         public final long transientReuses;
 
         private PoolStats(int transientAllocations, int retainedTransientAllocations,
@@ -1195,7 +1196,7 @@ public final class FrameGraph implements AutoCloseable {
             }
             for (PassBuilder reader : passes) {
                 if (reader.index != version.writer && reader.reads.contains(prior.handle.index)) {
-                    // Anti-dependency orders readers but does not keep unused readers alive.
+                    // Order each reader before the overwrite without keeping otherwise unused readers alive.
                     passes.get(version.writer).orderingDependencies.add(reader.index);
                 }
             }
@@ -1282,7 +1283,7 @@ public final class FrameGraph implements AutoCloseable {
             }
         }
     }
-    /** @return immutable execution-order names, compiling if necessary */
+    /** @return immutable pass names in execution order; compiles the graph if needed */
     public List<String> getExecutionOrder() {
         compile();
         List<String> names = new ArrayList<>();
@@ -1310,7 +1311,7 @@ public final class FrameGraph implements AutoCloseable {
         return Collections.unmodifiableList(new ArrayList<>(executedPasses));
     }
 
-    /** @return immutable names of passes eliminated as unused */
+    /** @return immutable list of unused passes removed by compilation */
     public List<String> getCulledPasses() {
         compile();
         List<String> names = new ArrayList<>();
@@ -1441,7 +1442,7 @@ public final class FrameGraph implements AutoCloseable {
         }
         for (ResourceAccess write : pass.writeAccess.values()) {
             if (write.shaderStorage) {
-                // Order upcoming shader stores after previous accesses, including old-frame reads.
+                // Wait for earlier accesses, even reads from the previous frame, before these shader stores.
                 barriers |= write.barrierBits;
             }
         }
@@ -1450,7 +1451,7 @@ public final class FrameGraph implements AutoCloseable {
             final int emitted = barriers;
             shaderWrites.replaceAll((object, published) -> published | emitted);
         }
-        // Mark before entering the callback: failures may happen after submitting GPU work.
+        // Mark the writes before the callback; it can fail after submitting GPU work.
         for (Map.Entry<Integer, ResourceAccess> access : pass.writeAccess.entrySet()) {
             if (access.getValue().shaderStorage) {
                 shaderWrites.put(resources.get(access.getKey()).value, 0);
@@ -1460,8 +1461,8 @@ public final class FrameGraph implements AutoCloseable {
 
     private void publishShaderWrites(RenderManager manager) {
         if (!shaderWrites.isEmpty()) {
-            // Exported/imported/history storage may be consumed outside this graph or next frame.
-            // Conservative boundary flush also makes pooled-object reuse safe after abort/failure.
+            // Exports, imports and history can outlive this execution.
+            // Flush writes here so the pool can reuse them safely even after a failed pass.
             boolean unpublished = shaderWrites.values().stream().anyMatch(mask -> mask != -1);
             if (unpublished) {
                 manager.getRenderer().memoryBarrier(-1);
@@ -1660,7 +1661,7 @@ public final class FrameGraph implements AutoCloseable {
             throw failure;
         }
     }
-    /** Permanently closes this graph; idempotent. Call on the render thread. */
+    /** Closes the graph permanently. Repeated calls are safe. Call on the render thread. */
     @Override
     public void close() {
         if (closed) {

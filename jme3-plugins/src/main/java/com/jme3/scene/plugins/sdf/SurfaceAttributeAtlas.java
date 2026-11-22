@@ -451,7 +451,7 @@ public final class SurfaceAttributeAtlas implements AutoCloseable {
         return evicted;
     }
 
-    /** @return requested cards not resident; consumers must provide a missing-data fallback */
+    /** @return requested cards missing from the atlas; callers must handle them separately */
     public int getMissingCardCount() {
         return missing;
     }

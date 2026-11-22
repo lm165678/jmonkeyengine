@@ -192,7 +192,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
         }
     }
 
-    /** Notify this spatial and its current ancestors; callbacks must only enqueue work. */
+    /** Notifies listeners on this spatial and its ancestors. Callbacks must only queue work. */
     protected final void notifySceneChanged(SceneChangeListener.Change change) {
         for (Spatial cursor = this; cursor != null; cursor = cursor.parent) {
             if (cursor.sceneChangeListeners != null) {

@@ -8,7 +8,7 @@ import com.jme3.scene.Spatial;
 import com.jme3.renderer.queue.RenderQueue;
 
 /**
- * CPU geometry-aware placement. Closed connected mesh components use three-ray
+ * Places probes against scene geometry on the CPU. Closed connected mesh components use three-ray
  * parity voting, independent of face winding. Exact nearest triangle distance
  * enforces clearance at faces, edges and vertices. Relocation is bounded to 45%
  * of each grid step and cannot cross a surface when starting in free space.
@@ -174,7 +174,7 @@ public final class GiProbePlacement {
         return a.add(edge.mult(Math.max(0, Math.min(1, t))));
     }
 
-    // Shared by the adaptive planner. Only actual scene surfaces guide placement.
+    // Use scene surfaces as placement samples in both bake modes.
     static boolean participates(Spatial spatial) {
         RenderQueue.Bucket bucket = spatial.getQueueBucket();
         if (bucket == RenderQueue.Bucket.Sky || bucket == RenderQueue.Bucket.Gui

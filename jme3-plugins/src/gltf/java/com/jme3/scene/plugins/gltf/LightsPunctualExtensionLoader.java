@@ -148,7 +148,8 @@ public class LightsPunctualExtensionLoader implements ExtensionLoader {
         float range = obj.has("range") ? obj.get("range").getAsFloat() : (COMPUTE_LIGHT_RANGE ? getCutoffDistance(color, scaledIntensity) : Float.POSITIVE_INFINITY);
         SpotLight spotLight = new SpotLight(true);
         spotLight.setName(name);
-        spotLight.setColor(applyScaledIntensity(color, scaledIntensity));
+        spotLight.setColor(color);
+        spotLight.setIntensity(scaledIntensity);
         spotLight.setSpotRange(range);
         spotLight.setSpotInnerAngle(innerConeAngle);
         spotLight.setSpotOuterAngle(outerConeAngle);
@@ -172,7 +173,8 @@ public class LightsPunctualExtensionLoader implements ExtensionLoader {
 
         DirectionalLight directionalLight = new DirectionalLight(true);
         directionalLight.setName(name);
-        directionalLight.setColor(applyScaledIntensity(color, scaledIntensity));
+        directionalLight.setColor(color);
+        directionalLight.setIntensity(scaledIntensity);
         directionalLight.setDirection(Vector3f.UNIT_Z.negate());
 
         return directionalLight;
@@ -197,7 +199,8 @@ public class LightsPunctualExtensionLoader implements ExtensionLoader {
 
         PointLight pointLight = new PointLight(true);
         pointLight.setName(name);
-        pointLight.setColor(applyScaledIntensity(color, scaledIntensity));
+        pointLight.setColor(color);
+        pointLight.setIntensity(scaledIntensity);
         pointLight.setRadius(range);
 
         return pointLight;
@@ -224,10 +227,6 @@ public class LightsPunctualExtensionLoader implements ExtensionLoader {
 
     private float toCompatIntensity(float intensity) {
         return intensity * GLTF_LIGHT_COMPAT_SCALE;
-    }
-
-    private ColorRGBA applyScaledIntensity(ColorRGBA color, float scaledIntensity) {
-        return color.mult(scaledIntensity);
     }
 
     private static class NodeNeedingLight {

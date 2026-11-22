@@ -16,6 +16,6 @@ void main() {
     AF3 color;
     AU4 config = AU4(floatBitsToUint(exp2(-(2.0 - 2.0 * m_Sharpness))), 0, 0, 0);
     FsrRcasF(color.r, color.g, color.b, AU2(gl_FragCoord.xy), config);
-    // Return display-linear values so UI blending and final sRGB encoding remain correct.
+    // Convert back to display-linear for UI blending and final sRGB encoding.
     gl_FragColor = vec4(color * color, texture(m_Texture, texCoord).a);
 }

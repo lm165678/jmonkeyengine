@@ -22,7 +22,7 @@ import java.util.function.*;
 import java.util.zip.*;
 
 /**
- * Incremental render-thread bake. Each step restores render state. The time budget
+ * Bakes on the render thread in steps, restoring render state after each step. The time budget
  * is soft: one cubemap face/readback, SH projection, visibility row, placement test
  * or final atlas publication is indivisible. Keep the capture scene stable; cancel
  * and restart after edits. Old volume data remains live until successful completion.
@@ -141,7 +141,7 @@ public final class GiBakeJob implements AutoCloseable {
         }
     }
 
-    /** Advances at least one work unit; returns true only after atomic publication. */
+    /** Processes at least one work unit. Returns {@code true} once the result has been published. */
     public boolean step(long budgetNanos) {
         if (result != null) {
             return true;

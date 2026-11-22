@@ -4,9 +4,8 @@ import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.ViewPort;
 
 /**
- * Runs the custom FrameGraph stages within the upstream pipeline lifecycle.
- * This is the manager's default pipeline. An explicit viewport pipeline still
- * takes precedence. GPU Scene and deferred rendering retain their capability
+ * Runs the frame graph as the render manager's default pipeline. A viewport
+ * can override it with its own pipeline. GPU Scene and deferred rendering retain their capability
  * fallbacks and per-viewport ownership; opaque strategies use OpaquePipeline.
  * All switching and rendering must occur on the application render thread.
  * <pre>{@code

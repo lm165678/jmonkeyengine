@@ -4,6 +4,9 @@ MaterialDef Blit {
         Int BoundDrawBuffer
         Int NumSamples
         Boolean Srgb
+        Boolean OutputDithering
+        Boolean HdrOutput
+        Float HdrHeadroom
         Texture2D Texture
     }
 
@@ -18,6 +21,8 @@ MaterialDef Blit {
             BOUND_DRAW_BUFFER : BoundDrawBuffer
             RESOLVE_MS : NumSamples
             SRGB: Srgb
+            OUTPUT_DITHERING : OutputDithering
+            HDR_DISPLAY_OUTPUT : HdrOutput
         }
     }
 

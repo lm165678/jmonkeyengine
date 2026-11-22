@@ -46,6 +46,7 @@ import java.util.List;
 
 /** Uploads enabled lights and selects a CPU/GPU implementation by capability. */
 final class LightCullingPass implements DeferredPass {
+    private final ColorRGBA effectiveLightColor = new ColorRGBA();
     private final LightCullingBackend cpu = new CpuLightCullingBackend();
     private final LightCullingBackend gpu = new GpuLightCullingBackend();
 
@@ -67,7 +68,7 @@ final class LightCullingPass implements DeferredPass {
                 continue;
             }
             if (light instanceof AmbientLight) {
-                ColorRGBA color = light.getColor();
+                ColorRGBA color = light.getEffectiveColor(effectiveLightColor);
                 frame.ambient.addLocal(color.r, color.g, color.b);
             } else if (!(light instanceof LightProbe) && !(light instanceof com.jme3.light.SkyLight)) {
                 frame.lights.add(light);
@@ -113,7 +114,7 @@ final class LightCullingPass implements DeferredPass {
             Image.Format.RGBA32F, 64 * Math.max(1, lights.size()));
         ByteBuffer data = r.lightTexture.getImage().getData(0);
         for (Light light : lights) {
-            ColorRGBA c = light.getColor();
+            ColorRGBA c = light.getEffectiveColor(effectiveLightColor);
             int type = light instanceof DirectionalLight ? 0 : light instanceof PointLight ? 1 : 2;
             data.putFloat(c.r).putFloat(c.g).putFloat(c.b).putFloat(type);
             Vector3f p;

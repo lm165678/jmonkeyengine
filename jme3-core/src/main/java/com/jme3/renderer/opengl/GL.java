@@ -53,7 +53,7 @@ public interface GL {
     default void glPushDebugGroup(String name) {
     }
 
-    /** Ends the current capture group; no-op on unsupported backends. */
+    /** Ends the active capture group. Unsupported backends ignore this call. */
     default void glPopCaptureGroup() {
     }
 

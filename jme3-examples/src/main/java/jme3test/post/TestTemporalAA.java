@@ -115,7 +115,7 @@ public final class TestTemporalAA extends SimpleApplication {
             }
             @Override
             protected void controlRender(RenderManager manager, ViewPort viewport) {
-                // Exercise the same late update timing as SkinningControl/MorphControl.
+                // Update late in the frame, as SkinningControl and MorphControl do.
                 if ("skin".equals(deformation)) {
                     bone.setTranslation(deformationShift, 0, 0);
                 } else if ("morph".equals(deformation)) {
@@ -125,7 +125,7 @@ public final class TestTemporalAA extends SimpleApplication {
             }
         });
         if ("rigid".equals(deformation)) {
-            // Shared-material/mesh instances exercise compaction reordering, not one object per batch.
+            // Use one shared batch so culling can reorder instances during compaction.
             for (int i = 0; i < 8; i++) {
                 Geometry instance = new Geometry("Native sibling " + i,
                         i < 4 ? moving.getMesh() : new Box(.2f, .2f, .1f));

@@ -9,7 +9,7 @@ import com.jme3.scene.Geometry;
 import com.jme3.scene.shape.Quad;
 import java.util.*;
 
-/** Current-frame standard-depth max pyramid. Owned by one viewport GPU Scene. */
+/** Standard-depth max pyramid for one viewport, rebuilt from the current frame. */
 final class HiZPyramid implements AutoCloseable {
     final List<Texture2D> levels = new ArrayList<>();
     final List<FrameBuffer> targets = new ArrayList<>();

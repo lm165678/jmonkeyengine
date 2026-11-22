@@ -3,7 +3,7 @@
 uniform COLORTEXTURE m_Texture;
 varying vec2 texCoord;
 uniform vec2 m_LogRange;
-uniform bool m_UE4Mode;
+uniform bool m_SceneHistogram;
 void main() {
     float bin = floor(texCoord.x * 64.0);
     float count = 0.0;
@@ -15,13 +15,13 @@ void main() {
             float position = clamp((logL - m_LogRange.x) / (m_LogRange.y - m_LogRange.x), 0.0, 1.0);
             float index = min(floor(position * 64.0), 63.0);
             float weight = abs(index - bin) < 0.5 ? 1.0 : 0.0;
-            if (m_UE4Mode) {
-                // Linear bin weights avoid discrete exposure jumps.
+            if (m_SceneHistogram) {
+                // Split samples between adjacent bins so exposure does not jump at a bin boundary.
                 weight = max(0.0, 1.0 - abs(position * 63.0 - bin));
                 index = bin;
             }
             count += weight;
-            float measured = m_UE4Mode ? mix(m_LogRange.x, m_LogRange.y, index / 63.0) : logL;
+            float measured = m_SceneHistogram ? mix(m_LogRange.x, m_LogRange.y, index / 63.0) : logL;
             sum += measured * weight;
         }
     }

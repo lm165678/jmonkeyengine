@@ -285,7 +285,7 @@ public final class GiProbeData implements Savable {
         return irradianceScale;
     }
 
-    /** Logical uncompressed texture bytes; drivers/bindless caches can keep extra copies. */
+    /** Returns the uncompressed texture size. The driver or the bindless cache may allocate additional copies. */
     public long getTextureBytes() {
         return (long) irradiance.getImage().getData(0).capacity() + moments.getImage().getData(0).capacity()
                 + (skyVisibility == null ? 0 : skyVisibility.getImage().getData(0).capacity());

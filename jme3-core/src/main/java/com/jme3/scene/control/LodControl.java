@@ -36,13 +36,14 @@ import com.jme3.export.InputCapsule;
 import com.jme3.export.JmeExporter;
 import com.jme3.export.JmeImporter;
 import com.jme3.export.OutputCapsule;
-import com.jme3.math.FastMath;
 import com.jme3.renderer.Camera;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.ViewPort;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Mesh;
 import com.jme3.scene.Spatial;
+import com.jme3.system.JmeSystem;
+import com.jme3.system.Platform;
 import com.jme3.util.clone.JmeCloneable;
 import java.io.IOException;
 
@@ -50,21 +51,25 @@ import java.io.IOException;
  * Determines what Level of Detail a spatial should be, based on how many pixels
  * on the screen the spatial is taking up. The more pixels covered, the more
  * detailed the spatial should be. It calculates the area of the screen that the
- * spatial covers by using its bounding box. When initializing, it will ask the
- * spatial for how many triangles it has for each LOD. It then uses that, along
- * with the trisPerPixel value to determine what LOD it should be at. It
- * requires the camera to do this. The controlRender method is called each frame
- * and will update the spatial's LOD if the camera has moved by a specified
- * amount.
+ * spatial covers by using its bounding volume. The camera projection and
+ * triangles per pixel determine which available level to draw, subject to
+ * the configured minimum level on desktop or mobile.
  */
 public class LodControl extends AbstractControl implements Cloneable, JmeCloneable {
 
     private float trisPerPixel = 1f;
     private float distTolerance = 1f;
-    private float lastDistance = 0f;
-    private int lastLevel = 0;
-    private int numLevels;
-    private int[] numTris;
+    private int desktopStartLevel;
+    private int mobileStartLevel;
+    private transient Mesh lastMesh;
+    private transient int lastLevelCount;
+    private transient float lastDistance = Float.NaN;
+    private transient float lastWidth;
+    private transient int lastLevel;
+
+    private static class RuntimePlatform {
+        private static final Platform PLATFORM = JmeSystem.getPlatform();
+    }
 
     /**
      * Creates a new
@@ -116,6 +121,62 @@ public class LodControl extends AbstractControl implements Cloneable, JmeCloneab
      */
     public void setTrisPerPixel(float trisPerPixel) {
         this.trisPerPixel = trisPerPixel;
+        lastDistance = Float.NaN;
+    }
+
+    /** @return the finest level allowed on desktop, initially 0 */
+    public int getDesktopStartLevel() {
+        return desktopStartLevel;
+    }
+
+    /**
+     * Sets the finest desktop level. The first and subsequent renders can
+     * select coarser levels according to projected size. Out-of-range values
+     * are clamped to the last available level at render time.
+     * Change this on the render thread for a live scene.
+     * <pre>{@code
+     * // 第一步：加载带有 LodControl 的 J3O。
+     * LodControl lod = geometry.getControl(LodControl.class);
+     * // 第二步：PC 从 LOD0 开始，移动端从 LOD1 开始。
+     * lod.setDesktopStartLevel(0);
+     * lod.setMobileStartLevel(1);
+     * // 第三步：两端都恢复完整细节时，将移动端起始级别设回 0。
+     * lod.setMobileStartLevel(0);
+     * }</pre>
+     *
+     * @param level nonnegative LOD index
+     */
+    public void setDesktopStartLevel(int level) {
+        desktopStartLevel = validateStartLevel(level);
+        lastDistance = Float.NaN;
+    }
+
+    /** @return the finest level allowed on Android and iOS, initially 0 */
+    public int getMobileStartLevel() {
+        return mobileStartLevel;
+    }
+
+    /**
+     * Sets the finest level on Android and iOS, with the same clamping and
+     * render-thread requirements as {@link #setDesktopStartLevel(int)}.
+     *
+     * @param level nonnegative LOD index
+     */
+    public void setMobileStartLevel(int level) {
+        mobileStartLevel = validateStartLevel(level);
+        lastDistance = Float.NaN;
+    }
+
+    private static int validateStartLevel(int level) {
+        if (level < 0) {
+            throw new IllegalArgumentException("LOD start level must be nonnegative");
+        }
+        return level;
+    }
+
+    int startLevel(Platform platform) {
+        Platform.Os os = platform.getOs();
+        return os == Platform.Os.Android || os == Platform.Os.iOS ? mobileStartLevel : desktopStartLevel;
     }
 
     @Override
@@ -125,27 +186,15 @@ public class LodControl extends AbstractControl implements Cloneable, JmeCloneab
         }
 
         super.setSpatial(spatial);
-        
-        if(spatial != null) {
-            Geometry geom = (Geometry) spatial;
-            Mesh mesh = geom.getMesh();
-            numLevels = mesh.getNumLodLevels();
-            numTris = new int[numLevels];
-            for (int i = numLevels - 1; i >= 0; i--) {
-                numTris[i] = mesh.getTriangleCount(i);
-            }
-        } else {
-            numLevels = 0;
-            numTris = null;
-        }
+        lastMesh = null;
+        lastDistance = Float.NaN;
     }
 
     @Override
     public Object jmeClone() {
         LodControl clone = (LodControl)super.jmeClone();
-        clone.lastDistance = 0;
-        clone.lastLevel = 0;
-        clone.numTris = numTris != null ? numTris.clone() : null;
+        clone.lastMesh = null;
+        clone.lastDistance = Float.NaN;
         return clone;
     }     
 
@@ -155,37 +204,48 @@ public class LodControl extends AbstractControl implements Cloneable, JmeCloneab
 
     @Override
     protected void controlRender(RenderManager rm, ViewPort vp) {
-        BoundingVolume bv = spatial.getWorldBound();
-
-        Camera cam = vp.getCamera();
-        float atanNH = FastMath.atan(cam.getFrustumNear() * cam.getFrustumTop());
-        float ratio = (FastMath.PI / (8f * atanNH));
-        float newDistance = bv.distanceTo(vp.getCamera().getLocation()) / ratio;
-        int level;
-
-        if (Math.abs(newDistance - lastDistance) <= distTolerance) {
-            level = lastLevel; // we haven't moved relative to the model, send the old measurement back.
-        } else if (lastDistance > newDistance && lastLevel == 0) {
-            level = lastLevel; // we're already at the lowest setting and we just got closer to the model, no need to keep trying.
-        } else if (lastDistance < newDistance && lastLevel == numLevels - 1) {
-            level = lastLevel; // we're already at the highest setting and we just got further from the model, no need to keep trying.
-        } else {
-            lastDistance = newDistance;
-
-            // estimate area of polygon via bounding volume
-            float area = AreaUtils.calcScreenArea(bv, lastDistance, cam.getWidth());
-            float trisToDraw = area * trisPerPixel;
-            level = numLevels - 1;
-            for (int i = numLevels; --i >= 0;) {
-                if (trisToDraw - numTris[i] < 0) {
-                    break;
-                }
-                level = i;
-            }
-            lastLevel = level;
+        if (!(spatial instanceof Geometry)) {
+            return;
         }
-
-        spatial.setLodLevel(level);
+        Geometry geometry = (Geometry) spatial;
+        Mesh mesh = geometry.getMesh();
+        int levels = mesh == null ? 0 : mesh.getNumLodLevels();
+        if (mesh != lastMesh || levels != lastLevelCount) {
+            lastMesh = mesh;
+            lastLevelCount = levels;
+            lastDistance = Float.NaN;
+        }
+        BoundingVolume bound = geometry.getWorldBound();
+        if (levels == 0 || bound == null) {
+            return;
+        }
+        int minimum = Math.min(desktopStartLevel == mobileStartLevel
+                ? desktopStartLevel : startLevel(RuntimePlatform.PLATFORM), levels - 1);
+        Camera cam = vp.getCamera();
+        float width = cam.getWidth() * (cam.getViewPortRight() - cam.getViewPortLeft());
+        float horizontalSpan = cam.getFrustumRight() - cam.getFrustumLeft();
+        float distance = cam.isParallelProjection() ? horizontalSpan * .5f
+                : bound.distanceTo(cam.getLocation()) * horizontalSpan / (2f * cam.getFrustumNear());
+        int level;
+        if (width == lastWidth && lastLevel >= minimum && lastLevel < levels
+                && distance > 0f && Math.abs(distance - lastDistance) <= distTolerance && !cam.isParallelProjection()) {
+            level = lastLevel;
+        } else {
+            level = minimum;
+            if (distance > 0f) {
+                float triangleBudget = AreaUtils.calcScreenArea(bound, distance, width) * trisPerPixel;
+                level = levels - 1;
+                while (level > minimum && triangleBudget >= mesh.getTriangleCount(level - 1)) {
+                    level--;
+                }
+            }
+            lastDistance = distance;
+            lastWidth = width;
+        }
+        lastLevel = level;
+        if (geometry.getLodLevel() != level) {
+            geometry.setLodLevel(level);
+        }
     }
 
     @Override
@@ -194,8 +254,19 @@ public class LodControl extends AbstractControl implements Cloneable, JmeCloneab
         OutputCapsule oc = ex.getCapsule(this);
         oc.write(trisPerPixel, "trisPerPixel", 1f);
         oc.write(distTolerance, "distTolerance", 1f);
-        oc.write(numLevels, "numLevels", 0);
-        oc.write(numTris, "numTris", null);
+        oc.write(desktopStartLevel, "desktopStartLevel", 0);
+        oc.write(mobileStartLevel, "mobileStartLevel", 0);
+        // Older runtimes read these fields instead of querying the mesh.
+        Mesh mesh = spatial instanceof Geometry ? ((Geometry) spatial).getMesh() : null;
+        int levels = mesh == null ? 0 : mesh.getNumLodLevels();
+        if (levels > 0) {
+            int[] triangles = new int[levels];
+            for (int i = 0; i < levels; i++) {
+                triangles[i] = mesh.getTriangleCount(i);
+            }
+            oc.write(levels, "numLevels", 0);
+            oc.write(triangles, "numTris", null);
+        }
     }
 
     @Override
@@ -204,7 +275,9 @@ public class LodControl extends AbstractControl implements Cloneable, JmeCloneab
         InputCapsule ic = im.getCapsule(this);
         trisPerPixel = ic.readFloat("trisPerPixel", 1f);
         distTolerance = ic.readFloat("distTolerance", 1f);
-        numLevels = ic.readInt("numLevels", 0);
-        numTris = ic.readIntArray("numTris", null);
+        desktopStartLevel = Math.max(0, ic.readInt("desktopStartLevel", 0));
+        mobileStartLevel = Math.max(0, ic.readInt("mobileStartLevel", 0));
+        lastMesh = null;
+        lastDistance = Float.NaN;
     }
 }

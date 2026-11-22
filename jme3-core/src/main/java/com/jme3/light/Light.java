@@ -106,6 +106,7 @@ public abstract class Light implements Savable, Cloneable {
     }
 
     protected ColorRGBA color = new ColorRGBA(ColorRGBA.White);
+    private float intensity = 1f;
     
     /**
      * Used in LightList for caching the distance 
@@ -156,12 +157,56 @@ public abstract class Light implements Savable, Cloneable {
     }
 
     /**
-     * Returns the color of the light.
+     * Returns the editable base color of the light.
      * 
      * @return The color of the light.
      */
     public ColorRGBA getColor() {
         return color;
+    }
+
+    /** Returns the multiplier for the light's linear RGB or sky radiance. Defaults to one. */
+    public float getIntensity() {
+        return intensity;
+    }
+
+    /**
+     * Changes light output without changing its base color. Directional, point,
+     * spot and ambient lighting scale linear RGB. The value is serialized and
+     * older assets use 1. Change it on the render thread when the light is in use.
+     * <pre>{@code
+     * // 第一步：设定灯光颜色并添加到场景。
+     * PointLight light = new PointLight();
+     * light.setColor(new ColorRGBA(1f, 0.8f, 0.6f, 1f));
+     * rootNode.addLight(light);
+     * // 第二步：把亮度放大三倍，颜色和照射范围保持原样。
+     * light.setIntensity(3f);
+     * // 第三步：设置为 1 恢复原始亮度，或者设为 0 停止贡献光照。
+     * light.setIntensity(1f);
+     * }</pre>
+     *
+     * @param intensity finite, nonnegative linear multiplier
+     * @throws IllegalArgumentException if the multiplier is negative or nonfinite
+     */
+    public void setIntensity(float intensity) {
+        if (!Float.isFinite(intensity) || intensity < 0f) {
+            throw new IllegalArgumentException("Light intensity must be finite and nonnegative.");
+        }
+        this.intensity = intensity;
+    }
+
+    /**
+     * Writes the base RGB scaled by intensity to a caller-owned color. Alpha
+     * is copied unchanged. Use this when packing light colors for a renderer.
+     *
+     * @param store destination, or null to allocate a color
+     * @return the calculated color
+     */
+    public ColorRGBA getEffectiveColor(ColorRGBA store) {
+        ColorRGBA base = getColor();
+        ColorRGBA result = store == null || store == base ? new ColorRGBA() : store;
+        float scale = getIntensity();
+        return result.set(base.r * scale, base.g * scale, base.b * scale, base.a);
     }
 
     /**
@@ -352,6 +397,7 @@ public abstract class Light implements Savable, Cloneable {
     public void write(JmeExporter ex) throws IOException {
         OutputCapsule oc = ex.getCapsule(this);
         oc.write(color, "color", null);
+        oc.write(intensity, "intensity", 1f);
         oc.write(enabled, "enabled", true);
         oc.write(castShadow, "castShadow", true);
         oc.write(shadowSettings, "shadowSettings", null);
@@ -363,6 +409,8 @@ public abstract class Light implements Savable, Cloneable {
     public void read(JmeImporter im) throws IOException {
         InputCapsule ic = im.getCapsule(this);
         color = (ColorRGBA) ic.readSavable("color", null);
+        float storedIntensity = ic.readFloat("intensity", 1f);
+        intensity = Float.isFinite(storedIntensity) && storedIntensity >= 0f ? storedIntensity : 1f;
         enabled = ic.readBoolean("enabled", true);
         castShadow = ic.readBoolean("castShadow", true);
         shadowSettings = (com.jme3.shadow.LightShadowSettings) ic.readSavable("shadowSettings",

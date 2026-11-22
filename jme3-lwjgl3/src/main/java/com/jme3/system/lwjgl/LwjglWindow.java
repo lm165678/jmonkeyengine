@@ -32,6 +32,7 @@
 package com.jme3.system.lwjgl;
 
 import com.jme3.app.Application;
+import com.jme3.app.SimpleApplication;
 import com.jme3.asset.AssetManager;
 import com.jme3.input.JoyInput;
 import com.jme3.input.KeyInput;
@@ -43,6 +44,7 @@ import com.jme3.input.lwjgl.SdlKeyInput;
 import com.jme3.input.lwjgl.SdlMouseInput;
 import com.jme3.material.Material;
 import com.jme3.math.Vector2f;
+import com.jme3.post.WorldSettings.DisplayOutput;
 import com.jme3.renderer.Caps;
 import com.jme3.renderer.Camera;
 import com.jme3.renderer.Limits;
@@ -95,6 +97,7 @@ import static org.lwjgl.sdl.SDLEvents.*;
 import static org.lwjgl.sdl.SDLHints.*;
 import static org.lwjgl.sdl.SDLInit.*;
 import static org.lwjgl.sdl.SDLPixels.*;
+import static org.lwjgl.sdl.SDLProperties.SDL_GetBooleanProperty;
 import static org.lwjgl.sdl.SDLSurface.*;
 import static org.lwjgl.sdl.SDLStdinc.SDL_setenv_unsafe;
 import static org.lwjgl.sdl.SDLVideo.*;
@@ -233,6 +236,9 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
     private int oldLogicalHeight;
     private final Vector2f displayScale = new Vector2f(1, 1);
     private Material blitMaterial;
+    private SdlScRgbPresentation hdrPresentation;
+    private boolean hdrPresentationFailed;
+    private volatile boolean hdrDisplayOutputActive;
     private Picture blitGeometry;
     private final Camera blitCamera = new Camera(1, 1);
     private FrameBuffer blitFramebuffer;
@@ -241,6 +247,7 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
     private int blitRequestedSamples;
     private Texture2D blitColorTexture;
     private boolean blitFramebufferDirty;
+    private Format reportedCompositionFormat;
     private boolean blitFramebufferTextureMultisampleWarningIssued;
     private boolean blitFramebufferResolveWarningIssued;
     private boolean windowStateChangedSinceLastSwap;
@@ -661,6 +668,8 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
     protected void destroyContext() {
         Exception failure = null;
         try {
+            destroyHdrPresentation();
+            hdrPresentationFailed = false;
             destroyBlitFramebufferResources();
             if (renderer != null) {
                 renderer.cleanup();
@@ -943,7 +952,9 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
             blitMaterial.getAdditionalRenderState().setDepthTest(false);
             blitMaterial.getAdditionalRenderState().setDepthWrite(false);
         }
-        blitMaterial.setBoolean("Srgb", useBlitFramebufferShaderSrgbConversion());
+        boolean shaderSrgb = useBlitFramebufferShaderSrgbConversion();
+        blitMaterial.setBoolean("Srgb", shaderSrgb);
+        blitMaterial.setBoolean("OutputDithering", shaderSrgb && settings.isSrgbOutputDithering());
 
         if (blitGeometry == null) {
             blitGeometry = new Picture("Blit FrameBuffer");
@@ -990,8 +1001,111 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
         destroyBlitFramebuffer();
         blitMaterial = null;
         blitGeometry = null;
+        reportedCompositionFormat = null;
         blitFramebufferTextureMultisampleWarningIssued = false;
         blitFramebufferResolveWarningIssued = false;
+    }
+
+    /**
+     * Reports whether the last frame was presented as native HDR. The window can
+     * fall back to SDR when the output or the current rendering path changes.
+     *
+     * @return true after a successful scRGB present
+     * @see AppSettings#setHdrDisplayOutput(boolean)
+     */
+    public boolean isHdrDisplayOutputActive() {
+        return hdrDisplayOutputActive;
+    }
+
+    private void destroyHdrPresentation() {
+        boolean wasActive = hdrDisplayOutputActive;
+        hdrDisplayOutputActive = false;
+        if (hdrPresentation != null) {
+            SdlScRgbPresentation presentation = hdrPresentation;
+            hdrPresentation = null;
+            try {
+                presentation.close();
+            } catch (RuntimeException failure) {
+                LOGGER.log(Level.WARNING, "Could not release shared HDR presentation resources", failure);
+            } finally {
+                restoreOpenGlContext();
+            }
+            if (wasActive) {
+                LOGGER.info("LWJGL3 HDR presentation ended, restoring OpenGL SDR output");
+            }
+        }
+    }
+
+    private void restoreOpenGlContext() {
+        if (SDL_GL_GetCurrentContext() != glContext && !SDL_GL_MakeCurrent(window, glContext)) {
+            throw new IllegalStateException("Could not restore OpenGL context: " + SDL_GetError());
+        }
+    }
+
+    private boolean canPresentHdr() {
+        return type == Type.Display && renderable.get() && allowSwapBuffers && autoFlush
+                && requestsHdrDisplayOutput() && settings.isGammaCorrection()
+                && JmeSystem.getPlatform().getOs() == Platform.Os.Windows
+                && !useAngle
+                && blitFramebuffer.getColorTarget().getFormat().isFloatingPont()
+                && SDL_GetBooleanProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+    }
+
+    private boolean requestsHdrDisplayOutput() {
+        if (listener instanceof SimpleApplication) {
+            DisplayOutput sceneOutput = ((SimpleApplication) listener).getSceneServices().getDisplayOutput();
+            if (sceneOutput != DisplayOutput.Application) {
+                return sceneOutput == DisplayOutput.Hdr;
+            }
+        }
+        return settings.isHdrDisplayOutput();
+    }
+
+    private boolean presentHdrFrame(RenderManager renderManager, int width, int height) {
+        if (!canPresentHdr()) {
+            destroyHdrPresentation();
+            hdrPresentationFailed = false;
+            return false;
+        }
+        if (hdrPresentationFailed) {
+            return false;
+        }
+        try {
+            if (hdrPresentation == null) {
+                hdrPresentation = new SdlScRgbPresentation(window, settings.isVSync());
+                restoreOpenGlContext();
+            }
+            float headroom = hdrPresentation.getHeadroom();
+            if (!Float.isFinite(headroom) || headroom <= 1f) {
+                LOGGER.info("LWJGL3 scRGB output has no HDR headroom, using OpenGL SDR");
+                destroyHdrPresentation();
+                hdrPresentationFailed = true;
+                return false;
+            }
+            try {
+                hdrPresentation.bind(width, height, headroom);
+                blitMaterial.setBoolean("HdrOutput", true);
+                blitMaterial.setFloat("HdrHeadroom", headroom);
+                renderManager.renderGeometry(blitGeometry);
+            } finally {
+                blitMaterial.clearParam("HdrOutput");
+                hdrPresentation.unbind();
+            }
+            hdrPresentation.present();
+            restoreOpenGlContext();
+            if (!hdrDisplayOutputActive) {
+                LOGGER.log(Level.INFO, "LWJGL3 HDR presentation: shared OpenGL/D3D11 FP16 scRGB, SDR white={0}, headroom={1}x",
+                        new Object[]{hdrPresentation.getSdrWhitePoint(), headroom});
+            }
+            hdrDisplayOutputActive = true;
+            windowStateChangedSinceLastSwap = false;
+            return true;
+        } catch (RuntimeException failure) {
+            LOGGER.log(Level.WARNING, "LWJGL3 shared HDR presentation failed, using OpenGL SDR", failure);
+            hdrPresentationFailed = true;
+            destroyHdrPresentation();
+            return false;
+        }
     }
 
     protected boolean renderFrameWithBlitFramebuffer() {
@@ -1053,7 +1167,10 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
                 blitGeometry.setHeight(blitHeight);
             }
             blitGeometry.updateGeometricState();
-            renderManager.renderGeometry(blitGeometry);
+            if (!presentHdrFrame(renderManager, blitWidth, blitHeight)) {
+                renderManager.renderGeometry(blitGeometry);
+            }
+            reportWindowColorFormats();
         } finally {
             renderer.setMainFrameBufferSrgb(previousSrgb);
             glRenderer.setMainFrameBufferOverride(restoreMainFramebuffer);
@@ -1062,6 +1179,27 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
             }
         }
         return true;
+    }
+
+    private void reportWindowColorFormats() {
+        Format compositionFormat = blitFramebuffer.getColorTarget().getFormat();
+        if (reportedCompositionFormat == compositionFormat) {
+            return;
+        }
+        reportedCompositionFormat = compositionFormat;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer value = stack.mallocInt(1);
+            LOGGER.log(Level.INFO, "LWJGL3 color buffers: linear composition={0}, window GL RGBA bits={1}/{2}/{3}/{4}",
+                    new Object[]{compositionFormat,
+                        readColorChannelBits(SDL_GL_RED_SIZE, value),
+                        readColorChannelBits(SDL_GL_GREEN_SIZE, value),
+                        readColorChannelBits(SDL_GL_BLUE_SIZE, value),
+                        readColorChannelBits(SDL_GL_ALPHA_SIZE, value)});
+        }
+    }
+
+    private static String readColorChannelBits(int attribute, IntBuffer value) {
+        return SDL_GL_GetAttribute(attribute, value) ? Integer.toString(value.get(0)) : "?";
     }
 
     protected void runLoop() {
@@ -1079,12 +1217,13 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
         }
 
         if (!renderFrameWithBlitFramebuffer()) {
+            destroyHdrPresentation();
             listener.update();
         }
 
         if (renderable.get()) {
             try {
-                if ((type != Type.Canvas) && allowSwapBuffers && autoFlush) {
+                if ((type != Type.Canvas) && allowSwapBuffers && autoFlush && !hdrDisplayOutputActive) {
                     if (!SDL_GL_SwapWindow(window)) {
                         String error = SDL_GetError();
                         pollEvents(true);
@@ -1194,11 +1333,15 @@ public abstract class LwjglWindow extends LwjglContext implements Runnable {
             case SDL_EVENT_WINDOW_EXPOSED:
             case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_RESTORED:
-            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
             case SDL_EVENT_WINDOW_OCCLUDED:
             case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
             case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
                 windowStateChangedSinceLastSwap = true;
+                break;
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+                windowStateChangedSinceLastSwap = true;
+                hdrPresentationFailed = false;
                 break;
             default:
                 break;

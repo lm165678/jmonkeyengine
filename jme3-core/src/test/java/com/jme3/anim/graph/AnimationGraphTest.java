@@ -200,9 +200,29 @@ class AnimationGraphTest {
                         new float[]{0, 1}, true, 0, 0)), Collections.emptyList());
         new AnimationGraphPlayer(graph, composer);
         node.updateLogicalState(1);
-        assertEquals(7.5, node.getLocalTranslation().x, 0.001);
+        assertEquals(10, node.getLocalTranslation().x, 0.001);
         node.updateLogicalState(1.5f);
-        assertEquals(3.75, node.getLocalTranslation().x, 0.001);
+        assertEquals(10, node.getLocalTranslation().x, 0.001);
+    }
+
+    @Test
+    void blendEndpointUsesNativeRateAndParameterChangesPreservePhase() {
+        Node node = model();
+        AnimComposer composer = node.getControl(AnimComposer.class);
+        clip(composer, node, "LongMove", 0, 10, 10);
+        AnimationGraph graph = new AnimationGraph("Blend", Collections.singletonList(new Parameter("Speed", Type.FLOAT, 1)),
+                Collections.singletonList(new State("Blend", "Speed", Arrays.asList("LongMove", "Move"),
+                        new float[]{0, 1}, true, 0, 0)), Collections.emptyList());
+        AnimationGraphPlayer player = new AnimationGraphPlayer(graph, composer);
+        node.updateLogicalState(.5f);
+        assertEquals(5, node.getLocalTranslation().x, .001);
+        player.setFloat("Speed", 0);
+        node.updateLogicalState(1);
+        assertEquals(6, node.getLocalTranslation().x, .001);
+        player.restart();
+        node.updateLogicalState(.25f);
+        assertEquals(2.5, node.getLocalTranslation().x, .001);
+        player.close();
     }
 
     @Test

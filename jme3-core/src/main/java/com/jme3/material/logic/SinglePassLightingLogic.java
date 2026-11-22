@@ -143,7 +143,7 @@ public final class SinglePassLightingLogic extends DefaultTechniqueDefLogic {
                 endIndex++;
                 continue;
             }
-            ColorRGBA color = l.getColor();
+            ColorRGBA color = l.getEffectiveColor(effectiveLightColor);
             shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), 0, 0, 0, lightDataIndex / 3);
             //Color
             lightData.setVector4InArray(color.getRed(),

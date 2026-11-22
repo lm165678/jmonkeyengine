@@ -183,7 +183,7 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
                 endIndex++;
                 continue;
             }
-            ColorRGBA color = l.getColor();
+            ColorRGBA color = l.getEffectiveColor(effectiveLightColor);
             //Color
 
             if (l.getType() != Light.Type.Probe && l.getType() != Light.Type.Sky) {
@@ -299,7 +299,7 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             Light l = lightList.get(j);
             if (l instanceof AmbientLight) {
                 useAmbientLight = true;
-                ambientLightColor.addLocal(l.getColor());
+                ambientLightColor.addLocal(l.getEffectiveColor(effectiveLightColor));
                 if(removeLights){
                     lightList.remove(l);
                     j--;

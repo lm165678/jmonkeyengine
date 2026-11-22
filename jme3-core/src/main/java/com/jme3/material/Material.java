@@ -926,7 +926,7 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         bindlessTextures = enabled;
     }
 
-    /** @return requested binding mode; hardware/resource fallback may still use units */
+    /** @return requested binding mode; the renderer can still fall back to texture units */
     public boolean isBindlessTextures() {
         return bindlessTextures;
     }

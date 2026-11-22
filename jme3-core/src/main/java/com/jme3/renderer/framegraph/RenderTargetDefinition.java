@@ -40,7 +40,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Immutable viewport-relative framebuffer allocation definition, with owned color
+ * Defines a framebuffer sized relative to the viewport, with owned color
  * and optional depth textures. Example:
  * <pre>{@code
  * ResourceHandle<RenderTarget> hdr = graph.createResource("hdr",

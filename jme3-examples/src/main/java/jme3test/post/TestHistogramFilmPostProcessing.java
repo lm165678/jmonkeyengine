@@ -14,16 +14,16 @@ import com.jme3.util.BufferUtils;
 import java.nio.ByteBuffer;
 
 /**
- * UE4-style SDR exposure/Film/CombineLUTs example, no external models required.
+ * histogram and film SDR exposure/Film/CombineLUTs example, no external models required.
  * Requires GL3+/float color targets; test requests GL4.3. No CPU readback in the
  * production filters; --verify alone reads test output. Run with --verify for
- * UE4_POST_GPU_PASS; use -Duepost.samples=4 for MSAA coverage. Without --verify,
+ * HISTOGRAM_FILM_POST_GPU_PASS; use -DhistogramFilm.samples=4 for MSAA coverage. Without --verify,
  * displays a changing neutral HDR background; standard fly-camera input applies.
- * Equivalent invocation after compilation: java -cp <runtime> jme3test.post.TestUE4PostProcessing --verify
- * Tests do not assert identical UE imagery: no PQ/pre-exposure,
+ * Equivalent invocation after compilation: java -cp <runtime> jme3test.post.TestHistogramFilmPostProcessing --verify
+ * The example uses SDR output without pre-exposure,
  * sparse portable metering and approximate tint remain documented differences.
  */
-public final class TestUE4PostProcessing extends SimpleApplication {
+public final class TestHistogramFilmPostProcessing extends SimpleApplication {
     private static boolean verify;
     private final AutoExposureFilter exposure = new AutoExposureFilter() {
         @Override
@@ -39,7 +39,7 @@ public final class TestUE4PostProcessing extends SimpleApplication {
 
     public static void main(String[] args) {
         verify = args.length > 0 && args[0].equals("--verify");
-        TestUE4PostProcessing app = new TestUE4PostProcessing();
+        TestHistogramFilmPostProcessing app = new TestHistogramFilmPostProcessing();
         AppSettings settings = new AppSettings(true);
         settings.setRenderer(AppSettings.LWJGL_OPENGL43);
         settings.setResolution(verify ? 64 : 960, verify ? 64 : 540);
@@ -59,12 +59,12 @@ public final class TestUE4PostProcessing extends SimpleApplication {
         // 第一步：使用线性 HDR 场景颜色。不要给 GI 捕获视口安装此链。
         chain = new FilterPostProcessor(assetManager);
         chain.setFrameBufferFormat(Image.Format.RGBA16F);
-        chain.setNumSamples(Integer.getInteger("uepost.samples", 1));
+        chain.setNumSamples(Integer.getInteger("histogramFilm.samples", 1));
         // 第二步：曝光 -> Bloom（按需）-> Film/CombineLUTs -> FXAA（按需）。
-        exposure.setMode(AutoExposureFilter.Mode.UE4Histogram);
+        exposure.setMode(AutoExposureFilter.Mode.SceneHistogram);
         exposure.setBrightnessRange(.0001f, 100f);
         exposure.setAdaptationSpeeds(3f, 1f);
-        grading.setCurve(ColorGradingFilter.Curve.UE4);
+        grading.setCurve(ColorGradingFilter.Curve.FilmLut);
         // 第三步：序列化只保留配置，LUT 与曝光历史在目标视口重新生成。
         grading = BinaryExporter.saveAndLoad(assetManager, grading);
         AutoExposureFilter restored = BinaryExporter.saveAndLoad(assetManager, new AutoExposureFilter());
@@ -72,8 +72,8 @@ public final class TestUE4PostProcessing extends SimpleApplication {
             throw new AssertionError("Legacy serialization changed");
         }
         AutoExposureFilter modern = new AutoExposureFilter();
-        modern.setMode(AutoExposureFilter.Mode.UE4Histogram);
-        if (BinaryExporter.saveAndLoad(assetManager, modern).getMode() != AutoExposureFilter.Mode.UE4Histogram) {
+        modern.setMode(AutoExposureFilter.Mode.SceneHistogram);
+        if (BinaryExporter.saveAndLoad(assetManager, modern).getMode() != AutoExposureFilter.Mode.SceneHistogram) {
             throw new AssertionError("Modern serialization lost mode");
         }
         chain.addFilter(exposure);
@@ -130,7 +130,7 @@ public final class TestUE4PostProcessing extends SimpleApplication {
         } else if (stage == 12) {
             grading.setCurve(ColorGradingFilter.Curve.Neutral);
         } else if (stage == 13) {
-            grading.setCurve(ColorGradingFilter.Curve.UE4);
+            grading.setCurve(ColorGradingFilter.Curve.FilmLut);
         }
         viewPort.setBackgroundColor(stage == 14 ? new ColorRGBA(16,0,0,.25f)
                 : stage == 15 ? new ColorRGBA(0,16,0,.25f)
@@ -161,7 +161,7 @@ public final class TestUE4PostProcessing extends SimpleApplication {
             priorBright = r;
         }
         if (frame%8==7) {
-            System.out.println("UE4_STAGE " + stage + " rgb=" + r + "," + g + "," + b);
+            System.out.println("HISTOGRAM_FILM_STAGE " + stage + " rgb=" + r + "," + g + "," + b);
             if ((stage==0 || stage==2 || stage==3 || stage==8 || stage==9 || stage==10 || stage==13)
                     && Math.abs(r-.18f)>.035f) {
                 throw new AssertionError("Grey or restored LUT mismatch");
@@ -175,7 +175,7 @@ public final class TestUE4PostProcessing extends SimpleApplication {
                 throw new AssertionError("Saturated Film output outside SDR");
             }
             if (stage==16) {
-                System.out.println("UE4_POST_GPU_PASS");
+                System.out.println("HISTOGRAM_FILM_POST_GPU_PASS");
                 stop();
             }
         }

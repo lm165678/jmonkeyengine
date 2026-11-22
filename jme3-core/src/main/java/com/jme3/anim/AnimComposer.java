@@ -58,6 +58,8 @@ public class AnimComposer extends AbstractControl {
      */
     public static final String DEFAULT_LAYER = "Default";
     private Map<String, AnimClip> animClipMap = new HashMap<>();
+    private Map<String, AnimClip> linkedClips = Collections.emptyMap();
+    private boolean checkedRootMotion;
 
     private Map<String, Action> actions = new HashMap<>();
     private float globalSpeed = 1f;
@@ -77,7 +79,7 @@ public class AnimComposer extends AbstractControl {
      * @return true, if the named animation is in the list of animations.
      */
     public boolean hasAnimClip(String name) {
-        return animClipMap.containsKey(name);
+        return animClipMap.containsKey(name) || linkedClips.containsKey(name);
     }
 
     /**
@@ -88,7 +90,8 @@ public class AnimComposer extends AbstractControl {
      * such named animation exists.
      */
     public AnimClip getAnimClip(String name) {
-        return animClipMap.get(name);
+        AnimClip local = animClipMap.get(name);
+        return local == null ? linkedClips.get(name) : local;
     }
 
     /**
@@ -282,7 +285,7 @@ public class AnimComposer extends AbstractControl {
      */
     public Action makeAction(String name) {
         Action action;
-        AnimClip clip = animClipMap.get(name);
+        AnimClip clip = getAnimClip(name);
         if (clip == null) {
             throw new IllegalArgumentException("Cannot find clip named " + name);
         }
@@ -381,7 +384,16 @@ public class AnimComposer extends AbstractControl {
      * @return the unmodifiable collection of animations
      */
     public Collection<AnimClip> getAnimClips() {
-        return Collections.unmodifiableCollection(animClipMap.values());
+        if (linkedClips.isEmpty()) {
+            return Collections.unmodifiableCollection(animClipMap.values());
+        }
+        List<AnimClip> clips = new ArrayList<>(animClipMap.values());
+        for (AnimClip clip : linkedClips.values()) {
+            if (!animClipMap.containsKey(clip.getName())) {
+                clips.add(clip);
+            }
+        }
+        return Collections.unmodifiableList(clips);
     }
 
     /**
@@ -392,7 +404,53 @@ public class AnimComposer extends AbstractControl {
      * @return the unmodifiable set of animation names.
      */
     public Set<String> getAnimClipsNames() {
-        return Collections.unmodifiableSet(animClipMap.keySet());
+        if (linkedClips.isEmpty()) {
+            return Collections.unmodifiableSet(animClipMap.keySet());
+        }
+        Set<String> names = new LinkedHashSet<>(animClipMap.keySet());
+        names.addAll(linkedClips.keySet());
+        return Collections.unmodifiableSet(names);
+    }
+
+    /**
+     * Returns clips that are actually written into this composer when saving.
+     * Linked clips are resolved by the model loader and exposed via getAnimClips().
+     *
+     * @return a read-only view of the embedded clips
+     */
+    public Collection<AnimClip> getEmbeddedAnimClips() {
+        return Collections.unmodifiableCollection(animClipMap.values());
+    }
+
+    /**
+     * Installs freshly resolved clips on the owning scene thread, or before the
+     * model is attached. These clips are not serialized. Embedded clips take
+     * precedence for duplicate names. Changing the set stops actions backed by
+     * the old linked clips.
+     * <pre>
+     * // 第一步：用 AssetManager.loadModel 加载带引用的 J3O。
+     * // 第二步：getAnimClip(id) 同时查找内置与已绑定的外部片段。
+     * // 第三步：加载器调用 setLinkedAnimClips(emptyList()) 清除外部片段。
+     * </pre>
+     *
+     * @param clips the resolved clips targeting this instance, or empty to clear
+     */
+    public void setLinkedAnimClips(Collection<AnimClip> clips) {
+        Map<String, AnimClip> replacement = new LinkedHashMap<>();
+        for (AnimClip clip : clips) {
+            replacement.put(clip.getName(), clip);
+        }
+        for (String name : linkedClips.keySet()) {
+            Action old = actions.remove(name);
+            if (old != null) {
+                for (AnimLayer layer : layers.values()) {
+                    if (layer.getCurrentAction() == old) {
+                        layer.setCurrentAction(null, null, false);
+                    }
+                }
+            }
+        }
+        linkedClips = replacement;
     }
 
     /**
@@ -402,6 +460,15 @@ public class AnimComposer extends AbstractControl {
      */
     @Override
     protected void controlUpdate(float tpf) {
+        if (!checkedRootMotion) {
+            checkedRootMotion = true;
+            try {
+                com.jme3.anim.graph.AnimationGraphPlayer.startStoredRootMotion(this);
+            } catch (IllegalArgumentException | IllegalStateException error) {
+                java.util.logging.Logger.getLogger(AnimComposer.class.getName())
+                        .warning("Cannot start authored root motion: " + error.getMessage());
+            }
+        }
         for (AnimLayer layer : layers.values()) {
             layer.update(tpf, globalSpeed);
         }
@@ -512,6 +579,7 @@ public class AnimComposer extends AbstractControl {
     @Override
     public void cloneFields(Cloner cloner, Object original) {
         super.cloneFields(cloner, original);
+        checkedRootMotion = false;
         Map<String, AnimClip> clips = new HashMap<>();
         for (String key : animClipMap.keySet()) {
             clips.put(key, cloner.clone(animClipMap.get(key)));
@@ -522,6 +590,11 @@ public class AnimComposer extends AbstractControl {
         }
         actions = act;
         animClipMap = clips;
+        Map<String, AnimClip> linked = new LinkedHashMap<>();
+        for (AnimClip clip : linkedClips.values()) {
+            linked.put(clip.getName(), cloner.clone(clip));
+        }
+        linkedClips = linked;
 
         Map<String, AnimLayer> newLayers = new LinkedHashMap<>();
         for (String key : layers.keySet()) {

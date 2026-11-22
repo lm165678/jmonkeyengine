@@ -5,13 +5,16 @@ import com.jme3.anim.graph.AnimationGraph.*;
 import com.jme3.anim.tween.action.Action;
 import com.jme3.anim.util.HasLocalTransform;
 import com.jme3.math.Transform;
+import com.jme3.math.Quaternion;
+import com.jme3.math.Vector3f;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Spatial;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Per-character graph player installed as the composer's default-layer action.
+ * Plays a character's graph through the AnimComposer default layer.
  * It executes inside AnimComposer, before the normal skinning update. Other layers
  * are untouched. Create a fresh player after loading/cloning each character;
  * player state is deliberately not serialized. The definition is String user data.
@@ -21,7 +24,8 @@ import java.util.Map;
  * until consumed by a winning edge or explicitly reset. Exit times and fades use
  * composer-scaled seconds; negative playback is unsupported. 1D blends clamp at
  * endpoints, blend adjacent samples, and synchronize normalized phase using the
- * longest clip's duration. Missing tracks use the pose captured at construction.
+ * weighted clip duration. Phase advances continuously as weights change; a fully
+ * weighted clip plays at its native rate. Missing tracks use the pose captured at construction.
  * Zero-duration clips (for example a single-frame T-pose) hold their time-zero
  * pose, with or without looping. They can blend with moving clips and leave via
  * the same elapsed-time/parameter transitions; no synthetic duration is added.
@@ -55,10 +59,19 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
     private final Map<String, Parameter> declarations = new LinkedHashMap<>();
     private final Map<String, Float> values = new LinkedHashMap<>();
     private final Pose baseline = new Pose();
+    private final List<TransformTrack> overlayTracks = new java.util.ArrayList<>();
+    private final Map<String, MotionTrack> rootTracks = new LinkedHashMap<>();
+    private final Map<HasLocalTransform, Transform> rootTargets = new LinkedHashMap<>();
+    private java.util.function.Consumer<RootMotionDelta> rootMotionConsumer;
+    private RootMotionDelta rootMotionDelta = RootMotionDelta.ZERO;
+    private double overlayTime;
+    private float overlayWeight;
     private State current;
     private State outgoing;
     private double time;
     private double outgoingTime;
+    private double phase;
+    private double outgoingPhase;
     private double previousInput;
     private double fadeTime;
     private double fadeDuration;
@@ -86,6 +99,14 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
                     if (track instanceof TransformTrack) {
                         HasLocalTransform target = ((TransformTrack) track).getTarget();
                         baseline.transforms.put(target, target.getLocalTransform().clone());
+                        if (graph.rootMotion != null && graph.rootMotion.includes(target, composer.getSpatial())) {
+                            Transform rest = baseline.transforms.get(target);
+                            if (!rootTracks.containsKey(clip)) {
+                                rootTracks.put(clip, new MotionTrack((TransformTrack) track, rest,
+                                        motionFrame(target)));
+                            }
+                            rootTargets.putIfAbsent(target, rest);
+                        }
                     } else if (track instanceof MorphTrack) {
                         MorphTrack morph = (MorphTrack) track;
                         if (morph.getTarget().getMorphState().length != morph.getNbMorphTargets()) {
@@ -95,6 +116,16 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
                     } else {
                         throw new IllegalArgumentException("Unsupported animation track: " + track.getClass().getName());
                     }
+                }
+            }
+        }
+        if (graph.overlay != null) {
+            for (AnimTrack<?> track : composer.getAnimClip(graph.overlay.clip).getTracks()) {
+                if (graph.overlayIncludes(track)) {
+                    TransformTrack transform = (TransformTrack) track;
+                    HasLocalTransform target = transform.getTarget();
+                    baseline.transforms.putIfAbsent(target, target.getLocalTransform().clone());
+                    overlayTracks.add(transform);
                 }
             }
         }
@@ -111,7 +142,11 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         previousManager = layer.getManager();
         layer.setCurrentAction("Animation graph", this, true);
         layer.setManager(this);
-        apply(sample(current, 0));
+        if (graph.rootMotion != null && graph.rootMotion.autoApply) {
+            Spatial actor = composer.getSpatial();
+            rootMotionConsumer = delta -> delta.applyTo(actor);
+        }
+        resetPose();
     }
 
     /** Start the graph stored on the spatial directly owning the composer. */
@@ -121,7 +156,64 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         if (text == null || composer == null) {
             throw new IllegalArgumentException("Spatial needs an animation graph and AnimComposer");
         }
+        if (composer.getCurrentAction() instanceof AnimationGraphPlayer) {
+            return (AnimationGraphPlayer) composer.getCurrentAction();
+        }
         return new AnimationGraphPlayer(AnimationGraph.decode(text), composer);
+    }
+
+    /**
+     * Starts an opted-in, stored graph on its owning composer. Ordinary graphs
+     * and an already selected action retain their previous startup behavior.
+     *
+     * @param composer attached composer on its first logical update
+     */
+    public static void startStoredRootMotion(AnimComposer composer) {
+        Spatial owner = composer.getSpatial();
+        if (owner == null || composer.getCurrentAction() != null) {
+            return;
+        }
+        Object stored = owner.getUserData(AnimationGraph.USER_DATA);
+        if (stored instanceof String) {
+            String text = (String) stored;
+            if (text.startsWith("rootMotion.path=") || text.contains("\nrootMotion.path=")) {
+                attach(owner);
+            }
+        }
+    }
+
+    /**
+     * Replaces the mover (including automatic movement). A null consumer
+     * disables applying movement while keeping extraction enabled.
+     * Call on the owning scene thread, once after attach or when changing modes.
+     *
+     * @param consumer receives one delta per active animation update
+     */
+    public void setRootMotionConsumer(java.util.function.Consumer<RootMotionDelta> consumer) {
+        rootMotionConsumer = consumer;
+    }
+
+    /** @return the most recent logical update's delta, or zero while paused or reset */
+    public RootMotionDelta getRootMotionDelta() {
+        return rootMotionDelta;
+    }
+
+    /** @return whether this graph extracts forward-playing root motion */
+    public boolean hasRootMotion() {
+        return graph.rootMotion != null;
+    }
+
+    /**
+     * Rebases the layer clock after an explicit seek so changing the clock does
+     * not move the actor. The graph's state clock remains independent.
+     *
+     * @param seconds the new layer clock time
+     */
+    public void synchronizeLayerClock(double seconds) {
+        if (graph.rootMotion != null && Double.isFinite(seconds)) {
+            previousInput = seconds;
+            rootMotionDelta = RootMotionDelta.ZERO;
+        }
     }
 
     public void setFloat(String name, float value) {
@@ -163,6 +255,9 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
     /** Pause the graph clock, keeping the current pose. */
     public void setPaused(boolean paused) {
         this.paused = paused;
+        if (paused) {
+            rootMotionDelta = RootMotionDelta.ZERO;
+        }
     }
 
     /** Reset entry state and all parameters, including pending triggers. */
@@ -170,22 +265,58 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         current = states.get(graph.entry);
         outgoing = null;
         time = 0;
+        phase = 0;
         for (Parameter p : graph.parameters) {
             values.put(p.name, p.initial);
         }
-        apply(sample(current, 0));
+        resetPose();
+    }
+
+    private void resetPose() {
+        rootMotionDelta = RootMotionDelta.ZERO;
+        overlayTime = 0;
+        overlayWeight = overlayEnabled() ? 1 : 0;
+        Pose pose = sample(current, 0);
+        applyOverlay(pose);
+        stripRootMotion(pose);
+        apply(pose);
+    }
+
+    private boolean overlayEnabled() {
+        return graph.overlay != null && values.get(graph.overlay.parameter) != 0f;
+    }
+
+    private void applyOverlay(Pose pose) {
+        if (overlayWeight <= 0) {
+            return;
+        }
+        double length = composer.getAnimClip(graph.overlay.clip).getLength();
+        double position = length > 0 ? overlayTime % length : 0;
+        Transform sample = new Transform();
+        for (TransformTrack track : overlayTracks) {
+            Transform base = pose.transforms.get(track.getTarget());
+            sample.set(base);
+            track.getDataAtTime(position, sample);
+            base.interpolateTransforms(base, sample, overlayWeight);
+        }
     }
 
     @Override
     public boolean interpolate(double input) {
         double delta = Math.max(0, input - previousInput);
         previousInput = input;
+        rootMotionDelta = RootMotionDelta.ZERO;
         if (closed || paused) {
             return true;
         }
+        if (delta > 0 && graph.rootMotion != null) {
+            rootMotionDelta = stepMotion(delta);
+        }
         time += delta;
+        phase += phaseStep(current, delta);
         if (outgoing != null) {
             outgoingTime += delta;
+            outgoingPhase += phaseStep(outgoing, delta);
             fadeTime += delta;
             if (fadeTime >= fadeDuration) {
                 outgoing = null;
@@ -195,8 +326,10 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
                 if (edge.from.equals(current.name) && time >= edge.exitTime && matches(edge)) {
                     outgoing = edge.duration > 0 ? current : null;
                     outgoingTime = time;
+                    outgoingPhase = phase;
                     current = states.get(edge.to);
                     time = 0;
+                    phase = 0;
                     fadeTime = 0;
                     fadeDuration = edge.duration;
                     if (edge.operator == Operator.TRIGGER) {
@@ -206,13 +339,29 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
                 }
             }
         }
-        Pose pose = sample(current, time);
+        Pose pose = sample(current, phase);
         if (outgoing != null) {
-            Pose source = sample(outgoing, outgoingTime);
+            Pose source = sample(outgoing, outgoingPhase);
             source.blend(pose, (float) (fadeTime / fadeDuration));
             pose = source;
         }
+        if (graph.overlay != null) {
+            boolean enabled = overlayEnabled();
+            if (enabled || overlayWeight > 0) {
+                overlayTime += delta;
+            }
+            float step = graph.overlay.fade == 0 ? 1 : (float) Math.min(1, delta / graph.overlay.fade);
+            overlayWeight = enabled ? Math.min(1, overlayWeight + step) : Math.max(0, overlayWeight - step);
+            if (!enabled && overlayWeight == 0) {
+                overlayTime = 0;
+            }
+            applyOverlay(pose);
+        }
+        stripRootMotion(pose);
         apply(pose);
+        if (rootMotionConsumer != null && delta > 0 && graph.rootMotion != null) {
+            rootMotionConsumer.accept(rootMotionDelta);
+        }
         return true;
     }
 
@@ -238,28 +387,251 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         }
     }
 
-    private Pose sample(State state, double seconds) {
+    private double stateLength(State state) {
         double length = 0;
-        for (String clip : state.clips) {
-            length = Math.max(length, composer.getAnimClip(clip).getLength());
+        double total = 0;
+        double[] weights = weights(state);
+        for (int i = 0; i < weights.length; i++) {
+            length += weights[i] * composer.getAnimClip(state.clips.get(i)).getLength();
+            total += weights[i];
         }
+        return total > 0 ? length / total : 0;
+    }
+
+    private double phaseStep(State state, double seconds) {
+        double length = stateLength(state);
+        return length > 0 ? seconds / length : 0;
+    }
+
+    private Pose sample(State state, double cycles) {
         // A zero-duration state holds its first pose, including looping T-poses.
         // Transition exit times still use elapsed seconds, not normalized phase.
-        double phase = 0;
-        if (length > 0) {
-            phase = state.loop ? (seconds % length) / length : Math.min(1, seconds / length);
+        double phase = state.loop ? cycles % 1 : Math.min(1, cycles);
+        double[] weights = weights(state);
+        double total = 0;
+        Pose pose = null;
+        for (int i = 0; i < weights.length; ++i) {
+            if (weights[i] > 0) {
+                Pose next = sampleClip(state.clips.get(i), phase);
+                total += weights[i];
+                if (pose == null) {
+                    pose = next;
+                } else {
+                    pose.blend(next, (float) (weights[i] / total));
+                }
+            }
+        }
+        return pose;
+    }
+
+    private double[] weights(State state) {
+        double[] weights = new double[state.clips.size()];
+        if (state.isTwoDimensional()) {
+            cartesianWeights(state, weights);
+            return weights;
         }
         float value = state.clips.size() == 1 ? state.threshold(0) : values.get(state.parameter);
         int lower = 0;
         while (lower + 1 < state.clips.size() && value >= state.threshold(lower + 1)) {
             lower++;
         }
-        Pose pose = sampleClip(state.clips.get(lower), phase);
+        weights[lower] = 1;
         if (lower + 1 < state.clips.size() && value > state.threshold(lower)) {
             float weight = (value - state.threshold(lower)) / (state.threshold(lower + 1) - state.threshold(lower));
-            pose.blend(sampleClip(state.clips.get(lower + 1), phase), weight);
+            weights[lower] = 1 - weight;
+            weights[lower + 1] = weight;
         }
-        return pose;
+        return weights;
+    }
+
+    private void cartesianWeights(State state, double[] weights) {
+        double x = values.get(state.parameter);
+        double y = values.get(state.parameterY);
+        double nearestDistance = Double.POSITIVE_INFINITY;
+        int nearest = 0;
+        boolean found = false;
+        for (int i = 0; i < state.clips.size(); ++i) {
+            double dx = x - state.threshold(i);
+            double dy = y - state.sampleY(i);
+            double distance = dx * dx + dy * dy;
+            if (distance < nearestDistance) {
+                nearest = i;
+                nearestDistance = distance;
+            }
+            double weight = 1;
+            // Fade each sample towards every other sample's perpendicular band.
+            for (int j = 0; j < state.clips.size() && weight > 0; ++j) {
+                if (i != j) {
+                    double sx = (double) state.threshold(j) - state.threshold(i);
+                    double sy = (double) state.sampleY(j) - state.sampleY(i);
+                    weight = Math.min(weight, 1 - (dx * sx + dy * sy) / (sx * sx + sy * sy));
+                }
+            }
+            if (weight > 0) {
+                weights[i] = weight;
+                found = true;
+            }
+        }
+        if (!found) {
+            weights[nearest] = 1;
+        }
+    }
+
+    private RootMotionDelta stepMotion(double delta) {
+        if (outgoing == null) {
+            // A transition chosen at the end of this tick starts the next interval.
+            return stateMotion(current, time, time + delta);
+        }
+        double shared = Math.min(delta, Math.max(0, fadeDuration - fadeTime));
+        double newWeight = Math.min(1, (fadeTime + shared * 0.5) / fadeDuration);
+        RootMotionDelta fade = RootMotionDelta.ZERO
+                .plusWeighted(stateMotion(outgoing, outgoingTime, outgoingTime + shared), 1 - newWeight)
+                .plusWeighted(stateMotion(current, time, time + shared), newWeight);
+        return fade.then(stateMotion(current, time + shared, time + delta));
+    }
+
+    private RootMotionDelta stateMotion(State state, double from, double to) {
+        double length = stateLength(state);
+        if (length <= 0 || to <= from) {
+            return RootMotionDelta.ZERO;
+        }
+        double basePhase = state == current ? phase : outgoingPhase;
+        double baseTime = state == current ? time : outgoingTime;
+        double fromPhase = basePhase + (from - baseTime) / length;
+        double toPhase = basePhase + (to - baseTime) / length;
+        double[] weights = weights(state);
+        double total = 0;
+        for (double weight : weights) {
+            total += weight;
+        }
+        RootMotionDelta result = RootMotionDelta.ZERO;
+        for (int i = 0; i < weights.length; ++i) {
+            String name = state.clips.get(i);
+            MotionTrack track = rootTracks.get(name);
+            double clipLength = composer.getAnimClip(name).getLength();
+            if (weights[i] > 0 && track != null && clipLength > 0) {
+                RootMotionDelta a = accumulatedMotion(track, clipLength, fromPhase, state.loop);
+                RootMotionDelta b = accumulatedMotion(track, clipLength, toPhase, state.loop);
+                result = result.plusWeighted(track.inActorSpace(a.inverse().then(b)), weights[i] / total);
+            }
+        }
+        return result;
+    }
+
+    private Transform motionFrame(HasLocalTransform target) {
+        Transform frame = new Transform();
+        Spatial owner = composer.getSpatial();
+        if (target instanceof Spatial) {
+            if (target != owner) {
+                appendParents(frame, ((Spatial) target).getParent(), owner);
+            }
+        } else if (target instanceof Joint) {
+            Joint joint = (Joint) target;
+            for (Joint parent = joint.getParent(); parent != null; parent = parent.getParent()) {
+                frame.combineWithParent(parent.getInitialTransform());
+            }
+            Spatial[] skinOwner = {null};
+            owner.depthFirstTraversal(spatial -> {
+                if (skinOwner[0] == null) {
+                    for (int i = 0; i < spatial.getNumControls(); ++i) {
+                        if (spatial.getControl(i) instanceof SkinningControl) {
+                            SkinningControl skin = (SkinningControl) spatial.getControl(i);
+                            if (skin.getArmature().getJointList().contains(joint)) {
+                                skinOwner[0] = spatial;
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+            if (skinOwner[0] != null) {
+                appendParents(frame, skinOwner[0], owner);
+            }
+        }
+        return frame;
+    }
+
+    private static void appendParents(Transform frame, Spatial start, Spatial owner) {
+        for (Spatial spatial = start; spatial != null && spatial != owner; spatial = spatial.getParent()) {
+            frame.combineWithParent(spatial.getLocalTransform());
+        }
+    }
+
+    private RootMotionDelta accumulatedMotion(MotionTrack track, double duration, double cycles, boolean loop) {
+        if (!loop) {
+            return track.origin.then(track.sample(Math.min(1, cycles) * duration));
+        }
+        long whole = (long) Math.floor(cycles);
+        RootMotionDelta phase = track.origin.then(track.sample((cycles - whole) * duration));
+        return whole == 0 ? phase
+                : track.origin.then(track.sample(duration)).repeated(whole).then(phase);
+    }
+
+    private static final class MotionTrack {
+        private final TransformTrack track;
+        private final Transform rest;
+        private final Transform frame;
+        private final float yawDirection;
+        private final float[] keys;
+        private final double[] unwrappedYaw;
+        private final RootMotionDelta origin;
+
+        MotionTrack(TransformTrack track, Transform rest, Transform frame) {
+            this.track = track;
+            this.rest = rest;
+            this.frame = frame;
+            yawDirection = frame.getRotation().mult(Vector3f.UNIT_Y).y;
+            keys = track.getTimes();
+            Quaternion[] rotations = track.getRotations();
+            unwrappedYaw = rotations == null ? new double[0] : new double[rotations.length];
+            for (int i = 0; i < unwrappedYaw.length; ++i) {
+                double current = yaw(rotations[i]);
+                unwrappedYaw[i] = i == 0 ? current
+                        : unwrappedYaw[i - 1] + wrapYaw(current - unwrappedYaw[i - 1]);
+            }
+            origin = sample(0).inverse();
+        }
+
+        RootMotionDelta inActorSpace(RootMotionDelta value) {
+            Vector3f movement = frame.getRotation().mult(value.getTranslation().multLocal(frame.getScale()));
+            return new RootMotionDelta(movement.x, movement.z, value.yaw * yawDirection);
+        }
+
+        RootMotionDelta sample(double seconds) {
+            float time = (float) Math.max(keys[0], Math.min(seconds, keys[keys.length - 1]));
+            Transform transform = rest.clone();
+            track.getDataAtTime(time, transform);
+            double sampledYaw = yaw(transform.getRotation());
+            if (unwrappedYaw.length > 0) {
+                int key = java.util.Arrays.binarySearch(keys, time);
+                key = key >= 0 ? key : Math.max(0, -key - 2);
+                sampledYaw = unwrappedYaw[key] + wrapYaw(sampledYaw - unwrappedYaw[key]);
+            }
+            Vector3f translation = transform.getTranslation();
+            return new RootMotionDelta(translation.x, translation.z, sampledYaw);
+        }
+    }
+
+    private static double yaw(Quaternion rotation) {
+        return 2 * Math.atan2(rotation.getY(), rotation.getW());
+    }
+
+    private static double wrapYaw(double value) {
+        return Math.atan2(Math.sin(value), Math.cos(value));
+    }
+
+    private void stripRootMotion(Pose pose) {
+        Quaternion remove = new Quaternion();
+        for (Map.Entry<HasLocalTransform, Transform> entry : rootTargets.entrySet()) {
+            Transform transform = pose.transforms.get(entry.getKey());
+            Transform rest = entry.getValue();
+            transform.getTranslation().x = rest.getTranslation().x;
+            transform.getTranslation().z = rest.getTranslation().z;
+            Quaternion rotation = transform.getRotation();
+            double inverseYaw = wrapYaw(yaw(rest.getRotation()) - yaw(rotation));
+            remove.fromAngleNormalAxis((float) inverseYaw, Vector3f.UNIT_Y);
+            transform.setRotation(remove.mult(rotation));
+        }
     }
 
     private Pose sampleClip(String name, double phase) {
@@ -279,6 +651,9 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
 
     private void apply(Pose pose) {
         for (Map.Entry<HasLocalTransform, Transform> entry : pose.transforms.entrySet()) {
+            if (graph.rootMotion != null && graph.rootMotion.autoApply && entry.getKey() == composer.getSpatial()) {
+                continue;
+            }
             if (getMask() == null || getMask().contains(entry.getKey())) {
                 entry.getKey().setLocalTransform(entry.getValue());
             }
@@ -288,7 +663,7 @@ public final class AnimationGraphPlayer extends Action implements AutoCloseable 
         }
     }
 
-    /** Restore the previous action only if this player still owns the layer. Idempotent. */
+    /** Restores the previous action if this player still owns the layer. Safe to call again. */
     @Override
     public void close() {
         if (closed) {

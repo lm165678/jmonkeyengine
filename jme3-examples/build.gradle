@@ -12,6 +12,22 @@ plugins {
 
 ext.mainClassName = 'jme3test.TestChooser'
 
+tasks.register('automaticLodSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.stress.TestAutomaticLod'
+    args '--verify'
+}
+
+tasks.register('lightIntensitySmoke', JavaExec) {
+    group = 'verification'
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.light.TestLightIntensity'
+    args '--verify'
+}
+
 tasks.register('cinematicPostSmoke', JavaExec) {
     group = 'verification'
     dependsOn classes
@@ -1114,6 +1130,22 @@ tasks.register('srgbPresentationSmoke', JavaExec) {
     mainClass = 'jme3test.post.TestSrgbPresentation'
     args '--verify'
     enableAssertions = true
+}
+
+tasks.register('hdrDisplayOutputSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestHdrDisplayOutput'
+    args '--verify'
+}
+
+tasks.register('awtHdrPreviewSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.post.TestAwtHdrPreview'
+    args '--verify'
 }
 
 tasks.register('fsr2BackendSmoke', JavaExec) {

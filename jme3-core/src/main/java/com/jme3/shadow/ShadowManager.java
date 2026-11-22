@@ -137,7 +137,7 @@ public final class ShadowManager implements AutoCloseable {
         copyState.setFaceCullMode(RenderState.FaceCullMode.Off);
     }
 
-    /** Returns a viewport override copied from the light's settings; clearSettings restores scene settings. No GPU allocation. */
+    /** Copies the light's settings for this viewport without allocating GPU resources. Clear the override to use the scene settings again. */
     public LightShadowSettings getSettings(Light light) {
         return settings.computeIfAbsent(Objects.requireNonNull(light), key -> key.getShadowSettings().clone());
     }
@@ -226,7 +226,7 @@ public final class ShadowManager implements AutoCloseable {
         this.enabled = enabled;
     }
 
-    /** Returns a hardware fallback explanation, or null when no fallback is needed. */
+    /** Returns why this viewport fell back, or null when it did not. */
     public String getFallbackReason() {
         return fallbackReason;
     }
@@ -558,7 +558,7 @@ public final class ShadowManager implements AutoCloseable {
         }
     }
 
-    /** Restores temporary material overrides after normal drawing or a failed pass. */
+    /** Restores the material overrides even if drawing failed. */
     public void finishFrame() {
         if (pixelOverride) {
             manager.removeForcedMatParam(pixelLighting);

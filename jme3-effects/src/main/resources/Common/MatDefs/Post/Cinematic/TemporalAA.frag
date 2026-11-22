@@ -14,8 +14,8 @@ vec3 toRGB(vec3 c) {
     return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
 }
 vec4 reconstructCurrent(vec2 outputUV) {
-    // Explicit bilinear reconstruction: scene targets deliberately use nearest
-    // sampling for other passes. Do not change shared texture sampler state.
+    // Reconstruct with bilinear taps here. Other passes use the scene
+    // textures with nearest filtering, so leave their sampler state alone.
     vec2 p = (outputUV + m_CurrentJitter) / m_InverseSize - vec2(.5);
     ivec2 base = ivec2(floor(p));
     vec2 f = fract(p);
@@ -30,10 +30,10 @@ void main() {
     ivec2 centerPixel = temporalScenePixel(texCoord);
     ivec2 motionPixel = temporalClosestPixel(centerPixel);
     vec4 motion = texelFetch(m_Velocity, motionPixel, 0);
-    // Previous depth is packed into RGBA16F velocity, whereas history depth is
-    // full precision. Include its half-float quantization error before rejection.
+    // Velocity stores the previous depth in RGBA16F. The history depth has
+    // full precision, so allow for quantization before rejecting a sample.
     float exponentScale = uintBitsToFloat(floatBitsToUint(abs(motion.z)) & 0x7f800000u);
-    // Allow one full half-float ULP: render-target conversion may truncate.
+    // Allow one half-float ULP because the render target may truncate on write.
     float halfStep = max(5.960464477539063e-8, exponentScale / 1024.0);
     float tolerance = max(halfStep + .000001,
             2.0 * max(abs(dFdx(motion.z)), abs(dFdy(motion.z))));
@@ -43,8 +43,8 @@ void main() {
         gl_FragColor = current;
         return;
     }
-    // The depth belongs to the selected foreground sample, not the output
-    // pixel. Reproject that sample for rejection; color history stays at historyUV.
+    // Reproject the selected foreground sample for the depth test.
+    // Color history still uses historyUV, the output pixel's UV.
     vec2 depthHistoryUV = (vec2(motionPixel) + vec2(.5)) * m_InverseSize
             - m_CurrentJitter - motion.xy;
     float oldDepth = texture(m_HistoryDepth, depthHistoryUV).r;
@@ -63,11 +63,11 @@ void main() {
         }
     }
     vec3 history = toYCoCg(texture(m_History, historyUV).rgb);
-    // Clip along the box-center ray, avoiding independent chroma channel shifts.
+    // Clip on the ray from the box center so the chroma channels move together.
     vec3 center = .5 * (minimum + maximum);
-    // Half-float RGB history can move constant Y/Co/Cg planes by an ULP.
-    // A near-zero extent would amplify that error and pull valid colors toward
-    // the box center. Expand only by a relative storage-precision allowance.
+    // Half-float history can shift a constant Y/Co/Cg plane by one ULP.
+    // A zero-width box amplifies that shift and drags valid colors inward.
+    // Pad the extent by a relative allowance for half-float storage error.
     vec3 precisionPadding = max(vec3(.00001), max(abs(minimum), abs(maximum)) * .002);
     vec3 extent = .5 * (maximum - minimum) + precisionPadding;
     vec3 delta = history - center;

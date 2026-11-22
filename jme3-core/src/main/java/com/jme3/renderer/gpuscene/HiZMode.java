@@ -2,7 +2,7 @@ package com.jme3.renderer.gpuscene;
 
 /** Main-view occluder depth scheduling; independent of shadow rendering. */
 public enum HiZMode {
-    /** Draw all eligible current-frame occluders, then query current Hi-Z. Default. */
+    /** Default. Builds Hi-Z from the current frame's eligible occluders before testing visibility. */
     SAME_FRAME,
     /**
      * Query history to reduce the current occluder prepass, then retest all

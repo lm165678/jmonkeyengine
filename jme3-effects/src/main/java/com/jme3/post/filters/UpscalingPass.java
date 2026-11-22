@@ -47,10 +47,10 @@ import java.io.IOException;
 import java.util.ServiceLoader;
 
 /**
- * Resolution reconstruction stage. FSR1 consumes tone-mapped, anti-aliased color;
- * FSR2 consumes linear HDR and replaces conventional TAA/FXAA. FPP orders the
- * supported built-in effects while enabled, restores insertion order when off,
- * and keeps GUI outside reconstruction at native output resolution.
+ * Upscales the scene before the GUI is drawn at native resolution. FSR1 takes
+ * tone-mapped, anti-aliased color. FSR2 takes linear HDR and takes over from
+ * TAA and FXAA. Enabling upscaling orders the supported filters by stage.
+ * Disabling it restores filter insertion order.
  * Input color/depth/motion must match the current FPP render dimensions. Custom
  * filters must restore their pipeline phase size before reconstruction. RGB uses
  * the selected reconstruction; source alpha is resampled separately, not temporally
@@ -112,7 +112,7 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
     public float getRenderScale() {
         return renderScale;
     }
-    /** Internal scene scale in [.25,1], default 2/3; output and GUI remain native. */
+    /** Sets the scene scale from 0.25 to 1. The default is 2/3. Output and GUI stay at native resolution. */
     public void setRenderScale(float value) {
         renderScale = bounded(value, .25f, 1, "Render scale");
         resetHistory();
@@ -123,7 +123,7 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
     public void setSharpness(float value) {
         sharpness = bounded(value, 0, 1, "Sharpness");
     }
-    /** Optional linear masks; caller retains ownership. Null uses zero masks. */
+    /** Optional linear masks owned by the caller. Pass null to use zero masks. */
     public void setReactiveMasks(Texture2D reactive, Texture2D composition) {
         reactiveMask = reactive;
         compositionMask = composition;

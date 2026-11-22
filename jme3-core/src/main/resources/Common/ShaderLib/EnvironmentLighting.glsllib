@@ -28,7 +28,7 @@ float environmentLocalCoverage(vec3 position) {
 }
 
 // Sky has no parallax. The legacy Phong path selects the nearest local probe;
-// PBR retains its existing multi-probe blending and uses sky as fallback only.
+// Blend local PBR probes first. Use the sky when no local probe contributes.
 vec3 environmentSpecular(vec3 direction, float roughness) {
     float lod = clamp(roughness, 0.0, 1.0) * max(0.0, g_EnvironmentData.x - 1.0);
     #if (__VERSION__ >= 130) || (defined(GL_EXT_shader_texture_lod))

@@ -5,6 +5,9 @@ import com.jme3.material.Material;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Node;
 import com.jme3.scene.SceneChangeListener;
+import com.jme3.scene.Start;
+import java.util.ArrayList;
+import java.util.List;
 import com.jme3.scene.control.Control;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -16,6 +19,7 @@ final class SceneServiceCatalog implements AutoCloseable {
     final Set<Material> materials = Collections.newSetFromMap(new IdentityHashMap<>());
     final Set<Control> controls = Collections.newSetFromMap(new IdentityHashMap<>());
     final java.util.List<com.jme3.post.WorldSettings> worlds = new java.util.ArrayList<>();
+    final List<Start> starts = new ArrayList<>();
     private Node root;
     private boolean dirty = true;
     private final SceneChangeListener listener = (spatial, change) -> {
@@ -39,7 +43,11 @@ final class SceneServiceCatalog implements AutoCloseable {
         materials.clear();
         controls.clear();
         worlds.clear();
+        starts.clear();
         root.depthFirstTraversal(spatial -> {
+            if (spatial instanceof Start) {
+                starts.add((Start) spatial);
+            }
             if (spatial instanceof GiProbeVolume) {
                 volumes.add((GiProbeVolume) spatial);
             }
@@ -70,6 +78,7 @@ final class SceneServiceCatalog implements AutoCloseable {
         materials.clear();
         controls.clear();
         worlds.clear();
+        starts.clear();
         dirty = true;
     }
 }

@@ -319,7 +319,7 @@ public final class TemporalScene implements AutoCloseable {
         manager.addForcedMatParam(param);
     }
 
-    /** Called only around main geometry draws, never shadow/capture draws. */
+    /** Wraps main geometry draws. Shadow and capture draws use their original transforms. */
     public Draw beginGeometry(Geometry geometry) {
         if (drawing || !basePass || geometry.getQueueBucket() != RenderQueue.Bucket.Opaque
                 || geometry.getMaterial().getMaterialDef().getMaterialParam("TemporalVelocity") == null) {

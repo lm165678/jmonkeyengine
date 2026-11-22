@@ -9,7 +9,7 @@ import com.jme3.util.BufferUtils;
 import java.util.List;
 
 /**
- * Internal draw packet retaining an ordinary material/technique. Produced by
+ * Draw packet that uses the existing material and technique. Produced by
  * GpuScenePipeline, never attached as a second copy to the scene graph. GPU storage
  * is owned by the pipeline; the attribute view must never be disposed independently.
  */
@@ -22,7 +22,7 @@ public final class GpuSceneGeometry extends Geometry {
     private final VertexBuffer[] temporalAttributes = {attribute, previousAttribute};
     private BufferObject previousTransforms;
 
-    // Buffer storage is batch-owned; the attribute is only a view of compacted output.
+    // The attribute views the compacted output buffer owned by the batch.
     void setTemporalTransforms(BufferObject transforms) {
         previousTransforms = transforms;
     }

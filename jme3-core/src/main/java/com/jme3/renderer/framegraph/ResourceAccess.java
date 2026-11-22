@@ -1,10 +1,10 @@
 package com.jme3.renderer.framegraph;
 
 /**
- * GPU access intent, used to synchronize incoherent shader writes on the GL backend.
- * Whole resources are tracked: no mip/layer ranges or cross-queue synchronization.
- * GENERAL is conservative when consuming shader output; ordinary framebuffer writes
- * require no explicit memory barrier. CPU mutations do not count as shader writes.
+ * Tells the GL backend which barrier a pass needs after a shader write. The
+ * graph tracks whole resources, without mip/layer ranges or cross-queue
+ * synchronization. Use GENERAL for conservative access. Ordinary framebuffer
+ * and CPU writes are outside this shader-write barrier tracking.
  * <pre>{@code
  * // 第一步：compute 的 SSBO 输出必须明确声明 STORAGE_BUFFER。
  * graph.addPass("Compute", context -> dispatch())

@@ -8,7 +8,7 @@ import com.jme3.scene.Node;
 import java.io.IOException;
 
 /**
- * Scene-serializable axis-aligned GI volume, independent of the PBR LightProbe.
+ * An axis-aligned GI volume saved with the scene. PBR LightProbe is a separate light type.
  * Translation places the minimum corner; coverage and counts configure baking.
  * Defaults are a 16-unit local cube with 5 probes per axis. Positive world scale
  * multiplies coverage; rotation is unsupported. Transform changes require a new
@@ -83,7 +83,7 @@ public final class GiProbeVolume extends Node {
     }
 
     /**
-     * Selects surface-conforming probes instead of regular lattice probes (default false).
+     * Uses surface-conforming probes when enabled. Regular lattice probes are the default.
      * Counts define the spatial bin resolution and total probe-slot budget. Free
      * positions are sampled outside surfaces, with up to eight probes per bin.
      * Surface payloads use full-float storage even when compactStorage is requested,
@@ -114,7 +114,7 @@ public final class GiProbeVolume extends Node {
         return surfaceLayout;
     }
 
-    /** Runtime diffuse GI multiplier; default 1, finite and nonnegative.
+    /** Scales diffuse GI at runtime. Defaults to 1 and must be finite and nonnegative.
      * Also updates generated adaptive child volumes. Does not change sky
      * visibility, direct light or invalidate the bake.
      * Change on the render thread and save the scene to persist it.
@@ -172,9 +172,9 @@ public final class GiProbeVolume extends Node {
     }
 
     /**
-     * Compatibility only: the leakage-prone smooth mode has been removed.
-     * Calls have no effect; old J3O flags are ignored. Normal visibility filtering
-     * is automatic, needs no rebake, and never enables this legacy weight floor.
+     * Retained for old callers. The smooth mode caused light leaks, so this
+     * setting and its old J3O flag are ignored. Visibility filtering works
+     * with the current bake and does not use the old minimum weight.
      * @deprecated No replacement switch is needed.
      */
     @Deprecated
@@ -196,7 +196,7 @@ public final class GiProbeVolume extends Node {
         return wideProbeSampling;
     }
 
-    /** Selects the costly 27-probe stencil; default false uses eight probes.
+    /** Selects the 27-probe stencil. The default uses eight probes.
      * Free surface layouts ignore this option. No rebake is needed. Change on
      * the owning scene thread; automatic services publish it at the next update.
      * The setting is saved in J3O and inherited by existing refinement children.
@@ -218,15 +218,15 @@ public final class GiProbeVolume extends Node {
         }
     }
 
-    /** Whether curved receivers limit plane extrapolation; defaults false for old lighting. */
+    /** @return whether curved receivers limit plane extrapolation; defaults to false */
     public boolean isCurvedReceiverCorrection() {
         return curvedReceiverCorrection;
     }
 
     /**
-     * Opt-in compact GI curved-receiver correction. Default/missing-field false
-     * preserves the previous plane algorithm. Applies to eight-probe grids only;
-     * wide/surface layouts keep their existing algorithms. No rebake is needed.
+     * Limits plane extrapolation for curved receivers on the eight-probe grid.
+     * The default (including old saves) uses the original plane algorithm.
+     * Wide and surface layouts ignore this setting. No rebake is needed.
      * Smooth mesh normals are required; this is a heuristic, not exact transport.
      * Call on the owning render thread after attachment; save J3O to retain it.
      * <pre>{@code
@@ -283,7 +283,7 @@ public final class GiProbeVolume extends Node {
         return coverage.clone();
     }
 
-    /** Bean-style editor setter; keeps counts and invalidates the previous bake. */
+    /** Updates the bounds without changing the probe counts. The volume must be baked again. */
     public void setCoverage(Vector3f coverage) {
         configure(coverage, (int) counts.x, (int) counts.y, (int) counts.z);
     }
@@ -309,7 +309,7 @@ public final class GiProbeVolume extends Node {
 
     /** Returns an embedded completed bake, or null before baking, after resizing,
      * or when the payload is external. For external data use getStreamAsset()
-     * and register a loader with GiProbeStreamer; this accessor never performs IO.
+     * and register a loader with GiProbeStreamer. This method does not read from disk.
      */
     public GiProbeData getData() {
         if (!getWorldRotation().equals(Quaternion.IDENTITY)) {
@@ -322,8 +322,8 @@ public final class GiProbeVolume extends Node {
     }
 
     /**
-     * Publishes a previously saved compressed asset reference and releases this
-     * node's CPU payload reference. Does not perform IO or dispose shared data.
+     * Switches this node to a saved compressed bake and drops its reference to
+     * the embedded CPU data. Does not perform IO or dispose shared data.
      * Call on the scene thread after a worker has atomically saved expected via
      * GiProbeData.saveCompressed. Stale bake completions return false.
      * <pre>{@code
@@ -363,9 +363,9 @@ public final class GiProbeVolume extends Node {
     }
 
     /**
-     * Bake descriptor with world scale applied to local spacing. Call after
-     * geometric updates on the render thread. Rotation and nonpositive scales
-     * are rejected rather than silently producing misaligned lighting.
+     * Builds a bake descriptor using world-scaled probe spacing. Call on the
+     * render thread after geometric updates. Rotated volumes and volumes
+     * with nonpositive scale cannot be baked.
      */
     public GiProbeGrid getBakeGrid() {
         Vector3f scale = getWorldScale();
@@ -378,7 +378,7 @@ public final class GiProbeVolume extends Node {
     }
 
     /**
-     * Checks static sky-bounce freshness without discarding the last completed bake.
+     * Checks whether the completed sky bounce still matches the scene. The existing bake stays in use.
      * Legacy files report Unknown until rebaked. Call on the scene thread after
      * sky controls have updated. This scans the scene; do not call per material.
      * No volume or unloaded coverage means fully visible sky in the shader.
@@ -419,7 +419,7 @@ public final class GiProbeVolume extends Node {
         bakedTransform = getWorldTransform().clone();
     }
 
-    /** Clones editable configuration while sharing the read-only bake resource. */
+    /** Copies the editable settings and shares the read-only bake data. */
     @Override
     public void cloneFields(com.jme3.util.clone.Cloner cloner, Object original) {
         super.cloneFields(cloner, original);

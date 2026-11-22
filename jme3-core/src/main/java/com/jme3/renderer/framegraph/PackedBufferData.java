@@ -4,11 +4,10 @@ import com.jme3.shader.bufferobject.BufferObject;
 import java.nio.ByteBuffer;
 
 /**
- * Internal packing for the tightly packed scalar arrays consumed by custom
- * compute shaders. Uses upstream buffer ownership and reuses CPU storage when
- * the byte count is unchanged. Render-thread only; buffers remain caller-owned.
- * Scalars occupy four native-order bytes each; this is not a general std140
- * structure packer. Materials choose the actual binding slot when dispatched.
+ * Packs scalar arrays for compute shaders, four native-order bytes per value.
+ * This layout cannot pack general std140 structures. Same-size updates reuse
+ * CPU storage. Call on the render thread and release the buffer when done.
+ * The material assigns its binding when dispatched.
  * <pre>{@code
  * // 第一步：创建缓冲，按 shader 的标量数组布局准备初始数据。
  * BufferObject values = PackedBufferData.create(0);
