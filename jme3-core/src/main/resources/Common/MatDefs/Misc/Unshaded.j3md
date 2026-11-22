@@ -33,6 +33,8 @@ MaterialDef Unshaded {
 
         Int BoundDrawBuffer
         Int DeferredShadingId
+        Boolean DeferredGiPayload
+        Boolean DeferredGiInLighting
         Texture2D ColorMap
         Texture2D LightMap
         Color Color (Color)
@@ -273,6 +275,8 @@ MaterialDef Unshaded {
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             INSTANCING : UseInstancing
             SEPARATE_TEXCOORD : SeparateTexCoord
             HAS_COLORMAP : ColorMap
@@ -302,6 +306,8 @@ MaterialDef Unshaded {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             SURFACE_CAPTURE
             SEPARATE_TEXCOORD : SeparateTexCoord
             HAS_COLORMAP : ColorMap

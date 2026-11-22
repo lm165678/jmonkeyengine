@@ -85,7 +85,7 @@ void main(){
         writeSurfaceAttributes(vec3(0.0), captureNormal, color.rgb);
         return;
     #endif
-    #ifdef GI_PROBES
+    #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
         // Explicit additive receiver mode preserves the original unlit base.
         if (!m_GiBakeBounce) {
             color.rgb += color.rgb * giSampleIrradiance(giWorldPosition, normalize(giWorldNormal)) / 3.14159265359;
@@ -93,7 +93,12 @@ void main(){
     #endif
     gl_FragColor = color;
     #ifdef DEFERRED_GBUFFER
-    writeDeferredSurface(color.rgb,vec3(0.0,0.0,1.0),1.0,vec3(0.0),
+    vec3 deferredNormal = vec3(0.0, 0.0, 1.0);
+    #ifdef DEFERRED_GI_LIGHT
+        deferredNormal = normalize(giWorldNormal);
+        setDeferredGiReceiver(giWorldPosition, deferredNormal, deferredNormal, color.rgb, false);
+    #endif
+    writeDeferredSurface(color.rgb,deferredNormal,1.0,vec3(0.0),
                          color.rgb,color.a,vec3(0.0),0.0,m_DeferredShadingId);
     #endif
 }

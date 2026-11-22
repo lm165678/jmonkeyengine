@@ -54,11 +54,13 @@ final class DeferredResources {
     private final Renderer renderer;
     FrameBuffer gbuffer;
     Texture2D velocity;
+    Texture2D giReceivers;
     final Texture2D[] targets = new Texture2D[6];
     Texture2D lightTexture, tileTexture;
     BufferObject gpuIndices;
     final Mesh quad = new Quad(1, 1);
-    private Shader cpuShader, gpuShader, computeShader;
+    private final Shader[] lightingShaders = new Shader[4];
+    private Shader computeShader;
     private int gpuRecords;
     private long modelVersion = -1;
     private boolean closed;
@@ -71,13 +73,17 @@ final class DeferredResources {
         return assets;
     }
     void borrowTargets(com.jme3.renderer.framegraph.RenderTarget target) {
+        borrowTargets(target, target.getFrameBuffer().getNumColorTargets() == 6);
+    }
+    void borrowTargets(com.jme3.renderer.framegraph.RenderTarget target, boolean temporal) {
         releaseTargets();
         gbuffer = target.getFrameBuffer();
         for (int i = 0; i < 5; i++) {
             targets[i] = target.getColorTexture(i);
         }
         targets[5] = target.getDepthTexture();
-        velocity = gbuffer.getNumColorTargets() > 5 ? target.getColorTexture(5) : null;
+        velocity = temporal ? target.getColorTexture(5) : null;
+        giReceivers = gbuffer.getNumColorTargets() > 6 ? target.getColorTexture(6) : null;
     }
     Texture2D storage(Texture2D old, int width, int height, Image.Format format, int bytes) {
         requireOpen();
@@ -118,13 +124,17 @@ final class DeferredResources {
         return computeShader;
     }
     Shader lightingShader(boolean gpu, ShadingModelRegistry models) {
+        return lightingShader(gpu, models, false);
+    }
+    Shader lightingShader(boolean gpu, ShadingModelRegistry models, boolean probeGi) {
         requireOpen();
         if (modelVersion != models.getVersion()) {
             deleteLightingShaders();
             modelVersion = models.getVersion();
         }
         Map<Integer, String> customModels = models.getSources();
-        Shader shader = gpu ? gpuShader : cpuShader;
+        int variant = (gpu ? 1 : 0) + (probeGi ? 2 : 0);
+        Shader shader = lightingShaders[variant];
         if (shader == null) {
             String source = (String) assets.loadAsset(ROOT + "Lighting.frag");
             source = assembleLightingSource(source, customModels);
@@ -133,12 +143,9 @@ final class DeferredResources {
             shader.addSource(Shader.ShaderType.Vertex, ROOT + "Fullscreen.vert",
                 (String) assets.loadAsset(ROOT + "Fullscreen.vert"), "", language);
             shader.addSource(Shader.ShaderType.Fragment, ROOT + "Lighting.frag", source,
-                DeferredRenderContext.uniformDefines() + (gpu ? "#define GPU_TILES\n" : ""), language);
-            if (gpu) {
-                gpuShader = shader;
-            } else {
-                cpuShader = shader;
-            }
+                DeferredRenderContext.uniformDefines() + (gpu ? "#define GPU_TILES\n" : "")
+                        + (probeGi ? "#define DEFERRED_GI_LIGHT\n#define GI_PROBES\n" : ""), language);
+            lightingShaders[variant] = shader;
         }
         return shader;
     }
@@ -199,16 +206,18 @@ final class DeferredResources {
     void releaseTargets() {
         // The graph releases or recycles these resources.
         gbuffer = null;
+        velocity = null;
+        giReceivers = null;
         java.util.Arrays.fill(targets, null);
     }
     private void deleteLightingShaders() {
-        if (cpuShader != null && cpuShader.getId() != -1) {
-            cpuShader.dispose();
+        for (int i = 0; i < lightingShaders.length; ++i) {
+            Shader shader = lightingShaders[i];
+            if (shader != null && shader.getId() != -1) {
+                shader.dispose();
+            }
+            lightingShaders[i] = null;
         }
-        if (gpuShader != null && gpuShader.getId() != -1) {
-            gpuShader.dispose();
-        }
-        cpuShader = gpuShader = null;
     }
     private void requireOpen() {
         if (closed) {

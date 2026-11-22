@@ -48,12 +48,14 @@ final class DeferredBatch {
     final List<Light> lights = new ArrayList<>();
     final Set<Light> identities = Collections.newSetFromMap(new IdentityHashMap<Light, Boolean>());
     Texture colorRamp;
+    DeferredProbeGi probeGi;
 
     void reset() {
         geometries.clear();
         lights.clear();
         identities.clear();
         colorRamp = null;
+        probeGi = null;
     }
 
     boolean matches(LightList list, Texture ramp) {

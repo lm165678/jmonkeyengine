@@ -11,6 +11,22 @@ layout(location = 1) out vec4 outGBuffer1;
 layout(location = 2) out vec4 outGBuffer2;
 layout(location = 3) out vec4 outGBuffer3;
 layout(location = 4) out vec4 outGBuffer4;
+#ifdef DEFERRED_GI_PAYLOAD
+layout(location = 6) out vec4 outDeferredGiReceiver;
+vec4 deferredGiReceiver = vec4(0.0);
+float deferredGiCurvature = 0.0;
+#endif
+#ifdef DEFERRED_GI_LIGHT
+void setDeferredGiReceiver(vec3 position, vec3 normal, vec3 geometryNormal, vec3 response, bool sky) {
+    // Alpha uses an exact 21-bit integer in the RGBA32F attachment. Keep the
+    // original triangle-plane derivatives so depth edges do not change visibility.
+    vec2 encoded = giOctEncode(giReceiverPlane(position, normal)) * 0.5 + 0.5;
+    vec2 quantized = floor(clamp(encoded, 0.0, 1.0) * 1023.0 + 0.5);
+    float packedNormal = 1.0 + quantized.x + 1024.0 * quantized.y;
+    deferredGiReceiver = vec4(response, sky ? -packedNormal : packedNormal);
+    deferredGiCurvature = min(giCurvature(position, geometryNormal), 65504.0);
+}
+#endif
 vec4 deferredSurfaceColor;
 #undef gl_FragColor
 #define gl_FragColor deferredSurfaceColor
@@ -25,6 +41,11 @@ void writeGBuffer(vec4 record0, vec4 record1, vec4 record2, vec4 record3, vec4 r
     outGBuffer2 = record2;
     outGBuffer3 = record3;
     outGBuffer4 = record4;
+    #ifdef DEFERRED_GI_PAYLOAD
+        outDeferredGiReceiver = deferredGiReceiver;
+        // Built-in GI receiver writers reserve record2.a for plane curvature.
+        outGBuffer2.a = deferredGiCurvature;
+    #endif
 }
 
 // Compatibility packer for existing built-in surface shaders. These meanings are

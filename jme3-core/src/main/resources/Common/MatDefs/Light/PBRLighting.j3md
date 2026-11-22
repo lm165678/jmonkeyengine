@@ -38,6 +38,8 @@ MaterialDef PBR Lighting {
         Texture2D DeferredLightData
         Int DeferredLightCount
         Int DeferredShadingId
+        Boolean DeferredGiPayload
+        Boolean DeferredGiInLighting
 
         // Alpha threshold for fragment discarding
         Float AlphaDiscardThreshold (AlphaTestFallOff)
@@ -419,6 +421,8 @@ MaterialDef PBR Lighting {
             GI_PROBES : GiIrradiance
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             BASECOLORMAP : BaseColorMap
             NORMALMAP : NormalMap
@@ -483,6 +487,8 @@ MaterialDef PBR Lighting {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             SURFACE_CAPTURE
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             BASECOLORMAP : BaseColorMap

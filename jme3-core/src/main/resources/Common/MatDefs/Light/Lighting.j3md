@@ -38,6 +38,8 @@ MaterialDef Phong Lighting {
         Texture2D DeferredLightData -LINEAR
         Int DeferredLightCount
         Int DeferredShadingId
+        Boolean DeferredGiPayload
+        Boolean DeferredGiInLighting
 
         // Compute vertex lighting in the shader
         // For better performance
@@ -439,6 +441,8 @@ MaterialDef Phong Lighting {
             GI_PROBES : GiIrradiance
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting
             MATERIAL_COLORS : UseMaterialColors
@@ -488,6 +492,8 @@ MaterialDef Phong Lighting {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             DEFERRED_GBUFFER
+            DEFERRED_GI_PAYLOAD : DeferredGiPayload
+            DEFERRED_GI_LIGHT : DeferredGiInLighting
             SURFACE_CAPTURE
             VERTEX_COLOR : UseVertexColor
             MATERIAL_COLORS : UseMaterialColors

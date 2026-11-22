@@ -49,6 +49,8 @@ final class GBufferPass implements DeferredPass {
         new MatParamOverride(VarType.Int, "DeferredLightCount", 0);
     private final MatParamOverride shadingIdOverride =
         new MatParamOverride(VarType.Int, "DeferredShadingId", 0);
+    private final MatParamOverride giPayload = new MatParamOverride(VarType.Boolean, "DeferredGiPayload", true);
+    private final MatParamOverride giInLighting = new MatParamOverride(VarType.Boolean, "DeferredGiInLighting", true);
 
     @Override
     public void reset() {
@@ -65,12 +67,17 @@ final class GBufferPass implements DeferredPass {
         lightDataOverride.setValue(frame.resources.lightTexture);
         lightCountOverride.setValue(frame.lights.size());
         String oldTechnique = rm.getForcedTechnique();
+        DeferredProbeGi probeGi = frame.batch.probeGi;
         try {
             renderer.setFrameBuffer(frame.resources.gbuffer);
             renderer.setBackgroundColor(ColorRGBA.BlackNoAlpha);
             renderer.clearBuffers(true, true, true);
             rm.setCamera(camera, false);
             rm.setForcedTechnique("GBuffer");
+            if (probeGi != null) {
+                rm.addForcedMatParam(giPayload);
+                rm.addForcedMatParam(giInLighting);
+            }
             for (Geometry geometry : frame.batch.geometries) {
                 Material material = geometry.getMaterial();
                 String previous = material.getActiveTechnique() == null
@@ -89,6 +96,9 @@ final class GBufferPass implements DeferredPass {
                     rm.addForcedMatParam(lightDataOverride);
                     rm.addForcedMatParam(lightCountOverride);
                 }
+                if (probeGi != null) {
+                    giInLighting.setEnabled(probeGi.includes(geometry));
+                }
                 try {
                     rm.renderGeometry(geometry);
                 } finally {
@@ -102,6 +112,10 @@ final class GBufferPass implements DeferredPass {
             }
             return true;
         } finally {
+            if (probeGi != null) {
+                rm.removeForcedMatParam(giInLighting);
+                rm.removeForcedMatParam(giPayload);
+            }
             rm.setForcedTechnique(oldTechnique);
         }
     }

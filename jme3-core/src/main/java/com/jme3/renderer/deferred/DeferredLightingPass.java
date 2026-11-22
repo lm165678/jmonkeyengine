@@ -66,7 +66,8 @@ final class DeferredLightingPass implements DeferredPass {
         int columns = frame.columns, tileSize = frame.tileSize, tileCapacity = frame.tileCapacity;
         List<Light> lights = frame.lights;
         Vector3f ambient = frame.ambient;
-        Shader shader = frame.resources.lightingShader(gpu, frame.models);
+        DeferredProbeGi probeGi = frame.batch.probeGi;
+        Shader shader = frame.resources.lightingShader(gpu, frame.models, probeGi != null);
         com.jme3.texture.FrameBuffer output = vp.getOutputFrameBuffer();
         boolean temporal = frame.resources.velocity != null && vp.getTemporalScene() != null;
         boolean multi = output != null && output.isMultiTarget();
@@ -115,6 +116,9 @@ final class DeferredLightingPass implements DeferredPass {
             uniform(shader, "TemporalVelocity", VarType.Int, temporal ? temporalUnit : 0);
             if (temporal) {
                 bindTexture(renderer, temporalUnit, frame.resources.velocity);
+            }
+            if (probeGi != null) {
+                probeGi.bind(renderer, shader, frame.resources.giReceivers, temporalUnit + (temporal ? 1 : 0));
             }
             renderer.setShader(shader);
             renderer.renderMesh(frame.resources.quad, 0, 1, null);

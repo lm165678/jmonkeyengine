@@ -681,16 +681,19 @@ GiLighting giSampleRoots(vec3 worldPosition, vec3 normal, vec3 planeNormal) {
     return primary;
 }
 
-vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
-    if (!m_GiEnabled) {
-        return vec4(0.0);
-    }
+vec3 giReceiverPlane(vec3 worldPosition, vec3 normal) {
     // Derivatives must precede per-fragment volume coverage tests. Normal-map
     // detail must not perturb the receiver plane or its visibility bias.
     vec3 planeNormal = cross(dFdx(worldPosition), dFdy(worldPosition));
     float planeScale = max(abs(planeNormal.x), max(abs(planeNormal.y), abs(planeNormal.z)));
     planeNormal = planeScale > 0.0 ? normalize(planeNormal / planeScale) : normal;
-    planeNormal *= dot(planeNormal, normal) < 0.0 ? -1.0 : 1.0;
+    return planeNormal * (dot(planeNormal, normal) < 0.0 ? -1.0 : 1.0);
+}
+
+vec4 giSampleIndirectOnPlane(vec3 worldPosition, vec3 normal, vec3 planeNormal) {
+    if (!m_GiEnabled) {
+        return vec4(0.0);
+    }
     GiLighting result;
     if (m_GiVolumeCount == 0) {
         vec4 atlasInfo = vec4(m_GiAtlas.x, 0.0, 0.0, m_GiAtlas.z);
@@ -707,7 +710,14 @@ vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
     giSkyDiffuseWeight = mix(1.0, result.sky.x, coverage);
     return vec4(result.irradiance * coverage, coverage);
 }
-vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
+vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
+    if (!m_GiEnabled) {
+        return vec4(0.0);
+    }
+    return giSampleIndirectOnPlane(worldPosition, normal, giReceiverPlane(worldPosition, normal));
+}
+
+float giCurvature(vec3 worldPosition, vec3 geometryNormal) {
     // Use interpolated mesh normals, never perturbed material normals. This is
     // a local curvature estimate, not a replacement for the actual triangle
     // plane used by depth projection. Hard/flat-shaded meshes cannot supply
@@ -716,8 +726,12 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
     vec3 dy = dFdy(worldPosition);
     vec3 nx = dFdx(geometryNormal);
     vec3 ny = dFdy(geometryNormal);
-    giReceiverCurvature = sqrt((dot(nx, nx) + dot(ny, ny))
+    return sqrt((dot(nx, nx) + dot(ny, ny))
             / max(dot(dx, dx) + dot(dy, dy), 1.0e-20));
+}
+
+vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
+    giReceiverCurvature = giCurvature(worldPosition, geometryNormal);
     vec4 sampleValue = giSampleIndirect(worldPosition, normal);
     giEnvironmentDiffuseWeight = 1.0 - sampleValue.a * (1.0 - clamp(m_GiEnvironmentMix, 0.0, 1.0));
     // Separated captures add direct sky to bounced radiance. Total captures

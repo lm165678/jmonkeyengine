@@ -248,18 +248,21 @@ void main(){
                 deferredFlags+=1.0;
             #endif
         #endif
-        #ifdef GI_PROBES
+        #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
             deferredBase += giDiffuseReflectance * diffuseColor.rgb
                     * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;
         #endif
     #ifdef ENVIRONMENT_LIGHTING
+            #ifdef DEFERRED_GI_LIGHT
+                giSkyDiffuseWeight = 0.0;
+            #endif
             deferredBase += environmentPhong(giWorldPosition, giSurfaceNormal,
                     normalize(g_CameraPosition - giWorldPosition),
                     giDiffuseReflectance * diffuseColor.rgb, SpecularSum * specularColor.rgb,
                     m_Shininess, giEnvironmentDiffuseWeight);
     #endif
+        float fogTransmission=1.0;
         #ifdef USE_FOG
-            float fogTransmission=1.0;
             #ifdef FOG_LINEAR
                 float f=clamp((m_LinearFog.y-fog_distance)/(m_LinearFog.y-m_LinearFog.x),0.0,1.0);
                 deferredBase=mix(m_FogColor.rgb,deferredBase,f);fogTransmission*=f;
@@ -273,6 +276,15 @@ void main(){
                 deferredBase=mix(m_FogColor.rgb,deferredBase,q);fogTransmission*=q;
             #endif
             deferredDiffuse*=fogTransmission;deferredSpec*=fogTransmission;deferredRef*=fogTransmission;
+        #endif
+        #ifdef DEFERRED_GI_LIGHT
+            #ifdef ENVIRONMENT_LIGHTING
+                bool deferredSky = true;
+            #else
+                bool deferredSky = false;
+            #endif
+            setDeferredGiReceiver(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal),
+                    giDiffuseReflectance * diffuseColor.rgb * fogTransmission, deferredSky);
         #endif
         writeDeferredSurface(deferredDiffuse,deferredN,deferredParameter,deferredSpec,
                              deferredBase,alpha,deferredRef,deferredFlags,deferredModel);

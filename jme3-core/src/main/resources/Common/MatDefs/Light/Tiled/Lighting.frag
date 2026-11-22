@@ -5,9 +5,35 @@
 
 #import "Common/ShaderLib/Deferred/GBuffer.glsllib"
 #import "Common/ShaderLib/Deferred/LightList.glsllib"
+#import "Common/ShaderLib/GI/ProbeSampling.glsllib"
 #import "Common/ShaderLib/Deferred/LightingModel.glsllib"
 #import "Common/ShaderLib/Deferred/PbrModel.glsllib"
 #import "Common/ShaderLib/Deferred/UnshadedModel.glsllib"
+#import "Common/ShaderLib/IrradianceSH.glsllib"
+
+#ifdef DEFERRED_GI_LIGHT
+uniform sampler2D m_DeferredGiReceivers;
+uniform vec3 m_DeferredGiSky[9];
+uniform float m_DeferredGiSkyIntensity;
+
+vec3 evaluateDeferredProbeGi() {
+    vec4 receiver = texelFetch(m_DeferredGiReceivers, getGBufferPixel(), 0);
+    if (receiver.a == 0.0) {
+        return vec3(0.0);
+    }
+    float packedNormal = abs(receiver.a) - 1.0;
+    vec2 octPlane = vec2(mod(packedNormal, 1024.0), floor(packedNormal / 1024.0));
+    vec3 plane = giOctDecode(octPlane * (2.0 / 1023.0) - 1.0);
+    vec3 normal = normalize(getGBuffer1().xyz);
+    giReceiverCurvature = getGBuffer2().a;
+    vec3 irradiance = giSampleIndirectOnPlane(getWorldPosition(), normal, plane).rgb;
+    if (receiver.a < 0.0) {
+        irradiance += shNativeIrradiance(m_DeferredGiSky, giSkyDirection(normal))
+                * (giSkyDiffuseWeight * m_DeferredGiSkyIntensity);
+    }
+    return shLambertResponse(irradiance, receiver.rgb, 1.0);
+}
+#endif
 
 layout(location = 0) out vec4 outFragColor;
 layout(location = 1) out vec4 outVelocity;
@@ -45,6 +71,9 @@ void main() {
         discard;
     }
     outFragColor = subfaceShading(shadingId);
+    #ifdef DEFERRED_GI_LIGHT
+        outFragColor.rgb += evaluateDeferredProbeGi();
+    #endif
     gl_FragDepth = getSurfaceDepth();
     outVelocity = m_TemporalOutput ? texelFetch(m_TemporalVelocity, ivec2(gl_FragCoord.xy), 0) : vec4(0.0);
 }

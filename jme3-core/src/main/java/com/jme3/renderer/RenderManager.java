@@ -131,7 +131,31 @@ public class RenderManager {
     }
     private RenderPath renderPath = RenderPath.Forward;
     private int deferredTileSize = 16;
+    private boolean deferredProbeGiInLighting = true;
     private final ViewportPipelines pipelines = new ViewportPipelines(this);
+
+    /**
+     * Selects probe GI in the deferred lighting pass (default) where supported.
+     * Materials and devices outside that path retain material-pass sampling.
+     * Call on the render thread before rendering the affected viewport.
+     * <pre>{@code
+     * // 第一步：选择延迟渲染，默认在光照通道计算兼容材质的探针 GI。
+     * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
+     * // 第二步：需要对照旧版时，在下一帧之前恢复 GBuffer 采样。
+     * renderManager.setDeferredProbeGiInLighting(false);
+     * // 第三步：传 true 恢复默认路径。
+     * renderManager.setDeferredProbeGiInLighting(true);
+     * }</pre>
+     * @param enabled true to evaluate eligible GI in the lighting pass
+     */
+    public void setDeferredProbeGiInLighting(boolean enabled) {
+        deferredProbeGiInLighting = enabled;
+    }
+
+    /** @return whether deferred lighting-pass probe GI is requested */
+    public boolean isDeferredProbeGiInLighting() {
+        return deferredProbeGiInLighting;
+    }
 
     /**
      * Sets the tile width and height in pixels for managed CPU and GPU paths.

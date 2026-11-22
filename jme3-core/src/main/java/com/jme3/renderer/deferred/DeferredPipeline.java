@@ -400,13 +400,24 @@ public final class DeferredPipeline implements OpaquePipeline {
     private void appendBatch(DeferredBatch batch, int index) {
         String name = "Batch[" + index + "]/";
         boolean[] ready = {false};
-        ResourceHandle<RenderTarget> surfaces = graph.createResource(name + "GBuffer",
-            new RenderTargetDefinition(1f, 1, Image.Format.Depth24,
-                vp.getTemporalScene() != null && vp.getTemporalScene().isBasePass()
+        boolean temporal = vp.getTemporalScene() != null && vp.getTemporalScene().isBasePass();
+        if (rm.isDeferredProbeGiInLighting()
+                && renderer.getLimits().get(Limits.FrameBufferMrtAttachments) >= 7
+                && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 20) {
+            batch.probeGi = DeferredProbeGi.select(batch);
+        }
+        Image.Format[] colors = temporal
                 ? new Image.Format[]{Image.Format.RGBA32F, Image.Format.RGBA16F, Image.Format.RGBA16F,
                     Image.Format.RGBA16F, Image.Format.RGBA16F, Image.Format.RGBA16F}
                 : new Image.Format[]{Image.Format.RGBA32F, Image.Format.RGBA16F, Image.Format.RGBA16F,
-                    Image.Format.RGBA16F, Image.Format.RGBA16F}));
+                    Image.Format.RGBA16F, Image.Format.RGBA16F};
+        if (batch.probeGi != null) {
+            colors = java.util.Arrays.copyOf(colors, 7);
+            colors[5] = temporal ? Image.Format.RGBA16F : Image.Format.RGBA8;
+            colors[6] = Image.Format.RGBA32F;
+        }
+        ResourceHandle<RenderTarget> surfaces = graph.createResource(name + "GBuffer",
+            new RenderTargetDefinition(1f, 1, Image.Format.Depth24, colors));
         ResourceHandle<FrameBuffer> output = graph.importResource(name + "Output",
             FrameBuffer.class, () -> vp.getOutputFrameBuffer());
         graph.addPass(name + "LightCulling", context -> {
@@ -423,7 +434,7 @@ public final class DeferredPipeline implements OpaquePipeline {
         }).sideEffect();
         graph.addPass(name + "GBuffer", context -> {
             if (ready[0]) {
-                frame.resources.borrowTargets(context.get(surfaces));
+                frame.resources.borrowTargets(context.get(surfaces), temporal);
                 surfacePass.execute(frame);
                 vp.notifyGBuffer(index, context.get(surfaces));
             }

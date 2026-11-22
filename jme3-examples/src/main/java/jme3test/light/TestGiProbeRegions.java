@@ -24,6 +24,10 @@ import java.util.Arrays;
  * Also samples across an equal-distance-to-two-faces line: the green contribution
  * must keep increasing across it rather than acquire a nearest-face plateau.
  * APIs: GiSceneBaker, GiProbeVolume, GiProbeSet.Entry and GiProbeSet.Binding.
+ * The test repeats each check with lighting-pass GI (default) and material-pass
+ * GI, switching through RenderManager.setDeferredProbeGiInLighting on the render
+ * thread. The lighting path requires seven floating-point-capable MRT slots and
+ * at least twenty fragment texture units. Unsupported draws use material GI.
  */
 public final class TestGiProbeRegions extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
@@ -35,6 +39,7 @@ public final class TestGiProbeRegions extends SimpleApplication {
     private GiProbeSet set;
     private GiProbeSet.Binding binding;
     private int frame;
+    private boolean lightingPayload;
 
     public static void main(String[] args) {
         TestGiProbeRegions app = new TestGiProbeRegions();
@@ -52,6 +57,7 @@ public final class TestGiProbeRegions extends SimpleApplication {
     public void simpleInitApp() {
         // Low-level GI ownership test; ordinary loaded scenes use automatic services.
         getSceneServices().setEnabled(false);
+        viewPort.setGBufferObserver((batch, target) -> lightingPayload |= target.getColorCount() == 7);
         // 第一步：使用大 Volume 覆盖场景，再在内部放置较小的 Volume。
         // 两者均保留默认 FadeDistance=0，边缘采用局部 Volume 的一格过渡宽度。
         red = new GiProbeVolume();
@@ -105,12 +111,16 @@ public final class TestGiProbeRegions extends SimpleApplication {
 
     @Override
     public void simpleUpdate(float tpf) {
-        if (frame == 32) {
+        if (frame > 0 && frame % 32 == 0) {
             // 第五步：局部设置正淡出距离，外层应补足覆盖，过渡带保持总能量。
             binding.close();
             set.close();
-            installAtlas(-1f, 0.75f);
+            boolean explicit = frame % 64 == 32;
+            installAtlas(explicit ? -1f : -0.01f, explicit ? 0.75f : 0f);
         }
+        // 在渲染线程切换回退选项，对照同一材质和同一份烘焙。
+        renderManager.setDeferredProbeGiInLighting(frame < 64);
+        lightingPayload = false;
         viewPort.setRenderPath(PATHS[(frame / 8) % PATHS.length]);
     }
 
@@ -127,6 +137,12 @@ public final class TestGiProbeRegions extends SimpleApplication {
     @Override
     public void simpleRender(RenderManager manager) {
         if (frame % 8 == 7) {
+            boolean supported = renderer.getLimits().get(Limits.FrameBufferMrtAttachments) >= 7
+                    && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 20;
+            boolean expectedPayload = supported && frame < 64 && viewPort.getRenderPath() != RenderPath.Forward;
+            if (lightingPayload != expectedPayload) {
+                throw new AssertionError("Unexpected GI stage for " + viewPort.getRenderPath() + " frame " + frame);
+            }
             ByteBuffer pixels = BufferUtils.createByteBuffer(240 * 180 * 4);
             renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
             int[] left = sample(pixels, -2);
@@ -163,9 +179,10 @@ public final class TestGiProbeRegions extends SimpleApplication {
                 throw new AssertionError("GI escaped both coverage bounds");
             }
             System.out.println("GI REGIONS " + viewPort.getRenderPath() + " PASS "
-                    + (frame < 32 ? "automatic " : "explicit ") + Arrays.toString(center));
+                    + (frame % 64 < 32 ? "automatic " : "explicit ") + "lighting=" + lightingPayload
+                    + " " + Arrays.toString(center));
             BufferUtils.destroyDirectBuffer(pixels);
-            if (frame == 63) {
+            if (frame == 127) {
                 stop();
             }
         }

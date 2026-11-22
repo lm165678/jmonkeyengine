@@ -80,14 +80,16 @@ void main(){
     prepareDeferredPbrIndirect(surface);
 
     vec3 volumeIrradiance = vec3(0.0);
-    #ifdef GI_PROBES
+    #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
         volumeIrradiance = giSampleIrradiance(wpos, surface.normal, surface.geometryNormal);
     #endif
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);
     #ifdef ENVIRONMENT_LIGHTING
+        #ifndef DEFERRED_GI_LIGHT
         surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, giSkyDirection(surface.normal)),
                 surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight * g_SkyIntensity;
+        #endif
         // Local reflections replace distant sky specular; they do not add energy.
         if (g_EnvironmentData.z > 0.5) {
             vec3 reflected = getSpecularDominantDir(surface.normal,
@@ -151,6 +153,15 @@ void main(){
         int model = m_DeferredShadingId;
         #ifdef DEBUG_VALUES_MODE
             model = 3;
+        #endif
+        #ifdef DEFERRED_GI_LIGHT
+            #ifdef ENVIRONMENT_LIGHTING
+                bool deferredSky = true;
+            #else
+                bool deferredSky = false;
+            #endif
+            setDeferredGiReceiver(wpos, surface.normal, surface.geometryNormal,
+                    surface.diffuseColor * clamp(surface.ao.r, 0.0, 1.0) * transmission, deferredSky);
         #endif
         // PBR decoder: record4 holds fog transmission, sun exposure, and flag 1.
         writeDeferredSurface(surface.diffuseColor, surface.normal, deferredRoughness,
