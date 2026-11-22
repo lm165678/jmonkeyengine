@@ -530,3 +530,8 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - Isolated offscreen diagnostic1280x720, fixed arch camera, VSync off/no cap,300 warmup/1000 timed frames: complete4.099ms(~244FPS), noGI1.701ms(~588FPS). Independent no-post/no-shadow/no-physics runs varied4.6..5.4ms rather than clean improvements; these are exploratory timings, not controlled effect cost subtraction or actual user's unknown display resolution. No1000FPS entitlement from model count.
 - Separate5000-frame JFR profile run overhead changed mean to7.07ms; do not compare it directly to unprofiled FPS. Last20s jME-thread328 execution samples: GPUScene prepare44/MaterialWatch.changed43 inclusive, FrameGraph.compile33, Material.render46; HashMap/parameter checks/sort work visible. Sampling identifies optimization candidates, not proof of GPU or CPU saturation and not evidence of repeated mesh buffer rebuild/leak. Initial JPEG decoding excluded from last20s summary.
 - Local harness/logs .gradle/arch-artifact-check/MainPerformance.java,mainperf-*.log,mainperf.jfr. No production rendering/quality settings were changed, no full SDK build, commit or push.
+
+## 2026-11-22 开发待办提醒
+
+- VT 模块重构（含 LightProbe 烘焙评估）和 Virtual Shadow Maps 已加入 [渲染路线图](RENDERING_QUALITY_ROADMAP.md)。完善地形编辑器已加入 SDK 的 `DEV_HANDOFF.md`。下次继续纹理流送、探针烘焙、阴影或地形相关工作时，先提醒用户对应待办。
+- 本次只更新计划，无实现、构建或兼容版本变更。提醒随相关开发会话触发。

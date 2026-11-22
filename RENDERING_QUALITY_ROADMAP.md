@@ -224,3 +224,16 @@ Follow-up native GPUScene motion is implemented: rigid instances retain indirect
 User subsequently authorized default shader output and immediate FSR2 OpenGL integration. Working source now adds AppSettings.ShaderSrgbOutput (default On for LWJGL3 windows/application AWT panels), UpscalingPass with FSR1 EASU/RCAS and an FP32 FSR2 OpenGL backend, render/output dimension separation, native-size GUI, and FSR2 AA bypass/restoration. FPP phases distinguish spatial reconstruction after Tonemap from temporal HDR reconstruction before exposure/Tonemap; custom filters must declare their phase. Explicit FPP format and upscaling configuration round-trip in J3O. This supersedes plan-only status for this subset, not the RHI/Vulkan/GTAO/frame-generation backlog.
 
 GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge regressions pass on RTX5060Ti; core/effects serialization and independent SDK controls/settings tests pass. See DEV_HANDOFF.md for source provenance, entry points and exact limits. Reactive masks can be supplied; automatic transparent-color difference capture, broader animation/particle/multi-GPU/real-scene quality and production memory/performance evaluation remain pending. No full SDK deployment or claim of UE/AMD cross-platform quality parity. Preserve these limits when continuing on another machine.
+
+## 待办：虚拟纹理（VT）模块重构（2026-11-22）
+
+- [ ] 盘点此前 VT 实现，区分可复用代码、工程专用逻辑和需要补齐的能力。将通用部分整理成 jME3 引擎模块，明确资产格式、页表、反馈、驻留与淘汰、上传预算、调试统计和缺页回退。
+- [ ] 单独评估 LightProbe 烘焙。确定离屏捕获如何预取所需纹理页、等待驻留或选择明确的低分辨率回退；检查六面捕获的清晰度与一致性、反复烘焙的稳定性和显存成本。
+- [ ] 先用现有 VT 样例验证迁移，再用大场景验证流送峰值、缺页和 LightProbe 烘焙。与现有表面卡片流送待办协调资源预算。
+
+## 待办：Virtual Shadow Maps（VSM）（2026-11-22）
+
+- [ ] 设计虚拟阴影页表、物理页池、请求和更新预算，定义灯光与投影物移动时的缓存失效、缺页处理和旧阴影路径回退。
+- [ ] 建议先验证平行光的分级范围和跨帧缓存，再评估 SpotLight、PointLight。与现有多光源阴影容量优化分别立项，共用场景和指标比较画质、帧时间与显存。
+
+下次继续 VT、纹理流送或 LightProbe 烘焙时主动提醒 VT 重构；继续阴影、阴影图集或多光源优化时主动提醒 VSM。两项均为开发待办，记录不授权启动实现。
