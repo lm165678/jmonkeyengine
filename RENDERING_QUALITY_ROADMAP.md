@@ -179,6 +179,18 @@ git pull --ff-only origin dev_feature_lightprobe
 
 复现相机：位置(5.7239,2.0553,-3.7907)，朝向(-.9887,-.1464,.0332)，FOV45。验收重点是平滑，不是偏黑就是错。诊断见DEV_HANDOFF；build产物为本机临时文件，跨机器需重新生成。
 
+## 待办：统一 GI 探针布局与手动密度体积（2026-11-22）
+
+目标是保留在 SDK 中手动摆放不同密度盒子的工作流。GI 覆盖体积定义烘焙范围，密度体积定义局部细分规则。多个密度体积可以重叠，统一烘焙生成一套分级探针数据。
+
+- [ ] 先验收现有 GI 页池和流送。用 `Scenes/TestScene5.j3o` 验证两份旧 `.giprobe` 都能加载并参与渲染。分别显示未加载、已读入、上传中、渲染中和页池空间不足，比较旧 64 MiB 图集与可容纳两份数据的配置。把容量与上传耗时分别记录。
+- [ ] 定义全局覆盖、基础间距和细分层数。让烘焙器在几何体附近自动加密，空旷区域保留粗探针。评估静态灯光附近的细分与预算裁剪。现有 `GiProbeStreamingData` 是单个规则网格的粗层与细块流送基础，后续统一布局仍需单独实现和验收。
+- [ ] 增加可重叠的手动密度体积。评估参考 UE4.27.2 的允许级别范围，`0` 为最细，`[0,0]` 强制最细，`[1,3]` 排除最细并允许较粗级别。明确 JME 的层数、实际探针间距和范围上限。重叠区域在烘焙时合并约束，参考 UE 对两个端点分别取较小值，并测试反转体积顺序得到相同结果。
+- [ ] 运行时按世界位置查找烘焙后的砖块。细块完成上传后使用细探针，细块缺失、卸载或预算不足时继续使用粗层，跨粗细边界平滑过渡。保留旧 J3O 与独立 `.giprobe` 的读取，以及独立烘焙地图块之间的原有边界混合。
+- [ ] 用 `TestScene5` 对照验证仅自动细分、添加密度体积、多个密度体积重叠、反转放置顺序及细块卸载回退。固定曝光和强度，检查接缝、漏光、局部细节、GPU 图集占用和上传峰值。
+
+参考本地 UE4.27.2 的 `VolumetricLightmapDensityVolume.h`、`FScene::GetVolumetricLightmapAllowedMipRange` 和 `FStaticLightingSystem::ShouldRefineVoxel`。下次继续 GI、探针密度、粗细层流送或 Volume 重叠优化时，主动提醒本节待办并先检查验收项。
+
 ## 2026-11-19 histogram and film SDR implementation checkpoint
 
 AutoExposureFilter now offers opt-in SceneHistogram brightness/adaptation semantics; ColorGradingFilter offers opt-in AP1 Film and cached CombineLUTs/ApplyColorLUT. Old modes remain defaults for compatibility. Targeted native numeric tests passed; see DEV_HANDOFF.md for limitations (sparse metering, approximate tint, no EV100/pre-exposure/PQ, partial tonal grading) and commands. Full UE visual parity, physical-camera exposure and later TAA remain pending.
