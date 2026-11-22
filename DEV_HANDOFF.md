@@ -1,3 +1,8 @@
+## 2026-11-23 TestScene5 GI performance diagnosis
+
+- Read-only offscreen run of TestGame `Main.java` and real `TestScene5.j3o`, engine build `3e90de5`, RTX 5080 / OpenGL 4.3, default camera `(0,0,10)` looking down −Z, uncapped/no VSync. Median full-frame GL timer-query time over 160 frames after 240 warmups. At 720p, GI on 4.578 ms, all volumes removed 0.912 ms. At 1080p, GI on 8.241 ms, fine bricks disabled with both volumes kept 7.058 ms, all volumes removed 1.470 ms.
+- At 1080p a temporary shader-only bypass measured 1.472 ms while the same 63.81 MiB atlas, 8 published slots, 17 CPU-resident sources, and fine-block admission failures remained. This isolates the cost of the shader path from allocation alone in the fixed-camera test. A normal valid probe can read nine SH coefficients plus four visibility samples. Deferred GBuffer material fragments evaluate GI before deferred light accumulation. Shader and test logs under `build/giscene5-check`. No production source, project asset, or SDK runtime changes. Interactive frame pacing and the user's display resolution were not measured.
+
 ## 2026-11-23 游戏发行和核心 Shader 发布待办
 
 - 下次继续游戏发行、代码混淆、核心 Shader 发布或渲染后端改造时，主动提醒用户查看 [游戏发行包保护与核心 Shader 二进制发布](RENDERING_QUALITY_ROADMAP.md)。先验证现代 ProGuard 与 `jpackage`，再做核心 Shader 的离线编译、引擎二进制加载和平台兼容验收。当前仅登记计划。
