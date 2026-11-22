@@ -548,6 +548,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
 
     // Use managed raster bias here. Legacy processors leave the material bias in effect.
     boolean managedRasterState;
+    ShadowManager managedOwner;
 
     protected void renderShadowMap(int shadowMapIndex) {
         shadowMapOccluders = getOccludersToRender(shadowMapIndex, shadowMapOccluders);
@@ -566,7 +567,11 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             renderManager.setForcedRenderState(forcedRenderState);
             renderManager.setForcedRenderStateOverridesTechnique(managedRasterState);
             renderManager.setLightFilter(NULL_LIGHT_FILTER);
-            viewPort.getQueue().renderShadowQueue(shadowMapOccluders, renderManager, shadowCam, true);
+            if (managedOwner == null) {
+                viewPort.getQueue().renderShadowQueue(shadowMapOccluders, renderManager, shadowCam, true);
+            } else {
+                managedOwner.renderCasters(shadowMapOccluders, shadowCam);
+            }
         } finally {
             renderManager.setLightFilter(tmpLightFilter);
             renderManager.setForcedRenderState(previousState);

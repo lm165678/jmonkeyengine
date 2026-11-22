@@ -9,6 +9,9 @@ import com.jme3.post.*;
 import com.jme3.renderer.*;
 import com.jme3.renderer.framegraph.FrameGraph;
 import com.jme3.renderer.framegraph.ResourceHandle;
+import com.jme3.renderer.gpuscene.ShadowCasterBatch;
+import com.jme3.renderer.queue.GeometryList;
+import com.jme3.renderer.queue.OpaqueComparator;
 import com.jme3.scene.*;
 import com.jme3.scene.shape.Quad;
 import com.jme3.shader.*;
@@ -80,6 +83,11 @@ public final class ShadowManager implements AutoCloseable {
     private AssetManager assets;
     private boolean catalogDirty = true;
     private boolean hasCasters;
+    private final List<Geometry> casters = new ArrayList<>();
+    private final GeometryList fallbackCasters = new GeometryList(new OpaqueComparator());
+    private ShadowCasterBatch indirectCasters;
+    private boolean indirectDrawing = true;
+    private int indirectCasterCount;
     private final SceneChangeListener catalogListener = (spatial, change) -> {
         if (change == SceneChangeListener.Change.ATTACHED || change == SceneChangeListener.Change.DETACHING
                 || change == SceneChangeListener.Change.RENDERING) {
@@ -197,6 +205,8 @@ public final class ShadowManager implements AutoCloseable {
         catalog.clear();
         assets = null;
         hasCasters = false;
+        casters.clear();
+        releaseIndirectCasters();
         for (Spatial scene : catalogScenes) {
             for (Light light : scene.getWorldLightList()) {
                 catalog.add(light);
@@ -204,8 +214,11 @@ public final class ShadowManager implements AutoCloseable {
             scene.depthFirstTraversal(spatial -> {
                 if (spatial instanceof Geometry) {
                     com.jme3.renderer.queue.RenderQueue.ShadowMode mode = spatial.getShadowMode();
-                    hasCasters |= mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Cast
-                            || mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive;
+                    if (mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Cast
+                            || mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive) {
+                        hasCasters = true;
+                        casters.add((Geometry) spatial);
+                    }
                 }
                 for (Light light : spatial.getLocalLightList()) {
                     catalog.add(light);
@@ -224,6 +237,67 @@ public final class ShadowManager implements AutoCloseable {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    /**
+     * Enables batched indirect draws for compatible managed shadow casters,
+     * by default. Each shadow camera still fits and culls its own caster list.
+     * Requires GPU Scene enabled and OpenGL 4.3. Compatible alpha-tested
+     * casters batch by texture and cutoff. Animated, custom and otherwise
+     * incompatible casters use their original technique.
+     * Set on the render thread before drawing. The setting is viewport-local.
+     * <pre>{@code
+     * // 第一步：用正常方式挂载物体并让光源投影；默认自动使用间接绘制。
+     * ShadowManager shadows = renderManager.getShadowManager(viewPort);
+     * // 第二步：对照测试时切回逐物体绘制，灯光和阴影配置继续生效。
+     * shadows.setIndirectDrawingEnabled(false);
+     * // 第三步：恢复自动间接绘制；移除视口会释放批次资源。
+     * shadows.setIndirectDrawingEnabled(true);
+     * }</pre>
+     * @param enabled whether to use indirect drawing where supported
+     */
+    public void setIndirectDrawingEnabled(boolean enabled) {
+        indirectDrawing = enabled;
+        if (!enabled) {
+            releaseIndirectCasters();
+        }
+    }
+
+    /**
+     * Returns the number of indirect caster submissions in the latest
+     * viewport render, including repeated geometry across cascades or faces.
+     * Query on the render thread after rendering.
+     * @return number of indirect caster commands
+     */
+    public int getIndirectCasterCount() {
+        return indirectCasterCount;
+    }
+
+    private void releaseIndirectCasters() {
+        if (indirectCasters != null) {
+            indirectCasters.close();
+            indirectCasters = null;
+        }
+    }
+
+    void renderCasters(GeometryList visible, Camera camera) {
+        try {
+            if (indirectCasters != null && manager.getRenderFilter() == null
+                    && !ShadowCasterBatch.hasShadowOverrides(manager.getForcedMatParams())) {
+                int drawn = indirectCasters.draw(manager, visible, fallbackCasters);
+                if (drawn > 0) {
+                    indirectCasterCount += drawn;
+                    if (fallbackCasters.size() != 0) {
+                        viewport.getQueue().renderShadowQueue(fallbackCasters, manager, camera, true);
+                    }
+                    return;
+                }
+            }
+            viewport.getQueue().renderShadowQueue(visible, manager, camera, true);
+        } finally {
+            fallbackCasters.clear();
+            visible.clear();
+        }
     }
 
     /** Returns why this viewport fell back, or null when it did not. */
@@ -252,8 +326,10 @@ public final class ShadowManager implements AutoCloseable {
     public void appendPasses(FrameGraph graph) {
         indices.clear();
         active.clear();
+        indirectCasterCount = 0;
         fallbackReason = null;
         if (!enabled) {
+            releaseIndirectCasters();
             return;
         }
         if (!manager.getRenderer().getCaps().contains(Caps.FloatTexture)
@@ -296,7 +372,19 @@ public final class ShadowManager implements AutoCloseable {
             }
         }
         if (found.isEmpty() || assets == null) {
+            releaseIndirectCasters();
             return;
+        }
+        if (indirectDrawing && manager.isGpuSceneEnabled() && manager.getClass() == RenderManager.class
+                && manager.getRenderer().getCaps().contains(Caps.OpenGL43)) {
+            if (indirectCasters != null && indirectCasters.isStale()) {
+                releaseIndirectCasters();
+            }
+            if (indirectCasters == null) {
+                indirectCasters = new ShadowCasterBatch(assets, casters);
+            }
+        } else {
+            releaseIndirectCasters();
         }
         if (found.size() > 64) {
             throw new IllegalStateException("Managed shadow budget exceeds 64 active lights");
@@ -422,6 +510,7 @@ public final class ShadowManager implements AutoCloseable {
         // grazing angles that moves blockers across wall/ceiling junctions.
         // Managed shadows already apply explicit receiver depth/normal bias.
         slot.renderer.managedRasterState = true;
+        slot.renderer.managedOwner = this;
         slot.renderer.getPreShadowForcedRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
         slot.renderer.getPreShadowForcedRenderState().setPolyOffset(0f, 0f);
         return slot;
@@ -597,6 +686,8 @@ public final class ShadowManager implements AutoCloseable {
         observedRoots = Collections.emptyList();
         catalogScenes = Collections.emptyList();
         catalog.clear();
+        casters.clear();
+        releaseIndirectCasters();
         assets = null;
         catalogDirty = true;
         for (Slot slot : slots.values()) {

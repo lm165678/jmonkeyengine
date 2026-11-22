@@ -716,6 +716,26 @@ public class VertexBuffer extends NativeObject implements Savable, Cloneable {
         setUpdateNeeded();
     }
 
+    private transient long dataRevision;
+
+    @Override
+    public void setUpdateNeeded() {
+        super.setUpdateNeeded();
+        dataRevision++;
+    }
+
+    /**
+     * Returns the revision of data submitted through this buffer's update APIs.
+     * Rendering a buffer does not reset its revision. Code that changes the
+     * contents of {@link #getData()} directly still needs to call
+     * {@link #setUpdateNeeded()} on the render thread.
+     *
+     * @return current revision of this buffer instance
+     */
+    public long getDataRevision() {
+        return dataRevision;
+    }
+
     /**
      * Returns true if the data size of the VertexBuffer has changed.
      * Internal use only.

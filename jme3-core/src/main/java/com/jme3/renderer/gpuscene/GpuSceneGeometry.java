@@ -56,7 +56,9 @@ public final class GpuSceneGeometry extends Geometry {
     }
 
     void enableMultiDraw(com.jme3.scene.Mesh packedMesh, int count, int[] vertexCounts) {
-        setMesh(packedMesh);
+        if (getMesh() != packedMesh) {
+            setMesh(packedMesh);
+        }
         multiDrawCount = count;
         this.vertexCounts = vertexCounts;
     }

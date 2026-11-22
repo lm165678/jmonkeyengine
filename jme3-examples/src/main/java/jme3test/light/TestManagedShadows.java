@@ -35,6 +35,9 @@ import java.nio.ByteBuffer;
  * Degenerate projections fall back to ordinary biased PCF. Hard shadows and
  * legacy filters retain their behavior. Receiver bias still handles depth
  * quantization and should not generally be set to zero.
+ * Each of the four paths also compares indirect and conventional shadow
+ * submission for both material models and verifies that the indirect queue
+ * was used. See ShadowManager.setIndirectDrawingEnabled for the viewport toggle.
  */
 public final class TestManagedShadows extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
@@ -46,6 +49,7 @@ public final class TestManagedShadows extends SimpleApplication {
     private int observedGbuffers;
     private int[] strengthDark;
     private int[] strengthHalf;
+    private int[] indirectReference;
 
     public static void main(String[] arguments) {
         TestManagedShadows app = new TestManagedShadows();
@@ -122,6 +126,13 @@ public final class TestManagedShadows extends SimpleApplication {
     @Override
     public void simpleUpdate(float tpf) {
         observedGbuffers = 0;
+        if (compareIndirect()) {
+            // 第一步：验证前四帧走间接绘制，后四帧切回原有路径。
+            renderManager.getShadowManager(viewPort).setIndirectDrawingEnabled(frame % 8 < 4);
+        } else if (frame == 32 || frame == 96) {
+            // 第二步：恢复默认间接绘制，继续验证阴影开关和强度。
+            renderManager.getShadowManager(viewPort).setIndirectDrawingEnabled(true);
+        }
         if (frame >= 152) {
             int strengthPhase = (frame - 152) / 8;
             int step = strengthPhase % 3;
@@ -170,12 +181,23 @@ public final class TestManagedShadows extends SimpleApplication {
 
     @Override
     public void simpleRender(RenderManager manager) {
+        if (compareIndirect() && (frame % 8 == 3 || frame % 8 == 7)) {
+            int count = manager.getShadowManager(viewPort).getIndirectCasterCount();
+            int[] color = sampleReceiver();
+            if (frame % 8 == 3) {
+                if (count == 0) {
+                    throw new AssertionError("No indirect shadow casters");
+                }
+                indirectReference = color;
+            } else {
+                if (count != 0 || !java.util.Arrays.equals(indirectReference, color)) {
+                    throw new AssertionError("Indirect/conventional shadow mismatch");
+                }
+                System.out.println("MANAGED SHADOW INDIRECT PASS frame=" + frame);
+            }
+        }
         if (frame % 8 == 7) {
-            ByteBuffer pixels = BufferUtils.createByteBuffer(160 * 120 * 4);
-            renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
-            Vector3f projected = cam.getScreenCoordinates(Vector3f.ZERO);
-            int pixel = ((int) projected.y * 160 + (int) projected.x) * 4;
-            int[] color = {pixels.get(pixel) & 255, pixels.get(pixel + 1) & 255, pixels.get(pixel + 2) & 255};
+            int[] color = sampleReceiver();
             if (frame >= 152) {
                 int strengthPhase = (frame - 152) / 8;
                 int step = strengthPhase % 3;
@@ -234,6 +256,18 @@ public final class TestManagedShadows extends SimpleApplication {
             }
         }
         frame++;
+    }
+
+    private boolean compareIndirect() {
+        return frame < 32 || (frame >= 64 && frame < 96);
+    }
+
+    private int[] sampleReceiver() {
+        ByteBuffer pixels = BufferUtils.createByteBuffer(160 * 120 * 4);
+        renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
+        Vector3f projected = cam.getScreenCoordinates(Vector3f.ZERO);
+        int pixel = ((int) projected.y * 160 + (int) projected.x) * 4;
+        return new int[]{pixels.get(pixel) & 255, pixels.get(pixel + 1) & 255, pixels.get(pixel + 2) & 255};
     }
 
     private void setStrengthMaterial(boolean pbr) {
