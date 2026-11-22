@@ -48,12 +48,15 @@ final class DeferredProbeGi {
             SkyLight sky = null;
             boolean local = false;
             for (Light light : geometry.getWorldLightList()) {
-                if (light.isEnabled() && light instanceof LightProbe probe && probe.isReady()) {
+                if (!light.isEnabled()) {
+                    continue;
+                }
+                if (light instanceof LightProbe && ((LightProbe) light).isReady()) {
                     local = true;
                     break;
                 }
-                if (light.isEnabled() && light instanceof SkyLight candidate && candidate.isReady() && sky == null) {
-                    sky = candidate;
+                if (sky == null && light instanceof SkyLight && ((SkyLight) light).isReady()) {
+                    sky = (SkyLight) light;
                 }
             }
             if (!local && selected.accept(geometry, sky)) {
