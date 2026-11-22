@@ -699,3 +699,9 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - Shader 从空间坐标查一个细块槽。完整上传后才发布索引，卸载时清除索引并恢复粗层。细块内部只取细层，有缺块的内部边缘渐变至粗层。不同 Volume 仍按原有区域规则混合。旧自定义 GI 材质继续获得原格式的根层元数据。
 - RTX 5080 / OpenGL 4.3，JDK25 定向编译与 GI_BRICK_STREAMING_PASS、GI_ADAPTIVE_PASS 通过。新流水线覆盖实际烘焙、J3O 自动配置、两区域按需读取、0 预算与资源缺失粗层回退，以及四渲染路径。TestGiSurfaceProbes 在基线和本改动均触发亮度 0/0 断言。用户项目的大场景效果和显存性能仍待完整运行验证。对应引擎与 SDK 实现基线分别为 86a9556b4、aea7fdbe。未构建 SDK 或替换安装。
 - 配套实现提交为引擎 8ba8a08ad 与 SDK 3038dd49。只读检查 TestGame 最近保存的 TestScene5.j3o 两份旧烘焙均存在，能独立解压。15³ 与 10³ 网格的距离纹理分别占 928 行和 512 行，旧 64 MiB 图集只有 1364 行。使用真实资产重放 GiPagePool 分配，64 MiB 拒绝第二份，80 MiB 可同时提交（TEST_SCENE_5_LEGACY_ADMISSION_PASS）。这是分配复现，未运行该场景的完整交互渲染。
+
+## 2026-11-22 GI Volume 重叠的局部优先与边缘过渡
+
+- Shader 先用体积描述和世界坐标选出最小的覆盖 Volume，再读取探针。一个有效普通规则网格的内部最多检查 8 个候选探针。局部无可用探针时继续查找后续 Volume。边缘只混合一个可用备选 Volume，若同处粗细层过渡或需要无效网格回退，则可能检查更多候选。
+- 内侧过渡默认按原细网格的一格宽，逐轴限制在覆盖尺寸的四分之一。显式 FadeDistance 可指定宽度。共享的包围盒面不触发两者之间的交接，例如共用地面的两个区域仍可沿水平边缘渐变。备选 Volume 会补足显式淡出损失的覆盖，有完整大区覆盖时避免压暗。孤立 Volume 保留原淡出规则，粗细层文件、流送设置和 J3O 格式保持兼容。
+- Windows RTX 5080 / OpenGL 4.3 验证 TestGiProbeRegions 的自动和显式边缘在 Forward、Deferred、TiledDeferredCPU、TiledDeferredGPU 通过。覆盖局部独占颜色、共享地面的边缘、两个无效小 Volume 的顺序回退、过渡亮度和覆盖范围。GI_BRICK_STREAMING_PASS 及 GI_ADAPTIVE_PASS 通过。分离天空与总光照的 SKY_VOLUME_COMPOSITION_PASS / SKY_TOTAL_COMPOSITION_PASS 各通过 288 组合与 6 个专项检查。未测用户项目的实际帧耗时，未构建 SDK。基线引擎 1cd148e4c，兼容 SDK 实现 3038dd49。

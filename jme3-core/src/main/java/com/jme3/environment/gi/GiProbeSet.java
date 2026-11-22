@@ -17,19 +17,20 @@ import java.util.*;
 
  * Bounded resident atlas for up to 16 overlapping volumes, including mixed probe
  * densities and visibility resolutions. Four texture units serve all volumes, including separated sky visibility.
- * Selection/blending is per fragment, so a large mesh/material can cross chunks.
- * Boundary weights use a separable quintic window (one cell per axis for zero
- * explicit fade), avoiding nearest-face ridges at brick corners. Weights are
- * normalized across available volumes; fine grids have
- * higher weight using inverse geometric-mean spacing. Provide overlapping coverage for continuous transitions; an
- * isolated volume contributes zero outside coverage. Invalid/occluded probes do
- * not contribute. Empty sets should be represented by closing the old binding.
+ * Selection is per fragment. The smallest covering volume with usable data
+ * wins in its interior. Equal bounds sizes favor more grid probes in the
+ * resident root, then spatial origin. The next usable volume blends only at the
+ * primary volume's inside boundary. With zero explicit fade, the separable
+ * transition per axis is one grid cell, capped at a quarter of the bounds.
+ * Provide overlapping coverage for continuous transitions. An isolated volume
+ * contributes zero outside its bounds. Close the old binding for empty sets.
  *
  * <pre>{@code
- * // 第一步：收集驻留的体积；可使用不同探针密度和距离矩分辨率。
+ * // 第一步：收集驻留的体积，令小体积 B 覆盖 A 的局部区域。
+ * // 零淡出距离保留独立体积边缘亮度，重叠时仍会在 B 的内侧渐变。
  * List<GiProbeSet.Entry> entries = new ArrayList<>();
- * entries.add(new GiProbeSet.Entry(a.getData(), a.getWorldTranslation(), 2f));
- * entries.add(new GiProbeSet.Entry(b.getData(), b.getWorldTranslation(), 2f));
+ * entries.add(new GiProbeSet.Entry(a.getData(), a.getWorldTranslation(), 0f));
+ * entries.add(new GiProbeSet.Entry(b.getData(), b.getWorldTranslation(), 0f));
  * // 第二步：在纹理尺寸和预算内创建快照；大模型可以共享这一个绑定。
  * GiProbeSet set = new GiProbeSet(entries, 4096, 64L * 1024 * 1024);
  * GiProbeSet.Binding binding = set.bind(material, 0.05f);

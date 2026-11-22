@@ -261,6 +261,9 @@ public final class GiProbeVolume extends Node {
     /** Optional outer-boundary fade in world units, default 0 (no attenuation).
      * Scene volumes commonly end at walls: automatically fading 20% of their
      * bounds darkens those surfaces even with perfectly valid probe data.
+     * In overlaps a positive distance also sets the width of the transition
+     * to another covering volume. Zero uses an automatic inner transition
+     * while keeping full coverage for an isolated volume.
      * For outdoor transitions set a positive distance explicitly; reset to zero
      * to restore full coverage. This only updates descriptors, never rebakes.
      * <pre>{@code

@@ -196,13 +196,13 @@ float giSpatialKernel(float distance) {
 
 // Returns incident irradiance in linear HDR units. No material response is
 // assumed here. The world-space normal must be normalized by the caller.
-vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 origin, vec3 spacing,
+vec3 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 origin, vec3 spacing,
         vec3 counts, vec2 encoding, vec4 atlasInfo, vec4 dimensions, float fade, bool metadata, out vec3 skyResult, out vec3 bentResult) {
     skyResult = vec3(1.0, 0.0, 0.0);
     bentResult = vec3(0.0);
     vec3 coordinate = (worldPosition - origin) / spacing;
     if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, counts - 1.0))) {
-        return vec4(0.0);
+        return vec3(0.0);
     }
     // Use the same biased position for cell selection and visibility. Otherwise
     // a receiver exactly on a grid plane can give all usable front-side probes
@@ -390,29 +390,17 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
     // Missing/invalid support falls back to other volumes or the sky. Total-light
     // coverage must not disappear merely because directional weights reach zero.
     if (total <= 0.0 && (separated || !hasSupport)) {
-        return vec4(0.0);
+        return vec3(0.0);
     }
     vec3 edge = min(coordinate * spacing, (counts - 1.0 - coordinate) * spacing);
     float blend = fade > 0.0 ? giOverlapWindow(edge, vec3(fade)) : 1.0;
     skyResult = vec3(separated && total > 0.0 ? skySum / total : 0.0, blend, separated ? 0.0 : 1.0);
     bentResult = total > 0.0 ? bentSum / total : vec3(0.0);
-    // Favor denser volumes and keep the weights defined at their borders.
-    // Relative overlap weights must not attenuate the only available volume.
-    // Zero outer fade keeps room boundary surfaces lit while still smoothly
-    // transitioning between overlapping probe grids.
-    float overlap = fade > 0.0 ? blend : giOverlapWindow(edge, spacing);
-    // Compare grid density across all three axes using the geometric mean.
-    // Using full volumetric density makes a 2x refinement eight times stronger
-    // and produces an excessively steep transition at its boundary.
-    // The halo smoothly restores coarse data at brick edges; unusable fine
-    // grids returned above never take part in this blend.
-    float weight = max(1.0e-5, overlap)
-            / pow(max(spacing.x * spacing.y * spacing.z, 1.0e-12), 1.0 / 3.0);
     vec3 result = total > 0.0 ? sum / total : vec3(0.0);
     if (stabilized) {
         result *= result;
     }
-    return vec4(result, weight);
+    return result;
 }
 
 // Paged scene atlas: 128 descriptor rows (16 roots), then 32 index rows
@@ -438,7 +426,7 @@ float giBrickSlot(float root, vec3 coord, vec3 blocks) {
     return channel < 3.0 ? entry.z : entry.w;
 }
 
-vec4 giSampleBrick(float root, vec3 worldPosition, vec3 normal, vec3 planeNormal,
+vec3 giSampleBrick(float root, vec3 worldPosition, vec3 normal, vec3 planeNormal,
         vec3 local, vec3 blocks, vec3 blockSize, out float blend, out vec3 skyResult, out vec3 bentResult) {
     blend = 0.0;
     skyResult = vec3(1.0, 0.0, 0.0);
@@ -446,17 +434,9 @@ vec4 giSampleBrick(float root, vec3 worldPosition, vec3 normal, vec3 planeNormal
     vec3 coord = min(floor(local / blockSize), blocks - 1.0);
     float slot = giBrickSlot(root, coord, blocks) - 1.0;
     if (slot < 0.0) {
-        return vec4(0.0);
+        return vec3(0.0);
     }
-    vec4 origin = giVolumeField(slot, 0.0);
-    vec4 spacing = giVolumeField(slot, 1.0);
-    vec4 counts = giVolumeField(slot, 2.0);
-    vec4 atlasInfo = giVolumeField(slot, 3.0);
-    vec4 result = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
-            vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, 0.0, true, skyResult, bentResult);
-    if (skyResult.y <= 0.0) {
-        return result;
-    }
+    vec3 cellSize = blockSize * 0.25;
     vec3 fromLow = local - coord * blockSize;
     vec3 fromHigh = blockSize - fromLow;
     blend = 1.0;
@@ -464,120 +444,268 @@ vec4 giSampleBrick(float root, vec3 worldPosition, vec3 normal, vec3 planeNormal
     // Fade only next to missing data, and keep the outer volume boundary lit.
     for (int axis = 0; axis < 3; axis++) {
         vec3 neighbor = coord;
-        if (coord[axis] > 0.0 && fromLow[axis] < spacing[axis]) {
+        if (coord[axis] > 0.0 && fromLow[axis] < cellSize[axis]) {
             neighbor[axis] = coord[axis] - 1.0;
             if (giBrickSlot(root, neighbor, blocks) == 0.0) {
-                blend = min(blend, smoothstep(0.0, spacing[axis], fromLow[axis]));
+                blend = min(blend, smoothstep(0.0, cellSize[axis], fromLow[axis]));
             }
         }
-        if (coord[axis] < blocks[axis] - 1.0 && fromHigh[axis] < spacing[axis]) {
+        if (coord[axis] < blocks[axis] - 1.0 && fromHigh[axis] < cellSize[axis]) {
             neighbor[axis] = coord[axis] + 1.0;
             if (giBrickSlot(root, neighbor, blocks) == 0.0) {
-                blend = min(blend, smoothstep(0.0, spacing[axis], fromHigh[axis]));
+                blend = min(blend, smoothstep(0.0, cellSize[axis], fromHigh[axis]));
             }
         }
     }
+    if (blend <= 0.0) {
+        return vec3(0.0);
+    }
+    vec4 origin = giVolumeField(slot, 0.0);
+    vec4 spacing = giVolumeField(slot, 1.0);
+    vec4 counts = giVolumeField(slot, 2.0);
+    vec4 atlasInfo = giVolumeField(slot, 3.0);
+    vec3 result = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
+            vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, 0.0, true, skyResult, bentResult);
+    if (skyResult.y <= 0.0) {
+        blend = 0.0;
+    }
     return result;
+}
+
+struct GiRoot {
+    float slot;
+    vec4 origin;
+    vec4 spacing;
+    vec4 counts;
+    vec3 size;
+};
+
+struct GiLighting {
+    vec3 irradiance;
+    vec3 sky;
+    vec3 bent;
+};
+
+GiRoot giEmptyRoot() {
+    return GiRoot(-1.0, vec4(0.0), vec4(0.0), vec4(0.0), vec3(0.0));
+}
+
+bool giRootBefore(GiRoot a, GiRoot b) {
+    if (b.slot < 0.0) {
+        return true;
+    }
+    float aSize = a.size.x * a.size.y * a.size.z;
+    float bSize = b.size.x * b.size.y * b.size.z;
+    if (aSize != bSize) {
+        return aSize < bSize;
+    }
+    float aProbes = a.counts.x * a.counts.y * a.counts.z;
+    float bProbes = b.counts.x * b.counts.y * b.counts.z;
+    if (aProbes != bProbes) {
+        return aProbes > bProbes;
+    }
+    // Equal-sized overlaps keep a spatially stable order when slots are reused.
+    if (a.origin.x != b.origin.x) {
+        return a.origin.x < b.origin.x;
+    }
+    if (a.origin.y != b.origin.y) {
+        return a.origin.y < b.origin.y;
+    }
+    if (a.origin.z != b.origin.z) {
+        return a.origin.z < b.origin.z;
+    }
+    return a.slot < b.slot;
+}
+
+// Find the first two covering roots using descriptor reads only. Further
+// batches are needed only if one of the first candidates has no valid data.
+void giFindRoots(vec3 worldPosition, GiRoot after, out GiRoot primary, out GiRoot backup) {
+    primary = giEmptyRoot();
+    backup = giEmptyRoot();
+    for (int volume = 0; volume < 16; volume++) {
+        if (volume >= m_GiVolumeCount) {
+            break;
+        }
+        float slot = float(volume);
+        vec4 counts = giVolumeField(slot, 2.0);
+        if (any(lessThan(counts.xyz, vec3(2.0)))) {
+            continue;
+        }
+        vec4 origin = giVolumeField(slot, 0.0);
+        vec3 local = worldPosition - origin.xyz;
+        if (any(lessThan(local, vec3(0.0)))) {
+            continue;
+        }
+        vec4 spacing = giVolumeField(slot, 1.0);
+        vec3 size = (counts.xyz - 1.0) * spacing.xyz;
+        if (any(greaterThan(local, size))) {
+            continue;
+        }
+        GiRoot root = GiRoot(slot, origin, spacing, counts, size);
+        if (after.slot >= 0.0 && !giRootBefore(after, root)) {
+            continue;
+        }
+        if (giRootBefore(root, primary)) {
+            backup = primary;
+            primary = root;
+        } else if (giRootBefore(root, backup)) {
+            backup = root;
+        }
+    }
+}
+
+GiLighting giEmptyLighting() {
+    return GiLighting(vec3(0.0), vec3(1.0, 0.0, 0.0), vec3(0.0));
+}
+
+// Combine irradiance and sky data with the same coverage-aware interpolation.
+GiLighting giMixLighting(GiLighting a, GiLighting b, float aCoverage, float bCoverage) {
+    float coverage = aCoverage + bCoverage;
+    if (coverage <= 0.0) {
+        return giEmptyLighting();
+    }
+    float amount = bCoverage / coverage;
+    vec3 sky = mix(a.sky, b.sky, amount);
+    sky.y = coverage;
+    return GiLighting(mix(a.irradiance, b.irradiance, amount), sky, mix(a.bent, b.bent, amount));
+}
+
+GiLighting giSampleRoot(GiRoot root, vec3 worldPosition, vec3 normal, vec3 planeNormal, out vec3 cellSize) {
+    vec3 local = worldPosition - root.origin.xyz;
+    float transition = 0.0;
+    GiLighting fine = giEmptyLighting();
+    cellSize = root.spacing.xyz;
+    if (m_GiVolumeDataHeight > 0) {
+        vec3 blocks = giVolumeField(root.slot, 4.0).xyz;
+        if (blocks.x > 0.0) {
+            vec3 blockSize = giVolumeField(root.slot, 5.0).xyz;
+            cellSize = blockSize * 0.25;
+            fine.irradiance = giSampleBrick(root.slot, worldPosition, normal, planeNormal,
+                    local, blocks, blockSize, transition, fine.sky, fine.bent);
+            if (root.origin.w > 0.0) {
+                vec3 edge = min(local, root.size - local);
+                fine.sky.y *= giOverlapWindow(edge, vec3(root.origin.w));
+            }
+        }
+    }
+    if (transition >= 1.0) {
+        return fine;
+    }
+    vec4 atlasInfo = giVolumeField(root.slot, 3.0);
+    GiLighting coarse;
+    coarse.irradiance = giSampleVolume(worldPosition, normal, planeNormal, root.origin.xyz, root.spacing.xyz,
+            root.counts.xyz, vec2(root.spacing.w, root.counts.w), atlasInfo,
+            m_GiTextureSize, root.origin.w, true, coarse.sky, coarse.bent);
+    if (transition <= 0.0) {
+        return coarse;
+    }
+    return giMixLighting(coarse, fine, (1.0 - transition) * coarse.sky.y, transition * fine.sky.y);
+}
+
+float giRootInterior(GiRoot root, vec3 worldPosition, vec3 cellSize, GiRoot other) {
+    vec3 local = worldPosition - root.origin.xyz;
+    // Preserve an exclusive interior even for a two-probe grid. The fine
+    // spacing keeps this transition stable when its bricks are evicted.
+    vec3 width = root.origin.w > 0.0 ? vec3(root.origin.w) : min(cellSize, root.size * 0.25);
+    vec3 low = local;
+    vec3 high = root.size - local;
+    if (other.slot >= 0.0) {
+        // A shared face is not a hand-off between volumes. For example, two
+        // room volumes can start on the same floor and still blend across X/Z.
+        vec3 epsilon = min(root.size, other.size) * 1.0e-5;
+        vec3 offset = root.origin.xyz - other.origin.xyz;
+        low = mix(width, low, step(epsilon, abs(offset)));
+        high = mix(width, high, step(epsilon, abs(offset + root.size - other.size)));
+    }
+    return giOverlapWindow(min(low, high), width);
+}
+
+GiLighting giSampleRoots(vec3 worldPosition, vec3 normal, vec3 planeNormal) {
+    GiRoot after = giEmptyRoot();
+    GiRoot chosen = giEmptyRoot();
+    GiLighting primary = giEmptyLighting();
+    vec3 primaryCell = vec3(0.0);
+    for (int batch = 0; batch < 8; batch++) {
+        GiRoot first;
+        GiRoot second;
+        giFindRoots(worldPosition, after, first, second);
+        for (int index = 0; index < 2; index++) {
+            GiRoot root = first;
+            if (index == 1) {
+                root = second;
+            }
+            if (root.slot < 0.0) {
+                return primary;
+            }
+            float interior = 0.0;
+            if (chosen.slot >= 0.0) {
+                interior = giRootInterior(chosen, worldPosition, primaryCell, root);
+                if (interior >= 1.0) {
+                    return primary;
+                }
+            }
+            vec3 cellSize;
+            GiLighting sampled = giSampleRoot(root, worldPosition, normal, planeNormal, cellSize);
+            if (sampled.sky.y <= 0.0) {
+                continue;
+            }
+            if (chosen.slot >= 0.0) {
+                // Both weights vanish at their own boundary, including where
+                // two volumes cross without one fully enclosing the other.
+                float backupInterior = giRootInterior(root, worldPosition, cellSize, chosen);
+                float backupWeight = (1.0 - interior) * backupInterior;
+                float total = interior + backupWeight;
+                if (total > 0.0) {
+                    float primaryWeight = interior / total;
+                    float primaryCoverage = min(primaryWeight, primary.sky.y);
+                    // A covering backup fills the primary's explicit fade.
+                    // Limit compensation at the backup's boundary as well.
+                    float backupCoverage = (backupWeight / total
+                            + (primaryWeight - primaryCoverage) * backupInterior) * sampled.sky.y;
+                    return giMixLighting(primary, sampled, primaryCoverage, backupCoverage);
+                }
+                return primary;
+            }
+            primary = sampled;
+            chosen = root;
+            primaryCell = cellSize;
+            if (index == 0 && second.slot < 0.0) {
+                return primary;
+            }
+            if (giRootInterior(root, worldPosition, cellSize, giEmptyRoot()) >= 1.0) {
+                return primary;
+            }
+        }
+        after = second;
+    }
+    return primary;
 }
 
 vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
     if (!m_GiEnabled) {
         return vec4(0.0);
     }
-    // Derivatives must precede per-fragment volume coverage tests. Compute once
-    // for all volumes. Normal-map detail remains in the SH/material response,
-    // but must not perturb the receiver plane or its visibility bias.
+    // Derivatives must precede per-fragment volume coverage tests. Normal-map
+    // detail must not perturb the receiver plane or its visibility bias.
     vec3 planeNormal = cross(dFdx(worldPosition), dFdy(worldPosition));
     float planeScale = max(abs(planeNormal.x), max(abs(planeNormal.y), abs(planeNormal.z)));
     planeNormal = planeScale > 0.0 ? normalize(planeNormal / planeScale) : normal;
     planeNormal *= dot(planeNormal, normal) < 0.0 ? -1.0 : 1.0;
+    GiLighting result;
     if (m_GiVolumeCount == 0) {
         vec4 atlasInfo = vec4(m_GiAtlas.x, 0.0, 0.0, m_GiAtlas.z);
         vec4 dimensions = vec4(m_GiAtlas.x * 9.0, m_GiAtlas.y, m_GiAtlas.xy * floor(m_GiAtlas.z));
-        vec3 skyResult;
-        vec3 bentResult;
-        vec4 value = giSampleVolume(worldPosition, normal, planeNormal, m_GiOrigin, m_GiSpacing, m_GiCounts,
-                m_GiEncoding, atlasInfo, dimensions, fract(m_GiAtlas.z) > 0.25 ? max(0.0, m_GiFadeDistance) : 0.0,
-                m_GiAtlas.w > 0.5, skyResult, bentResult);
-        giTotalSkyCoverage = skyResult.z * skyResult.y;
-        giSkyBentMoment = bentResult * skyResult.y;
-        giSkyDiffuseWeight = mix(1.0, skyResult.x, skyResult.y);
-        return vec4(value.rgb * skyResult.y, skyResult.y);
+        float fade = fract(m_GiAtlas.z) > 0.25 ? max(0.0, m_GiFadeDistance) : 0.0;
+        result.irradiance = giSampleVolume(worldPosition, normal, planeNormal, m_GiOrigin, m_GiSpacing, m_GiCounts,
+                m_GiEncoding, atlasInfo, dimensions, fade, m_GiAtlas.w > 0.5, result.sky, result.bent);
+    } else {
+        result = giSampleRoots(worldPosition, normal, planeNormal);
     }
-    vec3 sum = vec3(0.0);
-    float total = 0.0;
-    float skySum = 0.0;
-    vec3 bentSum = vec3(0.0);
-    float coverage = 0.0;
-    float totalSkySum = 0.0;
-    for (int volume = 0; volume < 16; volume++) {
-        if (volume >= m_GiVolumeCount) {
-            break;
-        }
-        float root = float(volume);
-        vec4 origin = giVolumeField(root, 0.0);
-        vec4 spacing = giVolumeField(root, 1.0);
-        vec4 counts = giVolumeField(root, 2.0);
-        // Unpublished/free page slots contain zero counts.
-        if (any(lessThan(counts.xyz, vec3(2.0)))) {
-            continue;
-        }
-        vec3 local = worldPosition - origin.xyz;
-        vec3 fullSize = (counts.xyz - 1.0) * spacing.xyz;
-        if (any(lessThan(local, vec3(0.0))) || any(greaterThan(local, fullSize))) {
-            continue;
-        }
-        float transition = 0.0;
-        vec3 fineSky = vec3(1.0, 0.0, 0.0);
-        vec3 fineBent = vec3(0.0);
-        vec4 fine = vec4(0.0);
-        vec3 blockSize = vec3(0.0);
-        if (m_GiVolumeDataHeight > 0) {
-            vec3 blocks = giVolumeField(root, 4.0).xyz;
-            if (blocks.x > 0.0) {
-                blockSize = giVolumeField(root, 5.0).xyz;
-                fine = giSampleBrick(root, worldPosition, normal, planeNormal, local, blocks, blockSize,
-                        transition, fineSky, fineBent);
-            }
-        }
-        vec3 skyResult = vec3(1.0, 0.0, 0.0);
-        vec3 bentResult = vec3(0.0);
-        vec4 value = vec4(0.0);
-        if (transition < 1.0) {
-            vec4 atlasInfo = giVolumeField(root, 3.0);
-            value = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
-                    vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult, bentResult);
-        }
-        if (blockSize.x > 0.0) {
-            vec3 edge = max(vec3(0.0), min(local, fullSize - local));
-            float outer = origin.w > 0.0 ? giOverlapWindow(edge, vec3(origin.w)) : 1.0;
-            float lo = (1.0 - transition) * skyResult.y;
-            float hi = transition * fineSky.y * outer;
-            float supported = lo + hi;
-            if (supported <= 0.0) {
-                continue;
-            }
-            float fineRatio = hi / supported;
-            vec3 originalSpacing = blockSize * 0.25;
-            float overlap = origin.w > 0.0 ? outer : giOverlapWindow(edge, originalSpacing);
-            value.rgb = mix(value.rgb, fine.rgb, fineRatio);
-            value.a = max(1.0e-5, overlap)
-                    / pow(max(originalSpacing.x * originalSpacing.y * originalSpacing.z, 1.0e-12), 1.0 / 3.0);
-            bentResult = mix(bentResult, fineBent, fineRatio);
-            skyResult = vec3(mix(skyResult.x, fineSky.x, fineRatio), supported,
-                    mix(skyResult.z, fineSky.z, fineRatio));
-        }
-        bentSum += bentResult * value.a;
-        skySum += skyResult.x * value.a;
-        totalSkySum += skyResult.z * value.a;
-        coverage = max(coverage, skyResult.y);
-        sum += value.rgb * value.a;
-        total += value.a;
-    }
-    giTotalSkyCoverage = total > 0.0 ? totalSkySum / total * coverage : 0.0;
-    giSkyDiffuseWeight = mix(1.0, total > 0.0 ? skySum / total : 1.0, coverage);
-    giSkyBentMoment = total > 0.0 ? bentSum / total * coverage : vec3(0.0);
-    return vec4(total > 0.0 ? sum / total * coverage : vec3(0.0), coverage);
+    float coverage = result.sky.y;
+    giTotalSkyCoverage = result.sky.z * coverage;
+    giSkyBentMoment = result.bent * coverage;
+    giSkyDiffuseWeight = mix(1.0, result.sky.x, coverage);
+    return vec4(result.irradiance * coverage, coverage);
 }
 vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
     // Use interpolated mesh normals, never perturbed material normals. This is
