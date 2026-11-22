@@ -29,7 +29,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 package com.jme3.profile;
 
 import com.jme3.renderer.ViewPort;
@@ -47,19 +47,47 @@ import com.jme3.renderer.queue.RenderQueue.Bucket;
 public interface AppProfiler {
 
     /**
+     * Begins a nested render-thread scope. Existing profiler implementations may
+     * ignore scopes. Calls must be balanced in finally, including failed passes.
+     * DetailedProfiler includes scopes in its CPU/GPU timing tree.
+     * <pre>{@code
+     * // 第一步：在渲染线程获取 RenderManager 的 profiler。
+     * AppProfiler profiler = renderManager.getProfiler();
+     * // 第二步：成对标记工作；FrameGraph 自动标记其所有已执行 Pass。
+     * if (profiler != null) {
+     *     profiler.beginScope("Custom work");
+     * }
+     * try {
+     *     renderCustomWork();
+     * } finally {
+     *     if (profiler != null) {
+     *         profiler.endScope();
+     *     }
+     * }
+     * }</pre>
+     * @param name scope name; slashes create display groups
+     */
+    default void beginScope(String name) {
+    }
+
+    /** Ends the most recent scope on the same thread. */
+    default void endScope() {
+    }
+
+    /**
      *  Called at the beginning of the specified AppStep.
-     * 
+     *
      * @param step the application-level step that's about to begin
      */
     public void appStep(AppStep step);
-    
+
     /**
      * Called as a substep of the previous AppStep
      *
      * @param additionalInfo information about the substep
      */
     public void appSubStep(String... additionalInfo);
-    
+
     /**
      *  Called at the beginning of the specified VpStep during
      *  the rendering of the specified ViewPort.  For bucket-specific

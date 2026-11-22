@@ -36,12 +36,23 @@ import java.util.Arrays;
  * See createGraph() for read/write/import declarations and target allocation.
  * All configuration happens on the render thread; RenderManager owns lifecycle.
  * Run gradlew :jme3-examples:frameGraphSmoke for offscreen pixel/cleanup checks.
+ * That command also verifies FrameGraph CPU/GPU profiler paths on OpenGL 4.3
+ * with timer-query support. Run main with --profile for the interactive overlay;
+ * F6 toggles it and the mouse wheel over the panel scrolls the pass list.
+ * // 第一步：stateManager.attach(new DetailedProfilerState())。
+ * // 第二步：按 2 或 3 切到 FrameGraph，展开 FrameGraph/Passes。
  */
 public class TestFrameGraph extends RenderPathExample {
     private FrameGraph graph;
     private boolean smoke;
+    private com.jme3.app.DetailedProfiler smokeProfiler;
     @Override
     public void simpleInitApp() {
+        if (smoke) {
+            smokeProfiler = new com.jme3.app.DetailedProfiler();
+            smokeProfiler.setRenderer(renderer);
+            setAppProfiler(smokeProfiler);
+        }
         cam.setLocation(new Vector3f(0, 0, 6));
         cam.lookAt(Vector3f.ZERO, Vector3f.UNIT_Y);
         viewPort.setBackgroundColor(new ColorRGBA(.03f, .04f, .06f, 1));
@@ -191,6 +202,18 @@ public class TestFrameGraph extends RenderPathExample {
                 throw new AssertionError("Graph/Forward mismatch: " + difference);
             }
             if (frame == 60) {
+                boolean pass = false;
+                boolean gpu = false;
+                for (var entry : smokeProfiler.getStats().entrySet()) {
+                    if (entry.getKey().contains("/FrameGraph/Passes/Opaque")) {
+                        pass |= entry.getValue().getAverageCpu() > 0;
+                        gpu |= entry.getValue().getAverageGpu() > 0;
+                    }
+                }
+                if (!pass || renderer.getCaps().contains(com.jme3.renderer.Caps.GpuTimerQuery) && !gpu) {
+                    throw new AssertionError("Missing FrameGraph CPU/GPU profiler samples");
+                }
+                System.out.println("FRAMEGRAPH_PROFILER_CPU_GPU_PASS");
                 if (!graph.getExecutionOrder().equals(Arrays.asList("Opaque", "Resolve"))) {
                     throw new AssertionError();
                 }
@@ -209,6 +232,9 @@ public class TestFrameGraph extends RenderPathExample {
     public static void main(String[] args) {
         TestFrameGraph app = new TestFrameGraph();
         app.smoke = Arrays.asList(args).contains("--smoke");
+        if (Arrays.asList(args).contains("--profile")) {
+            app.stateManager.attach(new com.jme3.app.DetailedProfilerState());
+        }
         if (app.smoke) {
             System.setProperty("renderpath.smoke", "true");
         }

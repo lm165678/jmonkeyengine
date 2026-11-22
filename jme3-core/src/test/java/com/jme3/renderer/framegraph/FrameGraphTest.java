@@ -8,6 +8,40 @@ import static org.junit.Assert.*;
 
 public class FrameGraphTest {
     @Test
+    public void profilerScopesBalanceOnAbortAndFailureAndSkipCulledPasses() {
+        List<String> events = new ArrayList<>();
+        com.jme3.app.DetailedProfiler profiler = new com.jme3.app.DetailedProfiler() {
+            @Override
+            public void beginScope(String name) {
+                events.add("+" + name);
+            }
+            @Override
+            public void endScope() {
+                events.add("-");
+            }
+        };
+        manager.setAppProfiler(profiler);
+        for (boolean fail : new boolean[]{false, true}) {
+            events.clear();
+            try (FrameGraph graph = new FrameGraph()) {
+                graph.addPass("Culled", pass -> fail("Culled pass ran"));
+                graph.addPass("Required", pass -> {
+                    if (fail) {
+                        throw new IllegalStateException("test");
+                    }
+                    pass.abort();
+                }).sideEffect();
+                try {
+                    assertFalse(graph.execute(manager, viewport));
+                    assertFalse(fail);
+                } catch (IllegalStateException expected) {
+                    assertTrue(fail);
+                }
+            }
+            assertEquals(Arrays.asList("+FrameGraph", "+Compile", "-", "+Passes/Required", "-", "-"), events);
+        }
+    }
+    @Test
     public void targetsFollowPhysicalFramebufferSizeWithoutResizingLogicalCamera() {
         ResourceDefinition<int[]> definition = new ResourceDefinition<int[]>() {
             @Override

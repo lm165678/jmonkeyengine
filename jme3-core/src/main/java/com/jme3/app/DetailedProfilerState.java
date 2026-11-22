@@ -49,6 +49,12 @@ import java.util.*;
 
 /**
  * Created by Nehon on 25/01/2017.
+ * FrameGraph passes appear automatically below their viewport while enabled.
+ * 第一步：在 simpleInitApp 中 stateManager.attach(new DetailedProfilerState())。
+ * 第二步：按 F6 切换面板；展开 FrameGraph/Passes 查看各 Pass 的 CPU/GPU 时间。
+ * 第三步：鼠标位于面板上时滚轮浏览长列表，点击阶段名称折叠子树。
+ * CPU values measure render-thread submission; GPU queries are asynchronous and
+ * require GpuTimerQuery support. Profiling adds overhead; disable for benchmarks.
  */
 public class DetailedProfilerState extends BaseAppState {
 
@@ -60,6 +66,22 @@ public class DetailedProfilerState extends BaseAppState {
     private static final String TOGGLE_KEY = "Toggle_Detailed_Profiler";
     private static final String CLICK_KEY = "Click_Detailed_Profiler";
     private static final String INSIGNIFICANT = "Hide insignificant stat";
+    private static final String SCROLL_UP = "DetailedProfiler_ScrollUp";
+    private static final String SCROLL_DOWN = "DetailedProfiler_ScrollDown";
+    private int scrollRows;
+    private final AnalogListener scrollListener = (name, value, tpf) -> {
+        if (!isEnabled() || this.rootLine == null) {
+            return;
+        }
+        Vector2f cursor = getApplication().getInputManager().getCursorPosition();
+        if (cursor.x < this.ui.getLocalTranslation().x || cursor.y > getApplication().getCamera().getHeight() - HEADER_HEIGHT) {
+            return;
+        }
+        int available = Math.max(1, (getApplication().getCamera().getHeight() - HEADER_HEIGHT) / LINE_HEIGHT);
+        scrollRows = Math.max(0, Math.min(Math.max(0, this.height - available),
+                scrollRows + (SCROLL_DOWN.equals(name) ? 3 : -3)));
+        layout();
+    };
     private final DetailedProfiler prof = new DetailedProfiler();
 
     private float time = 0;
@@ -157,6 +179,9 @@ public class DetailedProfilerState extends BaseAppState {
             inputManager.addMapping(TOGGLE_KEY, new KeyTrigger(KeyInput.KEY_F6));
             inputManager.addMapping(CLICK_KEY, new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
             inputManager.addListener(inputListener, TOGGLE_KEY, CLICK_KEY);
+            inputManager.addMapping(SCROLL_UP, new MouseAxisTrigger(MouseInput.AXIS_WHEEL, false));
+            inputManager.addMapping(SCROLL_DOWN, new MouseAxisTrigger(MouseInput.AXIS_WHEEL, true));
+            inputManager.addListener(scrollListener, SCROLL_UP, SCROLL_DOWN);
         }
     }
 
@@ -167,6 +192,9 @@ public class DetailedProfilerState extends BaseAppState {
         manager.deleteMapping(TOGGLE_KEY);
         manager.deleteMapping(CLICK_KEY);
         manager.removeListener(inputListener);
+        manager.deleteMapping(SCROLL_UP);
+        manager.deleteMapping(SCROLL_DOWN);
+        manager.removeListener(scrollListener);
     }
 
     @Override
@@ -215,10 +243,19 @@ public class DetailedProfilerState extends BaseAppState {
     }
 
     private void layout() {
+        ui.setLocalTranslation(Math.max(0, getApplication().getCamera().getWidth() - PANEL_WIDTH),
+                getApplication().getCamera().getHeight(), 0);
         height = 0;
         selectedValueCpu = 0;
         selectedValueGpu = 0;
         rootLine.layout(0);
+        int available = Math.max(1, (getApplication().getCamera().getHeight() - HEADER_HEIGHT) / LINE_HEIGHT);
+        int maximum = Math.max(0, height - available);
+        if (scrollRows > maximum) {
+            scrollRows = maximum;
+            layout();
+            return;
+        }
 
         frameTimeValue.setText(df.format(getMsFromNs(prof.getAverageFrameTime())) + "ms");
         frameTimeValue.setLocalTranslation(PANEL_WIDTH / 2, -PADDING, 0);
@@ -362,7 +399,7 @@ public class DetailedProfilerState extends BaseAppState {
 
         public void onClick(Vector2f pos) {
 
-            if (!visible) {
+            if (!visible || label.getCullHint() == Spatial.CullHint.Always) {
                 return;
             }
 
@@ -421,7 +458,13 @@ public class DetailedProfilerState extends BaseAppState {
                 label.setColor(ColorRGBA.White);
             }
 
-            int y = -(height * LINE_HEIGHT + HEADER_HEIGHT);
+            int y = -((height - scrollRows) * LINE_HEIGHT + HEADER_HEIGHT);
+            Spatial.CullHint hint = y > -HEADER_HEIGHT || y < -getApplication().getCamera().getHeight() + LINE_HEIGHT
+                    ? Spatial.CullHint.Always : Spatial.CullHint.Inherit;
+            label.setCullHint(hint);
+            cpuText.setCullHint(hint);
+            gpuText.setCullHint(hint);
+            checkBox.setCullHint(hint);
 
             label.setLocalTranslation(PADDING + indent * PADDING, y, 0);
             float gpuPos = PANEL_WIDTH - font.getLineWidth(gpuText.getText())

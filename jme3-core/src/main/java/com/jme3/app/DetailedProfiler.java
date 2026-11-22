@@ -41,6 +41,10 @@ import java.util.*;
 
 /**
  * Created by Nehon on 25/01/2017.
+ * Nested AppProfiler scopes use exclusive CPU segments; the display aggregates
+ * descendants into parent totals. Multiple segments of a path in one frame are
+ * summed. GPU samples are collected only after every query for that path/frame
+ * is available, including paths absent from later frames. No query wait is used.
  */
 public class DetailedProfiler implements AppProfiler {
 
@@ -53,6 +57,10 @@ public class DetailedProfiler implements AppProfiler {
     private boolean frameEnded = false;
     private Renderer renderer;
     private boolean ongoingGpuProfiling = false;
+    private final Deque<String> scopes = new ArrayDeque<>();
+    private final Deque<String[]> scopeContexts = new ArrayDeque<>();
+    private final Deque<VpStep> scopeVpSteps = new LinkedList<>();
+    private long segmentStart;
 
 
     private String curAppPath = null;
@@ -74,6 +82,10 @@ public class DetailedProfiler implements AppProfiler {
         curAppPath = step.name();
 
         if (step == AppStep.BeginFrame) {
+            startFrame = System.nanoTime();
+            curVpPath = null;
+            curSpPath = "";
+            lastVpStep = null;
             if (data == null) {
                 data = new LinkedHashMap<>();
                 pool = new HashMap<>();
@@ -88,19 +100,30 @@ public class DetailedProfiler implements AppProfiler {
 
             frameEnded = false;
             if (renderer != null) {
-                for (StatLine statLine : data.values()) {
-                    for (Iterator<Integer> i = statLine.taskIds.iterator(); i.hasNext(); ) {
-                        int id = i.next();
-                        if (renderer.isTaskResultAvailable(id)) {
-                            long val = renderer.getProfilingTime(id);
-                            statLine.setValueGpu(val);
-                            i.remove();
+                for (StatLine statLine : pool.values()) {
+                    for (Iterator<List<Integer>> batches = statLine.taskIds.iterator(); batches.hasNext();) {
+                        List<Integer> batch = batches.next();
+                        boolean ready = true;
+                        for (int id : batch) {
+                            ready &= renderer.isTaskResultAvailable(id);
+                        }
+                        if (!ready) {
+                            break;
+                        }
+                        long total = 0;
+                        for (int id : batch) {
+                            total += renderer.getProfilingTime(id);
                             idsPool.push(id);
                         }
+                        statLine.setValueGpu(total);
+                        batches.remove();
                     }
                 }
             }
             data.clear();
+            scopes.clear();
+            scopeContexts.clear();
+            scopeVpSteps.clear();
         }
 
         if (data != null) {
@@ -202,6 +225,9 @@ public class DetailedProfiler implements AppProfiler {
 
 
     private void addStep(String path, long value) {
+        if (!scopes.isEmpty() && !path.startsWith(scopes.peek())) {
+            path = scopes.peek() + "/" + path;
+        }
         if (ongoingGpuProfiling && renderer != null) {
             renderer.stopProfiling();
             ongoingGpuProfiling = false;
@@ -210,7 +236,7 @@ public class DetailedProfiler implements AppProfiler {
         if (prevPath != null) {
             StatLine prevLine = data.get(prevPath);
             if (prevLine != null) {
-                prevLine.setValueCpu(value - prevLine.getValueCpu());
+                prevLine.setValueCpu(prevLine.getValueCpu() + value - segmentStart);
             }
         }
 
@@ -219,11 +245,19 @@ public class DetailedProfiler implements AppProfiler {
             line = new StatLine(currentFrame);
             pool.put(path, line);
         }
+        if (!data.containsKey(path)) {
+            line.setNewFrameValueCpu(0);
+            line.frameTasks = null;
+        }
         data.put(path, line);
-        line.setNewFrameValueCpu(value);
+        segmentStart = value;
         if (renderer != null) {
             int id = getUnusedTaskId();
-            line.taskIds.add(id);
+            if (line.frameTasks == null) {
+                line.frameTasks = new ArrayList<>();
+                line.taskIds.add(line.frameTasks);
+            }
+            line.frameTasks.add(id);
             renderer.startProfiling(id);
             ongoingGpuProfiling = true;
         }
@@ -239,6 +273,34 @@ public class DetailedProfiler implements AppProfiler {
             }
         }
         return path.toString();
+    }
+
+    @Override
+    public void beginScope(String name) {
+        if (data == null) {
+            return;
+        }
+        String parent = scopes.isEmpty()
+                ? curAppPath + (curVpPath == null ? "" : "/" + curVpPath) : scopes.peek();
+        scopeContexts.push(new String[]{curAppPath, curVpPath, curSpPath, parent});
+        scopeVpSteps.push(lastVpStep);
+        scopes.push(parent + "/" + name);
+        addStep(scopes.peek(), System.nanoTime());
+    }
+
+    @Override
+    public void endScope() {
+        if (scopes.isEmpty()) {
+            return;
+        }
+        scopes.pop();
+        String[] saved = scopeContexts.pop();
+        curAppPath = saved[0];
+        curVpPath = saved[1];
+        curSpPath = saved[2];
+        lastVpStep = scopeVpSteps.pop();
+        String parent = saved[3];
+        addStep(parent + "/Overhead", System.nanoTime());
     }
 
     public void setRenderer(Renderer renderer) {
@@ -277,7 +339,8 @@ public class DetailedProfiler implements AppProfiler {
         private long lastValue = 0;
         private int nbFramesCpu;
         private int nbFramesGpu;
-        List<Integer> taskIds = new ArrayList<>();
+        List<List<Integer>> taskIds = new ArrayList<>();
+        List<Integer> frameTasks;
 
 
         private StatLine(int currentFrame) {

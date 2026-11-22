@@ -56,6 +56,11 @@ import java.util.function.Consumer;
  * <p>This is a single graphics-queue graph, appropriate for jME's OpenGL renderer.
  * It does not introduce parallel GL contexts or backend-specific memory aliasing.
  * A graph instance is owned by one viewport; use one graph/pool per viewport.</p>
+ * <p>With DetailedProfiler enabled, execution reports FrameGraph/Compile and
+ * FrameGraph/Passes/name scopes below the viewport, including expanded passes.
+ * Culled passes report no execution time. Pass timings include resource acquisition,
+ * synchronization, callback submission and resource release. GPU timer results are
+ * collected asynchronously by the profiler; they are not CPU submission times.</p>
  */
 public final class FrameGraph implements AutoCloseable {
     private static final class Resource {
@@ -1491,6 +1496,22 @@ public final class FrameGraph implements AutoCloseable {
      * @return true on success, false after context.abort()
      */
     public boolean execute(RenderManager manager, ViewPort viewport, RenderQueue queue) {
+        Objects.requireNonNull(manager);
+        com.jme3.profile.AppProfiler profiler = manager.getProfiler();
+        if (profiler != null) {
+            profiler.beginScope("FrameGraph");
+        }
+        try {
+            return executeProfiled(manager, viewport, queue);
+        } finally {
+            if (profiler != null) {
+                profiler.endScope();
+            }
+        }
+    }
+
+    private boolean executeProfiled(RenderManager manager, ViewPort viewport, RenderQueue queue) {
+        com.jme3.profile.AppProfiler profiler = manager.getProfiler();
         if (closed || executing) {
             throw new IllegalStateException("Graph closed or reentrant");
         }
@@ -1499,7 +1520,16 @@ public final class FrameGraph implements AutoCloseable {
         }
         Objects.requireNonNull(manager);
         Objects.requireNonNull(viewport);
-        compile();
+        if (profiler != null) {
+            profiler.beginScope("Compile");
+        }
+        try {
+            compile();
+        } finally {
+            if (profiler != null) {
+                profiler.endScope();
+            }
+        }
         if (ownerViewport != null && (ownerViewport != viewport || ownerManager != manager)) {
             throw new IllegalStateException("Graph already owned by another viewport");
         }
@@ -1527,40 +1557,49 @@ public final class FrameGraph implements AutoCloseable {
         try {
             for (int i = 0; i < schedule.size(); i++) {
                 context.pass = schedule.get(i);
-                for (Resource r : resources) {
-                    if (r.first == i || !r.resolved && (r.imported != null || r.persistent != null)
-                        && (context.pass.reads.contains(r.handle.index)
-                            || context.pass.writes.contains(r.handle.index))) {
-                        acquire(r);
-                    }
+                if (profiler != null) {
+                    profiler.beginScope("Passes/" + context.pass.name);
                 }
-                for (int id : context.pass.reads) {
-                    Persistent persistent = resources.get(id).persistent;
-                    if (persistent != null && !persistent.valid) {
-                        throw new IllegalStateException("Uninitialized persistent read: "
-                            + resources.get(id).handle);
-                    }
-                }
-                executedPasses.add(context.pass.name);
-                manager.getRenderer().pushDebugGroup(viewport.getName() + "/" + context.pass.name);
                 try {
-                    synchronizeAccesses(context.pass);
-                    context.pass.callback.execute(context);
-                } finally {
-                    manager.getRenderer().popDebugGroup();
-                }
-                if (context.aborted) {
-                    return false;
-                }
-                for (int id : context.pass.writes) {
-                    Persistent persistent = resources.get(id).persistent;
-                    if (persistent != null) {
-                        persistent.valid = true;
+                    for (Resource r : resources) {
+                        if (r.first == i || !r.resolved && (r.imported != null || r.persistent != null)
+                            && (context.pass.reads.contains(r.handle.index)
+                                || context.pass.writes.contains(r.handle.index))) {
+                            acquire(r);
+                        }
                     }
-                }
-                for (Resource r : resources) {
-                    if (r.last == i && !isStorageExported(r)) {
-                        release(r);
+                    for (int id : context.pass.reads) {
+                        Persistent persistent = resources.get(id).persistent;
+                        if (persistent != null && !persistent.valid) {
+                            throw new IllegalStateException("Uninitialized persistent read: "
+                                + resources.get(id).handle);
+                        }
+                    }
+                    executedPasses.add(context.pass.name);
+                    manager.getRenderer().pushDebugGroup(viewport.getName() + "/" + context.pass.name);
+                    try {
+                        synchronizeAccesses(context.pass);
+                        context.pass.callback.execute(context);
+                    } finally {
+                        manager.getRenderer().popDebugGroup();
+                    }
+                    if (context.aborted) {
+                        return false;
+                    }
+                    for (int id : context.pass.writes) {
+                        Persistent persistent = resources.get(id).persistent;
+                        if (persistent != null) {
+                            persistent.valid = true;
+                        }
+                    }
+                    for (Resource r : resources) {
+                        if (r.last == i && !isStorageExported(r)) {
+                            release(r);
+                        }
+                    }
+                } finally {
+                    if (profiler != null) {
+                        profiler.endScope();
                     }
                 }
             }
