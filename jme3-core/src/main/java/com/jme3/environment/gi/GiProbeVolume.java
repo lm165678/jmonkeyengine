@@ -50,6 +50,7 @@ public final class GiProbeVolume extends Node {
     private GiProbeData data;
     private Transform bakedTransform;
     private String streamAsset;
+    private GiProbeStreamingData streamingData;
     private String bakedSkyState;
     private long streamBytes;
     private float intensity = 1;
@@ -72,6 +73,7 @@ public final class GiProbeVolume extends Node {
         counts.set(x, y, z);
         data = null;
         streamAsset = null;
+        streamingData = null;
         streamBytes = 0;
         // Generated refinements describe the previous coverage/grid. Explicit
         // user-authored child nodes remain untouched.
@@ -308,8 +310,9 @@ public final class GiProbeVolume extends Node {
     }
 
     /** Returns an embedded completed bake, or null before baking, after resizing,
-     * or when the payload is external. For external data use getStreamAsset()
-     * and register a loader with GiProbeStreamer. This method does not read from disk.
+     * or when the payload is external. Read the coarse layer through
+     * {@link #getStreamingData()} when present; {@link #getStreamAsset()}
+     * identifies legacy external data. This method does not read from disk.
      */
     public GiProbeData getData() {
         if (!getWorldRotation().equals(Quaternion.IDENTITY)) {
@@ -347,6 +350,7 @@ public final class GiProbeVolume extends Node {
             return false;
         }
         streamAsset = assetKey;
+        streamingData = null;
         streamBytes = expected.getTextureBytes();
         data = null;
         return true;
@@ -355,6 +359,32 @@ public final class GiProbeVolume extends Node {
     /** Valid external bake key, or null for embedded/unbaked/changed placement. */
     public String getStreamAsset() {
         return bakedTransform != null && bakedTransform.equals(getWorldTransform()) ? streamAsset : null;
+    }
+
+    /**
+     * Installs a complete coarse/fine bake after its fine assets were written.
+     * Call on the scene thread. A changed or replaced source rejects publication.
+     * See {@link GiProbeStreamingData} for a full baking and loading example.
+     *
+     * @param baked completed coarse/fine directory
+     * @param expected source captured by the writer
+     * @return whether the revision was installed
+     */
+    public boolean useStreamingData(GiProbeStreamingData baked, GiProbeData expected) {
+        java.util.Objects.requireNonNull(baked, "baked");
+        if (expected == null || getData() != expected) {
+            return false;
+        }
+        streamingData = baked;
+        streamAsset = null;
+        streamBytes = 0;
+        data = null;
+        return true;
+    }
+
+    /** @return the published brick directory for the current world transform, or null */
+    public GiProbeStreamingData getStreamingData() {
+        return bakedTransform != null && bakedTransform.equals(getWorldTransform()) ? streamingData : null;
     }
 
     /** Declared uncompressed texture payload bound for external chunk admission. */
@@ -393,7 +423,7 @@ public final class GiProbeVolume extends Node {
      * @return No bake, Unknown (rebake), Current, or Stale (rebake)
      */
     public String getSkyBakeStatus() {
-        if (data == null && streamAsset == null) {
+        if (data == null && streamAsset == null && streamingData == null) {
             return "No bake";
         }
         if (bakedSkyState == null) {
@@ -415,6 +445,7 @@ public final class GiProbeVolume extends Node {
         bakedSkyState = null;
         data = result;
         streamAsset = null;
+        streamingData = null;
         streamBytes = 0;
         bakedTransform = getWorldTransform().clone();
     }
@@ -436,6 +467,7 @@ public final class GiProbeVolume extends Node {
         out.write(counts, "giCounts", new Vector3f(5, 5, 5));
         out.write(data, "giData", null);
         out.write(streamAsset, "giStreamAsset", null);
+        out.write(streamingData, "giStreamingData", null);
         out.write(streamBytes, "giStreamBytes", 0L);
         out.write(bakedSkyState, "giSkyState", null);
         out.write(intensity, "giIntensity", 1f);
@@ -456,6 +488,7 @@ public final class GiProbeVolume extends Node {
         counts = (Vector3f) in.readSavable("giCounts", new Vector3f(5, 5, 5));
         data = (GiProbeData) in.readSavable("giData", null);
         streamAsset = in.readString("giStreamAsset", null);
+        streamingData = (GiProbeStreamingData) in.readSavable("giStreamingData", null);
         streamBytes = in.readLong("giStreamBytes", 0L);
         bakedSkyState = in.readString("giSkyState", null);
         setIntensity(in.readFloat("giIntensity", 1f));

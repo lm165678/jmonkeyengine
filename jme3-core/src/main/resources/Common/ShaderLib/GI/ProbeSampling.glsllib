@@ -37,6 +37,7 @@ uniform bool m_GiBakeBounce;
 uniform vec2 m_GiEncoding;
 uniform sampler2D m_GiVolumeData;
 uniform int m_GiVolumeCount;
+uniform int m_GiVolumeDataHeight;
 uniform vec4 m_GiTextureSize;
 
 vec4 giReadCoefficient(float probe, float coefficient, vec4 atlasInfo, vec4 dimensions) {
@@ -414,6 +415,71 @@ vec4 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
     return vec4(result, weight);
 }
 
+// Paged scene atlas: 128 descriptor rows (16 roots), then 32 index rows
+// per root. Each index channel stores one-based brick slot, zero if absent.
+vec4 giVolumeField(float row, float field) {
+    float width = m_GiVolumeDataHeight > 0 ? 256.0 : 4.0;
+    float height = float(m_GiVolumeDataHeight > 0 ? m_GiVolumeDataHeight : m_GiVolumeCount);
+    return texture2D(m_GiVolumeData, vec2((field + 0.5) / width,
+            (row + 0.5) / height));
+}
+
+float giBrickSlot(float root, vec3 coord, vec3 blocks) {
+    float cell = coord.x + blocks.x * (coord.y + blocks.y * coord.z);
+    float texel = floor(cell * 0.25);
+    vec4 entry = giVolumeField(128.0 + root * 32.0 + floor(texel / 256.0), mod(texel, 256.0));
+    float channel = mod(cell, 4.0);
+    if (channel < 1.0) {
+        return entry.x;
+    }
+    if (channel < 2.0) {
+        return entry.y;
+    }
+    return channel < 3.0 ? entry.z : entry.w;
+}
+
+vec4 giSampleBrick(float root, vec3 worldPosition, vec3 normal, vec3 planeNormal,
+        vec3 local, vec3 blocks, vec3 blockSize, out float blend, out vec3 skyResult, out vec3 bentResult) {
+    blend = 0.0;
+    skyResult = vec3(1.0, 0.0, 0.0);
+    bentResult = vec3(0.0);
+    vec3 coord = min(floor(local / blockSize), blocks - 1.0);
+    float slot = giBrickSlot(root, coord, blocks) - 1.0;
+    if (slot < 0.0) {
+        return vec4(0.0);
+    }
+    vec4 origin = giVolumeField(slot, 0.0);
+    vec4 spacing = giVolumeField(slot, 1.0);
+    vec4 counts = giVolumeField(slot, 2.0);
+    vec4 atlasInfo = giVolumeField(slot, 3.0);
+    vec4 result = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
+            vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, 0.0, true, skyResult, bentResult);
+    if (skyResult.y <= 0.0) {
+        return result;
+    }
+    vec3 fromLow = local - coord * blockSize;
+    vec3 fromHigh = blockSize - fromLow;
+    blend = 1.0;
+    // The halo gives both present bricks the same stencil at their boundary.
+    // Fade only next to missing data, and keep the outer volume boundary lit.
+    for (int axis = 0; axis < 3; axis++) {
+        vec3 neighbor = coord;
+        if (coord[axis] > 0.0 && fromLow[axis] < spacing[axis]) {
+            neighbor[axis] = coord[axis] - 1.0;
+            if (giBrickSlot(root, neighbor, blocks) == 0.0) {
+                blend = min(blend, smoothstep(0.0, spacing[axis], fromLow[axis]));
+            }
+        }
+        if (coord[axis] < blocks[axis] - 1.0 && fromHigh[axis] < spacing[axis]) {
+            neighbor[axis] = coord[axis] + 1.0;
+            if (giBrickSlot(root, neighbor, blocks) == 0.0) {
+                blend = min(blend, smoothstep(0.0, spacing[axis], fromHigh[axis]));
+            }
+        }
+    }
+    return result;
+}
+
 vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
     if (!m_GiEnabled) {
         return vec4(0.0);
@@ -448,19 +514,59 @@ vec4 giSampleIndirect(vec3 worldPosition, vec3 normal) {
         if (volume >= m_GiVolumeCount) {
             break;
         }
-        float y = (float(volume) + 0.5) / float(m_GiVolumeCount);
-        vec4 origin = texture2D(m_GiVolumeData, vec2(0.125, y));
-        vec4 spacing = texture2D(m_GiVolumeData, vec2(0.375, y));
-        vec4 counts = texture2D(m_GiVolumeData, vec2(0.625, y));
+        float root = float(volume);
+        vec4 origin = giVolumeField(root, 0.0);
+        vec4 spacing = giVolumeField(root, 1.0);
+        vec4 counts = giVolumeField(root, 2.0);
         // Unpublished/free page slots contain zero counts.
         if (any(lessThan(counts.xyz, vec3(2.0)))) {
             continue;
         }
-        vec4 atlasInfo = texture2D(m_GiVolumeData, vec2(0.875, y));
-        vec3 skyResult;
-        vec3 bentResult;
-        vec4 value = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
-                vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult, bentResult);
+        vec3 local = worldPosition - origin.xyz;
+        vec3 fullSize = (counts.xyz - 1.0) * spacing.xyz;
+        if (any(lessThan(local, vec3(0.0))) || any(greaterThan(local, fullSize))) {
+            continue;
+        }
+        float transition = 0.0;
+        vec3 fineSky = vec3(1.0, 0.0, 0.0);
+        vec3 fineBent = vec3(0.0);
+        vec4 fine = vec4(0.0);
+        vec3 blockSize = vec3(0.0);
+        if (m_GiVolumeDataHeight > 0) {
+            vec3 blocks = giVolumeField(root, 4.0).xyz;
+            if (blocks.x > 0.0) {
+                blockSize = giVolumeField(root, 5.0).xyz;
+                fine = giSampleBrick(root, worldPosition, normal, planeNormal, local, blocks, blockSize,
+                        transition, fineSky, fineBent);
+            }
+        }
+        vec3 skyResult = vec3(1.0, 0.0, 0.0);
+        vec3 bentResult = vec3(0.0);
+        vec4 value = vec4(0.0);
+        if (transition < 1.0) {
+            vec4 atlasInfo = giVolumeField(root, 3.0);
+            value = giSampleVolume(worldPosition, normal, planeNormal, origin.xyz, spacing.xyz, counts.xyz,
+                    vec2(spacing.w, counts.w), atlasInfo, m_GiTextureSize, origin.w, true, skyResult, bentResult);
+        }
+        if (blockSize.x > 0.0) {
+            vec3 edge = max(vec3(0.0), min(local, fullSize - local));
+            float outer = origin.w > 0.0 ? giOverlapWindow(edge, vec3(origin.w)) : 1.0;
+            float lo = (1.0 - transition) * skyResult.y;
+            float hi = transition * fineSky.y * outer;
+            float supported = lo + hi;
+            if (supported <= 0.0) {
+                continue;
+            }
+            float fineRatio = hi / supported;
+            vec3 originalSpacing = blockSize * 0.25;
+            float overlap = origin.w > 0.0 ? outer : giOverlapWindow(edge, originalSpacing);
+            value.rgb = mix(value.rgb, fine.rgb, fineRatio);
+            value.a = max(1.0e-5, overlap)
+                    / pow(max(originalSpacing.x * originalSpacing.y * originalSpacing.z, 1.0e-12), 1.0 / 3.0);
+            bentResult = mix(bentResult, fineBent, fineRatio);
+            skyResult = vec3(mix(skyResult.x, fineSky.x, fineRatio), supported,
+                    mix(skyResult.z, fineSky.z, fineRatio));
+        }
         bentSum += bentResult * value.a;
         skySum += skyResult.x * value.a;
         totalSkySum += skyResult.z * value.a;

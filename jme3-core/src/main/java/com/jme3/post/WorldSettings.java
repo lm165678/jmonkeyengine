@@ -12,7 +12,7 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Post-processing settings saved with the scene. GPU resources are created at runtime.
+ * Rendering settings saved with the scene. GPU resources are created at runtime.
  * SimpleApplication scene services apply the highest-priority attached settings
  * to the main viewport. Equal priorities use scene traversal order. Existing
  * application-owned FPPs take precedence; disabling scene services restores
@@ -49,6 +49,69 @@ public final class WorldSettings extends AbstractControl {
     private int priority;
     private long revision;
     private DisplayOutput displayOutput = DisplayOutput.Hdr;
+    private GiStreaming giStreaming = GiStreaming.DEFAULTS;
+
+    /** Immutable streaming policy shared by the scene and its editor preview. */
+    public static final class GiStreaming {
+        public static final GiStreaming DEFAULTS = new GiStreaming(64, 8192, 64);
+        public static final int MIN_ATLAS_MIB = 8;
+        public static final int MAX_ATLAS_MIB = 256;
+        private final float preloadDistance;
+        private final int maxFineProbes;
+        private final int atlasMiB;
+
+        /**
+         * @param preloadDistance camera-to-brick preload distance in world units
+         * @param maxFineProbes scene-wide budget including sampling halos; zero uses coarse only
+         * @param atlasMiB GPU atlas budget in MiB, including coarse and legacy volume pages
+         */
+        public GiStreaming(float preloadDistance, int maxFineProbes, int atlasMiB) {
+            if (!Float.isFinite(preloadDistance) || preloadDistance <= 0 || maxFineProbes < 0
+                    || atlasMiB < MIN_ATLAS_MIB || atlasMiB > MAX_ATLAS_MIB) {
+                throw new IllegalArgumentException("Invalid GI streaming budget");
+            }
+            this.preloadDistance = preloadDistance;
+            this.maxFineProbes = maxFineProbes;
+            this.atlasMiB = atlasMiB;
+        }
+
+        public float getPreloadDistance() {
+            return preloadDistance;
+        }
+
+        public int getMaxFineProbes() {
+            return maxFineProbes;
+        }
+
+        public int getAtlasMiB() {
+            return atlasMiB;
+        }
+    }
+
+    /**
+     * Sets the scene's fine GI streaming limits. Change on the scene thread.
+     * GPU budget changes rebuild the atlas; radius and probe changes apply on
+     * the next update without rebaking. Old scenes use {@link GiStreaming#DEFAULTS}.
+     * <pre>{@code
+     * // 第一步：加载 SDK 保存的 J3O 并挂载，自动读取场景配置。
+     * Spatial world = assetManager.loadModel("Scenes/World.j3o");
+     * rootNode.attachChild(world);
+     * // 第二步：在场景线程调整运行时预算，保存 J3O 可保留配置。
+     * WorldSettings settings = world.getControl(WorldSettings.class);
+     * settings.setGiStreaming(new WorldSettings.GiStreaming(64f, 4096, 64));
+     * // 第三步：用 0 个细探针可预览粗层，恢复 DEFAULTS 后重新流送细层。
+     * }</pre>
+     *
+     * @param settings immutable settings for the attached world
+     */
+    public void setGiStreaming(GiStreaming settings) {
+        giStreaming = Objects.requireNonNull(settings, "settings");
+    }
+
+    /** @return current GI streaming policy, including defaults for older files */
+    public GiStreaming getGiStreaming() {
+        return giStreaming;
+    }
 
     /**
      * Selects display output independently of the scene's post-processing filters.
@@ -136,6 +199,9 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(postProcessing, "postProcessing", new byte[0]);
         capsule.write(priority, "priority", 0);
         capsule.write(displayOutput, "displayOutput", DisplayOutput.Application);
+        capsule.write(giStreaming.preloadDistance, "giPreloadDistance", GiStreaming.DEFAULTS.preloadDistance);
+        capsule.write(giStreaming.maxFineProbes, "giMaxFineProbes", GiStreaming.DEFAULTS.maxFineProbes);
+        capsule.write(giStreaming.atlasMiB, "giAtlasMiB", GiStreaming.DEFAULTS.atlasMiB);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -152,6 +218,14 @@ public final class WorldSettings extends AbstractControl {
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);
+        try {
+            giStreaming = new GiStreaming(
+                    capsule.readFloat("giPreloadDistance", GiStreaming.DEFAULTS.preloadDistance),
+                    capsule.readInt("giMaxFineProbes", GiStreaming.DEFAULTS.maxFineProbes),
+                    capsule.readInt("giAtlasMiB", GiStreaming.DEFAULTS.atlasMiB));
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid scene GI streaming settings", invalid);
+        }
         String[] names = capsule.readStringArray("optionNames", new String[0]);
         double[] values = capsule.readDoubleArray("optionValues", new double[0]);
         if (names.length != values.length) {

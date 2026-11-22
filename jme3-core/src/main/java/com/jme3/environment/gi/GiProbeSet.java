@@ -43,6 +43,7 @@ import java.util.*;
  */
 public final class GiProbeSet implements AutoCloseable {
     public static final int MAX_VOLUMES = 16;
+    private Texture2D legacyMetadata;
 
     /** Immutable placement snapshot. fadeDistance is in world units, nonnegative. */
     public static final class Entry {
@@ -174,12 +175,13 @@ public final class GiProbeSet implements AutoCloseable {
     }
 
     // Shared binding contract for the incremental resident page pool.
-    GiProbeSet(Texture2D sh, Texture2D moments, Texture2D sky, Texture2D metadata) {
+    GiProbeSet(Texture2D sh, Texture2D moments, Texture2D sky, Texture2D metadata, Texture2D legacyMetadata) {
         this.sh = sh;
         this.moments = moments;
         this.skyVisibility = sky;
         this.metadata = metadata;
         this.count = MAX_VOLUMES;
+        this.legacyMetadata = legacyMetadata;
     }
 
     private static void copy(Image source, ByteBuffer target, int width, int row, boolean compact) {
@@ -195,7 +197,8 @@ public final class GiProbeSet implements AutoCloseable {
 
     public long getTextureBytes() {
         return (long) sh.getImage().getData(0).capacity() + moments.getImage().getData(0).capacity()
-                + metadata.getImage().getData(0).capacity() + skyVisibility.getImage().getData(0).capacity();
+                + metadata.getImage().getData(0).capacity() + skyVisibility.getImage().getData(0).capacity()
+                + (legacyMetadata == null ? 0 : legacyMetadata.getImage().getData(0).capacity());
     }
 
     public Binding bind(Material material, float normalBias) {
@@ -208,12 +211,16 @@ public final class GiProbeSet implements AutoCloseable {
     /** Restores parameters present before binding. Do not nest bindings on a material. */
     public final class Binding implements AutoCloseable {
         private final String[] names = {"GiIrradiance", "GiMoments", "GiVolumeData", "GiVolumeCount",
-            "GiTextureSize", "GiBias", "GiEnabled", "GiSkyVisibility"};
-        private final MatParam[] previous = new MatParam[names.length];
+            "GiTextureSize", "GiBias", "GiEnabled", "GiSkyVisibility", "GiVolumeDataHeight"};
+        private final int parameterCount;
+        private final MatParam[] previous;
         private Material material;
 
         private Binding(Material material, float bias) {
-            for (int i = 0; i < names.length; i++) {
+            boolean supportsBricks = material.getMaterialDef().getMaterialParam("GiVolumeDataHeight") != null;
+            parameterCount = supportsBricks ? names.length : names.length - 1;
+            previous = new MatParam[parameterCount];
+            for (int i = 0; i < parameterCount; i++) {
                 if (material.getMaterialDef().getMaterialParam(names[i]) == null) {
                     throw new IllegalArgumentException("Missing GI parameter " + names[i]);
                 }
@@ -224,8 +231,11 @@ public final class GiProbeSet implements AutoCloseable {
             material.setTexture("GiIrradiance", sh);
             material.setTexture("GiMoments", moments);
             material.setTexture("GiSkyVisibility", skyVisibility);
-            material.setTexture("GiVolumeData", metadata);
+            material.setTexture("GiVolumeData", !supportsBricks && legacyMetadata != null ? legacyMetadata : metadata);
             material.setInt("GiVolumeCount", count);
+            if (supportsBricks) {
+                material.setInt("GiVolumeDataHeight", legacyMetadata == null ? 0 : metadata.getImage().getHeight());
+            }
             material.setVector4("GiTextureSize", new Vector4f(sh.getImage().getWidth(), sh.getImage().getHeight(),
                     moments.getImage().getWidth(), moments.getImage().getHeight()));
             material.setFloat("GiBias", bias);
@@ -237,7 +247,7 @@ public final class GiProbeSet implements AutoCloseable {
             if (material == null) {
                 return;
             }
-            for (int i = 0; i < names.length; i++) {
+            for (int i = 0; i < parameterCount; i++) {
                 material.clearParam(names[i]);
                 if (previous[i] instanceof MatParamTexture) {
                     material.setTexture(names[i], (Texture) previous[i].getValue());
@@ -257,6 +267,9 @@ public final class GiProbeSet implements AutoCloseable {
             skyVisibility.getImage().dispose();
             moments.getImage().dispose();
             metadata.getImage().dispose();
+            if (legacyMetadata != null) {
+                legacyMetadata.getImage().dispose();
+            }
         }
     }
 }

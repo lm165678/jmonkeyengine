@@ -689,3 +689,10 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - Implementation pair: SDK 217d403bc968311e34cb8ab6f5f2bb0ad93c2b7e (master), engine 7b31f949e3bdfb3d1332a6b3abf6034875979869 (dev_fix_lightprobe_issue). Documentation-only commits follow.
 - Current sources/tests and prior validation records are collected; no additional full build or full-suite run for this push. SDK generated templates, native libraries, testdata JAR, generated ZIPs and local build counters remain local.
 - Fork destinations: lm165678/jmesdk and lm165678/jmonkeyengine. Remote success must be verified after pushing.
+
+## 2026-11-22 普通 GI Probe Volume 粗层与空间细块流送
+
+- SDK 普通规则网格烘焙可使用 GiProbeStreamingData：从已捕获结果抽取覆盖原体积的粗网格，每轴最多 8 个样本，低分辨率距离纹理保留原编码；每个细块为 4 格/轴，附最多两格采样边界，保留细层的 SH、位置偏移、有效性和距离统计。粗层及块目录写入 J3O，细块分别保存为压缩资产。旧内嵌网格和旧 .giprobe 可照常加载，已有资产需要以新流程重烘焙才转换。
+- SceneServicesState 读取附加场景的 WorldSettings。默认预取 64 世界单位，细层探针上限 8192（含采样边界），GPU 图集 64 MiB。距离和探针预算下一次更新生效，图集变化重建图集，0 个细探针使用粗层。新目录的粗层优先于细块驻留并独立于细层相机半径。图集仍有 16 个根描述槽，细块有独立的 112 个槽，实际容量受预算和纹理尺寸限制。
+- Shader 从空间坐标查一个细块槽。完整上传后才发布索引，卸载时清除索引并恢复粗层。细块内部只取细层，有缺块的内部边缘渐变至粗层。不同 Volume 仍按原有区域规则混合。旧自定义 GI 材质继续获得原格式的根层元数据。
+- RTX 5080 / OpenGL 4.3，JDK25 定向编译与 GI_BRICK_STREAMING_PASS、GI_ADAPTIVE_PASS 通过。新流水线覆盖实际烘焙、J3O 自动配置、两区域按需读取、0 预算与资源缺失粗层回退，以及四渲染路径。TestGiSurfaceProbes 在基线和本改动均触发亮度 0/0 断言。用户项目的大场景效果、显存性能与旧版重叠覆盖报告仍待单独验证。对应引擎与 SDK 实现基线分别为 86a9556b4、aea7fdbe。未构建 SDK 或替换安装。

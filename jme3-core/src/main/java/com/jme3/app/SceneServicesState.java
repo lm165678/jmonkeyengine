@@ -2,14 +2,13 @@ package com.jme3.app;
 
 import com.jme3.app.state.AbstractAppState;
 import com.jme3.app.state.AppStateManager;
-import com.jme3.asset.AssetKey;
 import com.jme3.environment.gi.*;
 import com.jme3.material.Material;
 import com.jme3.math.Vector3f;
+import com.jme3.post.WorldSettings;
 import com.jme3.post.WorldSettings.DisplayOutput;
 import com.jme3.renderer.Limits;
 import com.jme3.scene.*;
-import java.io.FileNotFoundException;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -27,6 +26,8 @@ import java.util.concurrent.*;
  * light shadows retain their own existing renderer lifecycle.
  * Adaptive refinement children are ordinary serialized GiProbeVolume nodes:
  * discovery, external payload loading and shader binding are automatic too.
+ * Regular baked grids can embed coarse data and a fine brick directory. The
+ * attached world's GI settings govern fine residency and GPU atlas size.
  * Ship every referenced .giprobe asset with the J3O. Loading never rebakes GI.
  * Service membership is cached and refreshed after attachment, detachment,
  * material or control changes through normal scene APIs. Moving objects does not
@@ -77,10 +78,13 @@ public final class SceneServicesState extends AbstractAppState {
     private GiProbeStreamer gi;
     private ExecutorService io;
     private long sequence;
+    private int giAtlasMiB;
+    private boolean giBricks;
 
     private static final class Source {
         String id;
         GiProbeData data;
+        GiProbeStreamingData bricks;
         String asset;
         Vector3f offset;
     }
@@ -100,14 +104,19 @@ public final class SceneServicesState extends AbstractAppState {
     public void update(float tpf) {
         catalog.refresh(app.getRootNode());
         physics.update(app, catalog.controls);
-        com.jme3.post.WorldSettings selected = null;
-        for (com.jme3.post.WorldSettings candidate : catalog.worlds) {
+        WorldSettings selected = selectWorld();
+        worldSettings.sync(selected, app.getAssetManager(), app.getViewPort(), app.getRenderer().getCaps());
+        displayOutput = selected == null ? DisplayOutput.Application : selected.getDisplayOutput();
+    }
+
+    private WorldSettings selectWorld() {
+        WorldSettings selected = null;
+        for (WorldSettings candidate : catalog.worlds) {
             if (selected == null || candidate.getPriority() > selected.getPriority()) {
                 selected = candidate;
             }
         }
-        worldSettings.sync(selected, app.getAssetManager(), app.getViewPort(), app.getRenderer().getCaps());
-        displayOutput = selected == null ? DisplayOutput.Application : selected.getDisplayOutput();
+        return selected;
     }
 
     /**
@@ -165,25 +174,37 @@ public final class SceneServicesState extends AbstractAppState {
             return;
         }
         Set<GiProbeVolume> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        boolean bricks = false;
         for (GiProbeVolume volume : catalog.volumes) {
-            if (volume.getData() != null || volume.getStreamAsset() != null) {
+            GiProbeStreamingData streaming = volume.getStreamingData();
+            if (volume.getData() != null || volume.getStreamAsset() != null || streaming != null) {
                 seen.add(volume);
             }
+            bricks |= streaming != null;
         }
         if (seen.isEmpty()) {
             closeGi();
             return;
         }
-        if (gi == null) {
+        WorldSettings world = selectWorld();
+        WorldSettings.GiStreaming settings = world == null ? WorldSettings.GiStreaming.DEFAULTS : world.getGiStreaming();
+        int atlasMiB = settings.getAtlasMiB();
+        if (gi == null || giAtlasMiB != atlasMiB || (bricks && !giBricks)) {
+            closeGi();
             io = Executors.newFixedThreadPool(2, runnable -> {
                 Thread thread = new Thread(runnable, "jME GI streaming");
                 thread.setDaemon(true);
                 return thread;
             });
-            gi = new GiProbeStreamer(io, 256L << 20,
-                    textureLimit, 200, app.getRenderer());
+            long gpu = (long) atlasMiB << 20;
+            long total = Math.max(256L << 20, gpu * 4);
+            gi = new GiProbeStreamer(io, total, textureLimit, 200, app.getRenderer(),
+                    bricks || atlasMiB != 64 ? gpu : 0);
+            giAtlasMiB = atlasMiB;
+            giBricks = bricks;
             gi.setUnloadMultiplier(1.3);
         }
+        gi.setFineStreaming(settings.getPreloadDistance(), settings.getMaxFineProbes());
         Iterator<Map.Entry<GiProbeVolume, Source>> iterator = sources.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<GiProbeVolume, Source> entry = iterator.next();
@@ -194,10 +215,11 @@ public final class SceneServicesState extends AbstractAppState {
         }
         for (GiProbeVolume volume : seen) {
             GiProbeData data = volume.getData();
+            GiProbeStreamingData streaming = volume.getStreamingData();
             String asset = volume.getStreamAsset();
             Vector3f offset = volume.getWorldTranslation();
             Source old = sources.get(volume);
-            if (old != null && old.data == data && Objects.equals(old.asset, asset)
+            if (old != null && old.data == data && old.bricks == streaming && Objects.equals(old.asset, asset)
                     && old.offset.equals(offset)) {
                 gi.setAppearance(old.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling(), volume.isCurvedReceiverCorrection());
                 continue;
@@ -208,26 +230,10 @@ public final class SceneServicesState extends AbstractAppState {
             Source source = new Source();
             source.id = "scene-volume-" + sequence++;
             source.data = data;
+            source.bricks = streaming;
             source.asset = asset;
             source.offset = offset.clone();
-            GiProbeGrid grid = data == null ? volume.getBakeGrid() : data.getGrid();
-            Vector3f size = grid.getCounts().subtract(1, 1, 1).multLocal(grid.getSpacing());
-            if (asset == null) {
-                gi.register(GiProbeStreamer.Chunk.borrowed(source.id,
-                        offset.x, offset.y, offset.z, size, data));
-            } else {
-                com.jme3.asset.AssetManager assets = app.getAssetManager();
-                gi.register(new GiProbeStreamer.Chunk(source.id, offset.x, offset.y, offset.z,
-                        size, volume.getStreamBytes(), () -> {
-                            com.jme3.asset.AssetInfo info = assets.locateAsset(new AssetKey<>(asset));
-                            if (info == null) {
-                                throw new FileNotFoundException(asset);
-                            }
-                            try (java.io.InputStream input = info.openStream()) {
-                                return GiProbeData.loadCompressed(input);
-                            }
-                        }));
-            }
+            gi.registerVolume(source.id, volume, app.getAssetManager());
             sources.put(volume, source);
             gi.setAppearance(source.id, volume.getIntensity(), volume.getFadeDistance(), volume.isStabilizedBlending(), volume.isSmoothBlending(), volume.isWideProbeSampling(), volume.isCurvedReceiverCorrection());
         }

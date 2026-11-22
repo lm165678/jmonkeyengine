@@ -28,6 +28,7 @@ MaterialDef Unshaded {
         Vector2 GiEncoding : 1.0 1.0
         Texture2D GiVolumeData -LINEAR
         Int GiVolumeCount : 0
+        Int GiVolumeDataHeight : 0
         Vector4 GiTextureSize
 
         Int BoundDrawBuffer

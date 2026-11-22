@@ -2,6 +2,11 @@ package com.jme3.environment.gi;
 
 import com.jme3.material.Material;
 import com.jme3.math.Vector3f;
+import com.jme3.asset.AssetInfo;
+import com.jme3.asset.AssetKey;
+import com.jme3.asset.AssetManager;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -101,6 +106,11 @@ public final class GiProbeStreamer implements AutoCloseable {
         boolean wide;
         boolean curved;
         boolean smooth;
+        GiProbeStreamingData bricks;
+        Chunk parent;
+        int brick;
+        int probes;
+        Vector3f dataOffset;
 
         public Chunk(String id, double x, double y, double z, Vector3f coverage,
                 long maximumTextureBytes, Callable<GiProbeData> loader) {
@@ -174,6 +184,9 @@ public final class GiProbeStreamer implements AutoCloseable {
     private long uploadByteBudget = 1024 * 1024;
     private long uploadNanos = 2_000_000;
     private double unloadMultiplier = 1.2;
+    private final Map<String, List<Chunk>> brickGroups = new LinkedHashMap<>();
+    private double fineLoadDistance = 64;
+    private int fineProbeBudget = 8192;
     private boolean closed;
     private double originX = Double.NaN;
     private double originY;
@@ -209,10 +222,43 @@ public final class GiProbeStreamer implements AutoCloseable {
      */
     public GiProbeStreamer(ExecutorService executor, long byteBudget, int maxTextureSize,
             double loadDistance, com.jme3.renderer.Renderer renderer) {
+        this(executor, byteBudget, maxTextureSize, loadDistance, renderer, 0);
+    }
+
+    /**
+     * Creates a pool with independent fine-brick slots and a specific GPU atlas
+     * budget in bytes. Use zero for the legacy volume-only pool. The total budget
+     * must also fit a CPU mirror and backing data. Low texture limits use coarse
+     * data only. See {@link GiProbeStreamingData} for scene usage.
+     */
+    public GiProbeStreamer(ExecutorService executor, long byteBudget, int maxTextureSize,
+            double loadDistance, com.jme3.renderer.Renderer renderer, long atlasBytes) {
         this(executor, byteBudget, maxTextureSize, loadDistance);
-        pages = new GiPagePool(renderer, maxTextureSize, byteBudget / 4);
+        if (atlasBytes < 0 || atlasBytes > byteBudget / 4) {
+            throw new IllegalArgumentException("GPU atlas budget may use at most one quarter of the total budget");
+        }
+        pages = new GiPagePool(renderer, maxTextureSize, atlasBytes == 0 ? byteBudget / 4 : atlasBytes, atlasBytes != 0);
         atlas = pages.bindings();
     }
+
+    /**
+     * Updates fine-brick preload radius and source probe budget on the render
+     * thread. Zero probes keeps the embedded coarse fallback only.
+     */
+    public void setFineStreaming(double preloadDistance, int maxProbes) {
+        if (!Double.isFinite(preloadDistance) || preloadDistance <= 0 || maxProbes < 0) {
+            throw new IllegalArgumentException("Positive preload radius and nonnegative probe budget required");
+        }
+        fineLoadDistance = preloadDistance;
+        fineProbeBudget = maxProbes;
+    }
+
+    /** @return the count of fine probes (including halos) selected on the last update */
+    public int getRequestedFineProbeCount() {
+        return requestedFineProbes;
+    }
+
+    private int requestedFineProbes;
 
     /** Render-thread configuration; time is soft, byte budget excludes initial allocation and metadata eviction. */
     public void setUploadBudget(long bytes, long nanos) {
@@ -318,9 +364,87 @@ public final class GiProbeStreamer implements AutoCloseable {
         directoryIndex = null;
     }
 
+    /**
+     * Registers the baked representation of a volume, if present. Call on the
+     * render thread after geometric updates. Use a unique ID; unregister that
+     * ID to release all its fine blocks. Legacy files keep whole-volume behavior.
+     * For streamed bakes {@link #getResidentData} returns the coarse layer.
+     */
+    public void registerVolume(String id, GiProbeVolume volume, AssetManager assets) {
+        GiProbeStreamingData directory = volume.getStreamingData();
+        GiProbeData data = directory == null ? volume.getData() : directory.getCoarseData();
+        String asset = volume.getStreamAsset();
+        if (data == null && asset == null) {
+            throw new IllegalArgumentException("GI volume has no completed bake");
+        }
+        Vector3f offset = volume.getWorldTranslation();
+        GiProbeGrid grid = data == null ? volume.getBakeGrid() : data.getGrid();
+        Vector3f extent = grid.getCounts().subtract(1, 1, 1).multLocal(grid.getSpacing());
+        Vector3f origin = offset.add(grid.getOrigin());
+        Chunk root;
+        if (asset == null) {
+            root = Chunk.borrowed(id, origin.x, origin.y, origin.z, extent, data);
+        } else {
+            root = new Chunk(id, origin.x, origin.y, origin.z, extent, volume.getStreamBytes(), () -> {
+                AssetInfo info = assets.locateAsset(new AssetKey<>(asset));
+                if (info == null) {
+                    throw new FileNotFoundException(asset);
+                }
+                try (InputStream input = info.openStream()) {
+                    return GiProbeData.loadCompressed(input);
+                }
+            });
+        }
+        root.dataOffset = offset.clone();
+        root.bricks = directory;
+        register(root);
+        if (directory == null) {
+            return;
+        }
+        List<Chunk> children = new ArrayList<>();
+        brickGroups.put(id, children);
+        if (pages == null || !pages.supportsBricks()) {
+            return;
+        }
+        Vector3f size = directory.brickSize();
+        Vector3f counts = directory.brickCounts();
+        Vector3f full = directory.extent();
+        for (int i = 0; i < directory.size(); i++) {
+            int index = i;
+            float x = i % (int) counts.x * size.x;
+            float y = i / (int) counts.x % (int) counts.y * size.y;
+            float z = i / ((int) counts.x * (int) counts.y) * size.z;
+            Vector3f coverage = new Vector3f(Math.min(size.x, full.x - x),
+                    Math.min(size.y, full.y - y), Math.min(size.z, full.z - z));
+            String childId = id + "/fine/" + i;
+            Chunk child = new Chunk(childId, root.x + x, root.y + y, root.z + z, coverage,
+                    directory.bytes(i), () -> directory.load(assets, index));
+            child.parent = root;
+            child.brick = i;
+            child.probes = directory.probes(i);
+            child.dataOffset = root.dataOffset;
+            register(child);
+            children.add(child);
+        }
+    }
+
     /** Stops requesting a chunk; the next update removes it atomically from the atlas. */
     public void unregister(String id) {
         requireOpen();
+        List<Chunk> children = brickGroups.remove(id);
+        if (children != null) {
+            for (Chunk child : children) {
+                removeChunk(child.id);
+            }
+        }
+        removeChunk(id);
+        if (pages != null) {
+            pages.retain(directory.keySet());
+        }
+        directoryIndex = null;
+    }
+
+    private void removeChunk(String id) {
         Chunk old = directory.remove(id);
         if (old != null) {
             Load loading = pending.remove(old);
@@ -328,14 +452,10 @@ public final class GiProbeStreamer implements AutoCloseable {
                 loading.discard();
             }
             GiProbeData data = resident.remove(old);
-            if (pages != null) {
-                pages.retain(directory.keySet());
-            }
             if (data != null && !old.borrowed) {
                 data.dispose();
             }
         }
-        directoryIndex = null;
         failures.remove(id);
         pageAdmissionFailures.remove(id);
     }
@@ -400,18 +520,44 @@ public final class GiProbeStreamer implements AutoCloseable {
             directoryIndex = new GiChunkIndex(directory.values());
         }
         List<Chunk> candidates = new ArrayList<>();
-        directoryIndex.query(cx, cy, cz, distance * unloadMultiplier, candidates);
-        candidates.sort(Comparator.comparingDouble(c -> c.distance(cx, cy, cz)));
+        directoryIndex.query(cx, cy, cz, Math.max(distance, fineLoadDistance) * unloadMultiplier, candidates);
+        for (String id : brickGroups.keySet()) {
+            Chunk coarse = directory.get(id);
+            if (!candidates.contains(coarse)) {
+                candidates.add(coarse);
+            }
+        }
+        candidates.sort(Comparator.comparingInt((Chunk c) -> c.bricks != null ? 0 : c.parent == null ? 1 : 2)
+                .thenComparingDouble(c -> c.distance(cx, cy, cz)));
         List<Chunk> wanted = new ArrayList<>();
         long reserved = pages == null ? 1024 : pages.bytes() * 2;
+        int roots = 0;
+        int fine = 0;
+        requestedFineProbes = 0;
         for (Chunk chunk : candidates) {
-            double radius = resident.containsKey(chunk) || pending.containsKey(chunk)
-                    ? distance * unloadMultiplier : distance;
-            if (chunk.distance(cx, cy, cz) <= radius && chunk.bytes <= (budget - reserved) / (pages == null ? 5 : 1)
-                    && wanted.size() < GiProbeSet.MAX_VOLUMES) {
-                wanted.add(chunk);
-                reserved += chunk.bytes * (pages == null ? 5 : 1);
+            double radius = chunk.parent == null ? distance : fineLoadDistance;
+            if (resident.containsKey(chunk) || pending.containsKey(chunk)) {
+                radius *= unloadMultiplier;
             }
+            if (failures.containsKey(chunk.id) || (chunk.bricks == null && chunk.distance(cx, cy, cz) > radius)
+                    || chunk.bytes > (budget - reserved) / (pages == null ? 5 : 1)) {
+                continue;
+            }
+            if (chunk.parent == null) {
+                if (roots == GiProbeSet.MAX_VOLUMES) {
+                    continue;
+                }
+                roots++;
+            } else {
+                if (fine == GiPagePool.FINE_SLOTS || !wanted.contains(chunk.parent)
+                        || chunk.probes > fineProbeBudget - requestedFineProbes) {
+                    continue;
+                }
+                fine++;
+                requestedFineProbes += chunk.probes;
+            }
+            wanted.add(chunk);
+            reserved += chunk.bytes * (pages == null ? 5 : 1);
         }
         Iterator<Map.Entry<Chunk, Load>> loads = pending.entrySet().iterator();
         while (loads.hasNext()) {
@@ -485,14 +631,22 @@ public final class GiProbeStreamer implements AutoCloseable {
             pages.retain(ids);
             pageAdmissionFailures.clear();
             for (Chunk chunk : selected) {
-                Vector3f offset = new Vector3f((float) (chunk.x - worldOriginX),
-                        (float) (chunk.y - worldOriginY), (float) (chunk.z - worldOriginZ));
+                Vector3f offset = offset(chunk, worldOriginX, worldOriginY, worldOriginZ);
                 float fade = chunk.fadeDistance >= 0 ? chunk.fadeDistance
                         : Math.min(chunk.size.x, Math.min(chunk.size.y, chunk.size.z)) * 0.2f;
-                if (!pages.offer(chunk.id, resident.get(chunk), offset, fade)) {
-                    pageAdmissionFailures.add(chunk.id);
+                GiProbeData data = resident.get(chunk);
+                boolean offered = pages.offer(chunk.id, data, offset, chunk.parent == null ? fade : 0,
+                        chunk.bricks, chunk.parent == null ? null : chunk.parent.id, chunk.brick);
+                if (!offered && chunk.bricks != null && pages.reclaimForCoarse(data)) {
+                    offered = pages.offer(chunk.id, data, offset, fade, chunk.bricks, null, 0);
                 }
-                pages.appearance(chunk.id, chunk.intensity, fade, chunk.stabilized, chunk.smooth, chunk.wide, chunk.curved);
+                if (!offered) {
+                    pageAdmissionFailures.add(chunk.id);
+                    continue;
+                }
+                Chunk appearance = chunk.parent == null ? chunk : chunk.parent;
+                pages.appearance(chunk.id, appearance.intensity, chunk.parent == null ? fade : 0,
+                        appearance.stabilized, appearance.smooth, appearance.wide, appearance.curved);
                 pages.relocate(chunk.id, offset);
             }
             pages.upload(uploadByteBudget, uploadNanos);
@@ -508,8 +662,7 @@ public final class GiProbeStreamer implements AutoCloseable {
             while (!selected.isEmpty()) {
                 List<GiProbeSet.Entry> entries = new ArrayList<>();
                 for (Chunk chunk : selected) {
-                    entries.add(new GiProbeSet.Entry(resident.get(chunk), new Vector3f((float) (chunk.x - worldOriginX),
-                            (float) (chunk.y - worldOriginY), (float) (chunk.z - worldOriginZ)),
+                    entries.add(new GiProbeSet.Entry(resident.get(chunk), offset(chunk, worldOriginX, worldOriginY, worldOriginZ),
                             chunk.fadeDistance >= 0 ? chunk.fadeDistance
                                     : Math.min(chunk.size.x, Math.min(chunk.size.y, chunk.size.z)) * 0.2f, chunk.intensity, chunk.stabilized, chunk.smooth, chunk.wide, chunk.curved));
                 }
@@ -549,6 +702,14 @@ public final class GiProbeStreamer implements AutoCloseable {
                 attempted = null;
             }
         }
+    }
+
+    private Vector3f offset(Chunk chunk, double x, double y, double z) {
+        if (chunk.dataOffset != null) {
+            return new Vector3f((float) (chunk.dataOffset.x - x), (float) (chunk.dataOffset.y - y),
+                    (float) (chunk.dataOffset.z - z));
+        }
+        return new Vector3f((float) (chunk.x - x), (float) (chunk.y - y), (float) (chunk.z - z));
     }
 
     private long pendingBytes() {

@@ -15,14 +15,21 @@ import java.util.*;
  */
 final class GiPagePool implements AutoCloseable {
     private static final int PAGE_ROWS = 4;
+    private static final int BRICK_SLOTS = 128;
+    static final int FINE_SLOTS = BRICK_SLOTS - GiProbeSet.MAX_VOLUMES;
+    private static final int INDEX_WIDTH = 256;
+    private static final int INDEX_ROWS = GiProbeStreamingData.MAX_BRICKS / (INDEX_WIDTH * 4);
+    private static final int INDEX_HEIGHT = BRICK_SLOTS + GiProbeSet.MAX_VOLUMES * INDEX_ROWS;
     private final Renderer renderer;
     private final Texture2D[] textures;
     private final Texture2D metadata;
+    private final Texture2D legacyMetadata;
     private final BitSet[] rows = {new BitSet(), new BitSet()};
     private final Map<String, Slot> slots = new LinkedHashMap<>();
     private final GiProbeSet bindings;
     private final int width;
     private final int height;
+    private final boolean bricks;
     private long uploaded;
 
     private static final class Slot {
@@ -43,12 +50,24 @@ final class GiPagePool implements AutoCloseable {
         int stage;
         int row;
         boolean published;
+        Slot parent;
+        int brick;
+        GiProbeStreamingData directory;
     }
 
     GiPagePool(Renderer renderer, int limit, long bytes) {
+        this(renderer, limit, bytes, false);
+    }
+
+    GiPagePool(Renderer renderer, int limit, long bytes, boolean spatialBricks) {
         this.renderer = Objects.requireNonNull(renderer);
+        bricks = spatialBricks && limit >= INDEX_HEIGHT;
         width = Math.min(1024, limit);
-        int availableRows = (int) Math.min(limit, (bytes - 1024) / (3L * width * 16));
+        int indexWidth = bricks ? INDEX_WIDTH : 4;
+        int indexHeight = bricks ? INDEX_HEIGHT : GiProbeSet.MAX_VOLUMES;
+        int metadataBytes = indexWidth * indexHeight * 16;
+        int legacyBytes = bricks ? GiProbeSet.MAX_VOLUMES * 64 : 0;
+        int availableRows = (int) Math.min(limit, (bytes - metadataBytes - legacyBytes) / (3L * width * 16));
         height = availableRows / PAGE_ROWS * PAGE_ROWS;
         if (width < 9 || height < PAGE_ROWS) {
             throw new IllegalArgumentException("GI page budget too small");
@@ -58,9 +77,14 @@ final class GiPagePool implements AutoCloseable {
             textures[i] = GiProbeData.texture(width, height,
                     BufferUtils.createByteBuffer(width * height * 16), false);
         }
-        metadata = GiProbeData.texture(4, GiProbeSet.MAX_VOLUMES,
-                BufferUtils.createByteBuffer(GiProbeSet.MAX_VOLUMES * 64), false);
-        bindings = new GiProbeSet(textures[0], textures[2], textures[1], metadata);
+        metadata = GiProbeData.texture(indexWidth, indexHeight, BufferUtils.createByteBuffer(metadataBytes), false);
+        legacyMetadata = bricks ? GiProbeData.texture(4, GiProbeSet.MAX_VOLUMES,
+                BufferUtils.createByteBuffer(legacyBytes), false) : null;
+        bindings = new GiProbeSet(textures[0], textures[2], textures[1], metadata, legacyMetadata);
+    }
+
+    boolean supportsBricks() {
+        return bricks;
     }
 
     GiProbeSet bindings() {
@@ -86,16 +110,56 @@ final class GiPagePool implements AutoCloseable {
     }
 
     private int allocate(int bank, int pages) {
+        int start = findRows(rows[bank], pages);
+        if (start >= 0) {
+            rows[bank].set(start, start + pages);
+            return start * PAGE_ROWS;
+        }
+        return -1;
+    }
+
+    private int findRows(BitSet usedRows, int pages) {
         int count = height / PAGE_ROWS;
         for (int start = 0; start + pages <= count; start++) {
-            int used = rows[bank].nextSetBit(start);
+            int used = usedRows.nextSetBit(start);
             if (used < 0 || used >= start + pages) {
-                rows[bank].set(start, start + pages);
-                return start * PAGE_ROWS;
+                return start;
             }
             start = used;
         }
         return -1;
+    }
+
+    // A newly attached coarse layer may reclaim fine pages. If even an atlas
+    // containing only roots could not fit it, retain the current fine pages.
+    boolean reclaimForCoarse(GiProbeData data) {
+        if (!bricks || data.irradiance().getImage().getWidth() > width
+                || data.moments().getImage().getWidth() > width) {
+            return false;
+        }
+        Set<String> roots = new HashSet<>();
+        BitSet sh = new BitSet();
+        BitSet visibility = new BitSet();
+        for (Slot slot : slots.values()) {
+            if (slot.parent == null) {
+                roots.add(slot.id);
+                int a = slot.shRow / PAGE_ROWS;
+                int b = slot.visRow / PAGE_ROWS;
+                sh.set(a, a + slot.shPages);
+                visibility.set(b, b + slot.visPages);
+            }
+        }
+        if (roots.size() == GiProbeSet.MAX_VOLUMES || roots.size() == slots.size()
+                || findRows(sh, pages(data.irradiance())) < 0
+                || findRows(visibility, pages(data.moments())) < 0) {
+            return false;
+        }
+        retain(roots);
+        return true;
+    }
+
+    private int pages(Texture2D texture) {
+        return (texture.getImage().getHeight() + PAGE_ROWS - 1) / PAGE_ROWS;
     }
 
     boolean contains(String id) {
@@ -103,17 +167,37 @@ final class GiPagePool implements AutoCloseable {
     }
 
     boolean offer(String id, GiProbeData data, Vector3f offset, float fade) {
+        return offer(id, data, offset, fade, null, null, 0);
+    }
+
+    boolean offer(String id, GiProbeData data, Vector3f offset, float fade,
+            GiProbeStreamingData directory, String parentId, int brick) {
         if (slots.containsKey(id)) {
             return true;
         }
-        if (slots.size() == GiProbeSet.MAX_VOLUMES
-                || data.irradiance().getImage().getWidth() > width
+        if (data.irradiance().getImage().getWidth() > width
                 || data.moments().getImage().getWidth() > width) {
             return false;
         }
         Slot slot = new Slot();
-        slot.shPages = (data.irradiance().getImage().getHeight() + PAGE_ROWS - 1) / PAGE_ROWS;
-        slot.visPages = (data.moments().getImage().getHeight() + PAGE_ROWS - 1) / PAGE_ROWS;
+        slot.directory = directory;
+        slot.brick = brick;
+        if (parentId != null) {
+            slot.parent = slots.get(parentId);
+            if (!bricks || slot.parent == null) {
+                return false;
+            }
+        }
+        BitSet indices = new BitSet();
+        for (Slot existing : slots.values()) {
+            indices.set(existing.index);
+        }
+        slot.index = indices.nextClearBit(slot.parent == null ? 0 : GiProbeSet.MAX_VOLUMES);
+        if (slot.index >= (slot.parent == null ? GiProbeSet.MAX_VOLUMES : BRICK_SLOTS)) {
+            return false;
+        }
+        slot.shPages = pages(data.irradiance());
+        slot.visPages = pages(data.moments());
         slot.shRow = allocate(0, slot.shPages);
         slot.visRow = allocate(1, slot.visPages);
         if (slot.shRow < 0 || slot.visRow < 0) {
@@ -125,11 +209,6 @@ final class GiPagePool implements AutoCloseable {
             }
             return false;
         }
-        BitSet indices = new BitSet();
-        for (Slot existing : slots.values()) {
-            indices.set(existing.index);
-        }
-        slot.index = indices.nextClearBit(0);
         slot.id = id;
         slot.data = data;
         slot.offset = offset.clone();
@@ -181,6 +260,7 @@ final class GiPagePool implements AutoCloseable {
             Slot slot = iterator.next();
             if (!wanted.contains(slot.id)) {
                 if (slot.published) {
+                    indexBrick(slot, false);
                     descriptor(slot, false);
                 }
                 rows[0].clear(slot.shRow / PAGE_ROWS, slot.shRow / PAGE_ROWS + slot.shPages);
@@ -227,13 +307,28 @@ final class GiPagePool implements AutoCloseable {
                     slot.row = 0;
                 }
             }
-            if (bytes + 64 > byteBudget || System.nanoTime() - start >= nanos) {
+            int metadataBytes = bricks ? 96 + (slot.parent == null ? 64 : 0) : 64;
+            if (bytes + metadataBytes + (slot.parent == null ? 0 : 16) > byteBudget
+                    || System.nanoTime() - start >= nanos) {
                 return;
             }
             descriptor(slot, true);
+            indexBrick(slot, true);
             slot.published = true;
-            bytes += 64;
+            bytes += metadataBytes + (slot.parent == null ? 0 : 16);
         }
+    }
+
+    private void indexBrick(Slot slot, boolean active) {
+        if (slot.parent == null) {
+            return;
+        }
+        int x = slot.brick / 4 % INDEX_WIDTH;
+        int y = BRICK_SLOTS + slot.parent.index * INDEX_ROWS + slot.brick / (INDEX_WIDTH * 4);
+        metadata.getImage().getData(0).putFloat((y * INDEX_WIDTH + x) * 16 + slot.brick % 4 * 4,
+                active ? slot.index + 1 : 0);
+        renderer.modifyTexture(metadata, metadata.getImage(), x, y, x, y, 1, 1);
+        uploaded += 16;
     }
 
     private void descriptor(Slot slot, boolean active) {
@@ -246,11 +341,31 @@ final class GiPagePool implements AutoCloseable {
             spacing.x, spacing.y, spacing.z, data.distanceScale(),
             counts.x, counts.y, counts.z, data.irradianceScale() * slot.intensity,
             data.columns(), slot.shRow, slot.visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0) + (slot.stabilized ? 0.125f : 0) + (slot.wide ? 0.015625f : 0) + (slot.curved ? 0.0078125f : 0)};
-        for (int c = 0; c < 16; c++) {
-            metadata.getImage().getData(0).putFloat(slot.index * 64 + c * 4, values[c]);
+        int rowOffset = slot.index * metadata.getImage().getWidth() * 16;
+        ByteBuffer buffer = metadata.getImage().getData(0);
+        for (int c = 0; c < values.length; c++) {
+            buffer.putFloat(rowOffset + c * 4, values[c]);
         }
-        renderer.modifyTexture(metadata, metadata.getImage(), 0, slot.index, 0, slot.index, 4, 1);
-        uploaded += 64;
+        int columns = 4;
+        if (bricks) {
+            Vector3f blocks = slot.directory == null ? Vector3f.ZERO : slot.directory.brickCounts();
+            Vector3f size = slot.directory == null ? Vector3f.ZERO : slot.directory.brickSize();
+            for (int c = 0; c < 3; c++) {
+                buffer.putFloat(rowOffset + 64 + c * 4, blocks.get(c));
+                buffer.putFloat(rowOffset + 80 + c * 4, size.get(c));
+            }
+            columns = 6;
+        }
+        renderer.modifyTexture(metadata, metadata.getImage(), 0, slot.index, 0, slot.index, columns, 1);
+        uploaded += columns * 16L;
+        if (legacyMetadata != null && slot.parent == null) {
+            ByteBuffer legacy = legacyMetadata.getImage().getData(0);
+            for (int c = 0; c < values.length; c++) {
+                legacy.putFloat(slot.index * 64 + c * 4, values[c]);
+            }
+            renderer.modifyTexture(legacyMetadata, legacyMetadata.getImage(), 0, slot.index, 0, slot.index, 4, 1);
+            uploaded += 64;
+        }
     }
 
     @Override

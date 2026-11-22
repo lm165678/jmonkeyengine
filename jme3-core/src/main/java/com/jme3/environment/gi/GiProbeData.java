@@ -239,6 +239,72 @@ public final class GiProbeData implements Savable {
         return skyVisibility;
     }
 
+    // Repack original texels rather than reconstructing moments or SH. When
+    // decimating, express the old physical position relative to the new grid.
+    GiProbeData resample(int x0, int y0, int z0, int sx, int sy, int sz,
+            int nx, int ny, int nz, int tileSize) {
+        GiProbeData result = new GiProbeData();
+        result.origin = origin.add(spacing.mult(new Vector3f(x0, y0, z0)));
+        Vector3f step = new Vector3f((float) (sx - 1) / (nx - 1),
+                (float) (sy - 1) / (ny - 1), (float) (sz - 1) / (nz - 1));
+        result.spacing = spacing.mult(step);
+        result.counts = new Vector3f(nx, ny, nz);
+        result.resolution = tileSize;
+        result.irradianceScale = irradianceScale;
+        result.distanceScale = distanceScale;
+        int probes = nx * ny * nz;
+        int cols = Math.min(probes, 1024 / Math.max(9, tileSize));
+        result.columns = cols;
+        int rows = (probes + cols - 1) / cols;
+        boolean compact = irradiance.getImage().getFormat() == Image.Format.RGBA16F;
+        int pixelBytes = compact ? 8 : 16;
+        ByteBuffer sh = BufferUtils.createByteBuffer(cols * 9 * rows * pixelBytes);
+        ByteBuffer sky = hasSeparatedSky() ? BufferUtils.createByteBuffer(sh.capacity()) : null;
+        ByteBuffer visibility = BufferUtils.createByteBuffer(cols * rows * tileSize * tileSize * pixelBytes);
+        GiProbeGrid sourceGrid = getGrid();
+        boolean decimated = !step.equals(Vector3f.UNIT_XYZ);
+        for (int p = 0; p < probes; p++) {
+            float x = p % nx * step.x;
+            float y = p / nx % ny * step.y;
+            float z = p / (nx * ny) * step.z;
+            int ix = Math.round(x);
+            int iy = Math.round(y);
+            int iz = Math.round(z);
+            int from = sourceGrid.index(x0 + ix, y0 + iy, z0 + iz);
+            int source = probeComponent(from, 0);
+            int target = (p / cols * cols * 9 + p % cols * 9) * 4;
+            for (int c = 0; c < 36; c++) {
+                put(sh, target + c, component(irradiance.getImage(), source + c), compact);
+                if (sky != null) {
+                    put(sky, target + c, component(skyVisibility.getImage(), source + c), compact);
+                }
+            }
+            if (decimated) {
+                put(sh, target + 7, (component(irradiance.getImage(), source + 7) + ix - x) / step.x, compact);
+                put(sh, target + 11, (component(irradiance.getImage(), source + 11) + iy - y) / step.y, compact);
+                put(sh, target + 15, (component(irradiance.getImage(), source + 15) + iz - z) / step.z, compact);
+            }
+            for (int v = 0; v < tileSize; v++) {
+                int sv = (2 * v + 1) * resolution / (2 * tileSize);
+                for (int u = 0; u < tileSize; u++) {
+                    int su = (2 * u + 1) * resolution / (2 * tileSize);
+                    int a = ((from / columns * resolution + sv) * columns * resolution
+                            + from % columns * resolution + su) * 4;
+                    int b = ((p / cols * tileSize + v) * cols * tileSize + p % cols * tileSize + u) * 4;
+                    for (int c = 0; c < 4; c++) {
+                        put(visibility, b + c, component(moments.getImage(), a + c), compact);
+                    }
+                }
+            }
+        }
+        result.irradiance = texture(cols * 9, rows, sh, compact);
+        result.moments = texture(cols * tileSize, rows * tileSize, visibility, compact);
+        if (sky != null) {
+            result.skyVisibility = texture(cols * 9, rows, sky, compact);
+        }
+        return result;
+    }
+
     /** True for separated bounce radiance + sky visibility; old assets remain total lighting. */
     public boolean hasSeparatedSky() {
         return skyVisibility != null;
@@ -334,14 +400,32 @@ public final class GiProbeData implements Savable {
 
     /** Saves a gzip-compressed binary asset. Worker-safe when the data is not modified. */
     public void saveCompressed(java.io.OutputStream output) throws IOException {
-        java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(output);
-        com.jme3.export.binary.BinaryExporter.getInstance().save(this, gzip);
-        gzip.finish();
+        // The caller owns the destination. Release the deflater per brick.
+        java.io.FilterOutputStream destination = new java.io.FilterOutputStream(output) {
+            @Override
+            public void write(byte[] bytes, int offset, int count) throws IOException {
+                out.write(bytes, offset, count);
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        try (java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(destination)) {
+            new com.jme3.export.binary.BinaryExporter().save(this, gzip);
+        }
     }
 
     /** Loads a compressed chunk on a worker; does not upload GPU resources or close the input. */
     public static GiProbeData loadCompressed(java.io.InputStream input) throws IOException {
-        return (GiProbeData) new com.jme3.export.binary.BinaryImporter().load(new java.util.zip.GZIPInputStream(input));
+        java.io.FilterInputStream source = new java.io.FilterInputStream(input) {
+            @Override
+            public void close() {
+            }
+        };
+        try (java.util.zip.GZIPInputStream gzip = new java.util.zip.GZIPInputStream(source)) {
+            return (GiProbeData) new com.jme3.export.binary.BinaryImporter().load(gzip);
+        }
     }
 
     /** Returns a new descriptor; its coordinates remain relative to the volume. */
@@ -427,7 +511,9 @@ public final class GiProbeData implements Savable {
         out.write(skyVisibility, "skyVisibility", null);
         out.write(resolution, "resolution", 0);
         out.write(columns, "columns", 0);
-        out.write(surfaceLayout ? 4 : hasSeparatedSky() ? 3 : 2, "giFormatVersion", 0);
+        int expectedColumns = (int) Math.ceil(Math.sqrt(getGrid().getProbeCount()));
+        int version = surfaceLayout ? 4 : columns != expectedColumns ? 5 : hasSeparatedSky() ? 3 : 2;
+        out.write(version, "giFormatVersion", 0);
         out.write(distanceScale, "distanceScale", 1);
         out.write(irradianceScale, "irradianceScale", 1);
     }
@@ -444,7 +530,7 @@ public final class GiProbeData implements Savable {
         resolution = in.readInt("resolution", 0);
         columns = in.readInt("columns", 0);
         int version = in.readInt("giFormatVersion", 0);
-        if (version != 0 && version != 2 && version != 3 && version != 4) {
+        if (version != 0 && version != 2 && version != 3 && version != 4 && version != 5) {
             throw new IOException("Unsupported GI chunk version " + version);
         }
         distanceScale = in.readFloat("distanceScale", 1);
@@ -460,11 +546,13 @@ public final class GiProbeData implements Savable {
         try {
             GiProbeGrid grid = getGrid();
             int expectedColumns = (int) Math.ceil(Math.sqrt(grid.getProbeCount()));
-            int rows = (grid.getProbeCount() + expectedColumns - 1) / expectedColumns;
-            if (!counts.equals(grid.getCounts()) || resolution > 64 || columns != expectedColumns
+            if (!counts.equals(grid.getCounts()) || resolution > 64
+                    || (version == 5 ? columns > Math.min(grid.getProbeCount(), 1024 / Math.max(9, resolution))
+                            : columns != expectedColumns)
                     || grid.getProbeCount() > 65536) {
                 throw new IOException("Invalid GI probe atlas layout");
             }
+            int rows = (grid.getProbeCount() + columns - 1) / columns;
             validateTexture(irradiance, columns * 9, rows);
             if (version == 3 || skyVisibility != null) {
                 if (skyVisibility == null) {
