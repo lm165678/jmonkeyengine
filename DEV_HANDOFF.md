@@ -1,3 +1,7 @@
+## 2026-11-23 游戏发行和核心 Shader 发布待办
+
+- 下次继续游戏发行、代码混淆、核心 Shader 发布或渲染后端改造时，主动提醒用户查看 [游戏发行包保护与核心 Shader 二进制发布](RENDERING_QUALITY_ROADMAP.md)。先验证现代 ProGuard 与 `jpackage`，再做核心 Shader 的离线编译、引擎二进制加载和平台兼容验收。当前仅登记计划。
+
 ## 2026-11-22 Default scene HDR output
 
 - User confirms embedded 3DViewer HDR now looks correct. New WorldSettings default to Hdr. Serialization deliberately retains Application as the omitted-field value so old scenes preserve their behavior and new Hdr values are explicitly saved. Attached SimpleApplication scenes continue to select output through SceneServicesState; detach restores launch settings. Unsupported HDR still falls back to SDR.

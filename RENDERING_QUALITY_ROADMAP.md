@@ -231,6 +231,18 @@ Renderer / FrameGraph / 渲染 Pass
 
 本节是计划，RHI 和 Vulkan 尚未实现。时序效果的现有 OpenGL 实现和后续依赖见下一节。
 
+## 待办：游戏发行包保护与核心 Shader 二进制发布（2026-11-23）
+
+发行包的目标是减少源码和制作素材暴露，提高逆向成本。客户端字节码、原生机器码和 Shader 中间码仍可被分析。开发构建保留 GLSL 源码与热重载，保护模式在发行构建中验证。
+
+- [ ] 建立独立的现代 ProGuard 和 `jpackage` 发行任务。旧 SDK `Obfuscate Build` 仍依赖 Java 8 的 `jre/lib/rt.jar`，先评估替换并验证 JDK 25。第一阶段只混淆游戏业务代码。保留主入口、JNI 方法与类名、J3O 里已有的自定义 `Control` / `Savable` 类名和反射构造入口。内部保存混淆映射，用实际安装包验证旧 J3O、动画链接、DDS 和各平台 JNI。
+- [ ] 用发行清单限制包内资源，只交付运行所需的 J3O、DDS 和运行时依赖。排除原始 FBX、PSD、源码、SDK 工程、混淆映射和调试构建产物。服务端保管 API 私钥、授权签发密钥及联网权威判定。离线授权若需要，客户端只携带验签公钥。原生库或 GraalVM Native Image 作为后续评估项，验证反射、资源、JNI 和目标平台。
+- [ ] 增加 Shader 离线编译任务。先选一条核心材质技术与一个 Shader 变体验证，再逐步覆盖发行所需的 GI、光照和后处理。沿用 `.j3md` 技术与材质参数，构建时解析 GLSL `#import`、展开所需 defines 并生成按后端和变体区分的二进制与绑定元数据。资产清单按 Shader 阶段、入口、变体、目标环境和版本定位产物。
+- [ ] 调整引擎的 Shader 资产加载、技术选择与渲染后端。桌面 OpenGL 验证 OpenGL 4.6 或声明 `GL_ARB_gl_spirv` 的上下文能加载并特化 **OpenGL 目标环境**的 SPIR-V。Vulkan 接入后使用单独编译的 Vulkan 目标产物。`glProgramBinary` 依赖驱动与硬件，只评估为可失效的本机缓存。对缺少 SPIR-V 支持的 OpenGL 4.3、LWJGL 2 等目标，明确由兼容发行包提供 GLSL 或提高保护版最低要求。保护版缺少受支持的二进制时给出可定位的错误。
+- [ ] 验证核心 Shader 及其私有 `.glsllib` 源码不会经游戏资源、引擎 JAR 或回退包意外进入保护版。对照 GLSL 版与二进制版的渲染结果，覆盖材质参数、骨骼动画、GL 环境能力差异、变体缺失、驱动更新和启动耗时。记录各后端、显卡与驱动的实测覆盖。
+
+参考 [OpenGL SPIR-V 扩展规范](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_gl_spirv.txt) 和 [OpenGL 4.6 Core 规范](https://registry.khronos.org/OpenGL/specs/gl/glspec46.core.pdf)。下次继续游戏发行、混淆、核心 Shader 发布或渲染后端改造时，主动提醒本节并先确认目标平台。当前为计划。
+
 ## 待办：TAA / GTAO / FSR 与 LWJGL Vulkan 后端（2026-11-19）
 
 用户要求记录以下路线，本轮仅更新文档，不实现功能。FSR 2 是时序超分辨率，不含帧生成；FSR 3 才引入帧生成。不要因版本混淆，把 TAA 或 FSR 2 的全部开发依赖于插帧呈现框架。
