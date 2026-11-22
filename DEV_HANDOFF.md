@@ -683,3 +683,9 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 
 - VT 模块重构（含 LightProbe 烘焙评估）和 Virtual Shadow Maps 已加入 [渲染路线图](RENDERING_QUALITY_ROADMAP.md)。完善地形编辑器已加入 SDK 的 `DEV_HANDOFF.md`。下次继续纹理流送、探针烘焙、阴影或地形相关工作时，先提醒用户对应待办。
 - 本次只更新计划，无实现、构建或兼容版本变更。提醒随相关开发会话触发。
+
+## 2026-11-22 Paired source checkpoint
+
+- Implementation pair: SDK 217d403bc968311e34cb8ab6f5f2bb0ad93c2b7e (master), engine 7b31f949e3bdfb3d1332a6b3abf6034875979869 (dev_fix_lightprobe_issue). Documentation-only commits follow.
+- Current sources/tests and prior validation records are collected; no additional full build or full-suite run for this push. SDK generated templates, native libraries, testdata JAR, generated ZIPs and local build counters remain local.
+- Fork destinations: lm165678/jmesdk and lm165678/jmonkeyengine. Remote success must be verified after pushing.
