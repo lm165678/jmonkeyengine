@@ -217,6 +217,7 @@ public final class ViewportPipelines {
                     gpu.setMultiDrawIndirect(true);
                     gpu.setMeshMerging(true);
                     gpu.setMaterialMerging(true);
+                    gpu.useWorldLodThresholds();
                     shading = gpu;
                 }
                 entry = new Entry(shading, false);

@@ -205,6 +205,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
         if (change == SceneChangeListener.Change.ATTACHED || change == SceneChangeListener.Change.DETACHING
                 || change == SceneChangeListener.Change.RENDERING) {
             structuralChanges.add(spatial);
+            worldLodDirty = true;
             for (Spatial ancestor = spatial; ancestor != null; ancestor = ancestor.getParent()) {
                 ownedSubtrees.remove(ancestor);
                 ownershipChanges.add(ancestor);
@@ -616,6 +617,27 @@ public final class GpuScenePipeline implements OpaquePipeline {
     private float maxDistance;
     private float minPixels;
     private float[] lodThresholds = new float[0];
+    private static final float[] DEFAULT_WORLD_LOD_THRESHOLDS = {80, 30, 10, 3};
+    private boolean useWorldLod;
+    private boolean worldLodDirty = true;
+    private final List<com.jme3.post.WorldSettings> lodWorlds = new ArrayList<>();
+    private com.jme3.post.WorldSettings lodWorld;
+    private long lodWorldRevision = -1;
+
+    /**
+     * Lets the automatic viewport pipeline read LOD thresholds from its scene.
+     * Call before installation. Manually configured pipelines use their own
+     * thresholds by default.
+     */
+    public void useWorldLodThresholds() {
+        useWorldLod = true;
+        setLodThresholds(DEFAULT_WORLD_LOD_THRESHOLDS);
+    }
+
+    /** @return a copy of the automatic GPU Scene's default pixel thresholds */
+    public static float[] getDefaultWorldLodThresholds() {
+        return DEFAULT_WORLD_LOD_THRESHOLDS.clone();
+    }
 
     /**
      * Selects existing mesh LODs by projected bounding-sphere diameter in pixels.
@@ -638,6 +660,18 @@ public final class GpuScenePipeline implements OpaquePipeline {
      * @param pixels decreasing screen-diameter thresholds, copied by the pipeline
      */
     public void setLodThresholds(float... pixels) {
+        validateLodThresholds(pixels);
+        if (!Arrays.equals(lodThresholds, pixels)) {
+            lodThresholds = pixels.clone();
+            clear();
+        }
+    }
+
+    /**
+     * Checks the same pixel thresholds accepted by the pipeline and WorldSettings.
+     * @param pixels projected diameters in pixels
+     */
+    public static void validateLodThresholds(float... pixels) {
         Objects.requireNonNull(pixels);
         if (pixels.length > 7) {
             throw new IllegalArgumentException("At most seven LOD transitions");
@@ -648,10 +682,6 @@ public final class GpuScenePipeline implements OpaquePipeline {
                 throw new IllegalArgumentException("LOD thresholds must be positive and strictly decreasing");
             }
             previous = value;
-        }
-        if (!Arrays.equals(lodThresholds, pixels)) {
-            lodThresholds = pixels.clone();
-            clear();
         }
     }
 
@@ -1029,6 +1059,9 @@ public final class GpuScenePipeline implements OpaquePipeline {
         if (!isActive()) {
             return;
         }
+        if (useWorldLod) {
+            updateWorldLod();
+        }
         temporalFrame++;
         if (viewport.getTemporalScene() == null) {
             for (Batch batch : batches) {
@@ -1057,6 +1090,32 @@ public final class GpuScenePipeline implements OpaquePipeline {
                 }
             }
             viewport.getTemporalScene().registerGpuPackets(handled, packets);
+        }
+    }
+
+    private void updateWorldLod() {
+        if (worldLodDirty) {
+            lodWorlds.clear();
+            root.depthFirstTraversal(spatial -> {
+                com.jme3.post.WorldSettings world = spatial.getControl(com.jme3.post.WorldSettings.class);
+                if (world != null) {
+                    lodWorlds.add(world);
+                }
+            });
+            worldLodDirty = false;
+        }
+        com.jme3.post.WorldSettings selected = null;
+        for (com.jme3.post.WorldSettings candidate : lodWorlds) {
+            if (candidate.isEnabled() && candidate.hasGpuLodThresholds()
+                    && (selected == null || candidate.getPriority() > selected.getPriority())) {
+                selected = candidate;
+            }
+        }
+        long revision = selected == null ? -1 : selected.getRevision();
+        if (selected != lodWorld || revision != lodWorldRevision) {
+            lodWorld = selected;
+            lodWorldRevision = revision;
+            setLodThresholds(selected == null ? DEFAULT_WORLD_LOD_THRESHOLDS : selected.getGpuLodThresholds());
         }
     }
 

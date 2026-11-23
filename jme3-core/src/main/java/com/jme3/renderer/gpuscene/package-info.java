@@ -11,8 +11,9 @@
  * ownership. It accelerates main views, not shadow-map traversal or GUI views.
  * Original geometry still supplies shadows; main-view Hi-Z never rejects shadow
  * casters. Automatic policy enables MDI, compatible mesh/material merging and
- * Bindless. It does not silently enable Hi-Z, distance/screen cutoffs, change LOD
- * quality, or enable command compaction (whose compute cost can exceed its gain).
+ * Bindless. Automatic LOD uses 80, 30, 10 and 3 pixel diameters unless overridden
+ * by scene WorldSettings. Hi-Z, distance/screen cutoffs and command compaction
+ * remain opt-in.
  * All scene/configuration edits must occur on the application/render thread.</p>
  * <pre>{@code
  * // 第一步：普通应用无需手工安装管线；需要兼容旧项目时在启动前关闭。

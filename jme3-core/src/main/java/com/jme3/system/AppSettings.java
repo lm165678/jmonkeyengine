@@ -1281,7 +1281,9 @@ public final class AppSettings extends HashMap<String, Object> {
      * Requests automatic GPU Scene for main viewports. Default true. OpenGL 4.3
      * is required; unsupported hardware/materials/deformed or transparent meshes
      * retain traditional rendering. Explicit custom pipelines retain ownership.
-     * Does not force Hi-Z, distance thresholds, LOD changes or command compaction.
+     * The automatic pipeline uses scene LOD thresholds or the default pixel
+     * diameters (80, 30, 10, 3). Hi-Z, distance cutoffs and command compaction
+     * remain opt-in.
      * Configure before start; changing AppSettings alone does not alter a running
      * RenderManager. Use its render-thread setters for runtime switching.
      * <pre>{@code

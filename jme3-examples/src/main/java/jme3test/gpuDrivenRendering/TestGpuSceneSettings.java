@@ -25,6 +25,8 @@ import java.nio.ByteBuffer;
  * No explicit GPU pipeline installation. Automatically verifies first-frame
  * GPU on/off restoration, Bindless off, material edits, Forward/Deferred selection,
  * and unsupported-device fallback by comparing rendered images. Exits on success.
+ * Also verifies saved scene LOD thresholds, automatic defaults and restoration
+ * on unloading through GPU triangle counts.
  * <pre>{@code
  * // 第一步：默认请求 GPU Scene 和 Bindless；旧项目可在启动前关闭。
  * AppSettings settings = new AppSettings(true);
@@ -39,12 +41,18 @@ import java.nio.ByteBuffer;
  * // 第五步：重新开启并选择 Deferred，能力不足时仍保留传统回退。
  * renderManager.setGpuSceneEnabled(true);
  * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
+ * // 第六步：SceneComposer 保存 GPU Scene LOD 后，游戏加载并挂载场景即可生效。
+ * rootNode.attachChild(assetManager.loadModel("Scenes/Level.j3o"));
  * }</pre>
  */
 public final class TestGpuSceneSettings extends SimpleApplication {
     private int frame;
     private ByteBuffer reference;
     private Material material;
+    private com.jme3.scene.Node lodSettings;
+    private long fullTriangles;
+    private long defaultTriangles;
+    private long reducedTriangles;
 
     public static void main(String[] args) {
         TestGpuSceneSettings app = new TestGpuSceneSettings();
@@ -81,6 +89,24 @@ public final class TestGpuSceneSettings extends SimpleApplication {
         }
         cam.setLocation(new Vector3f(0, 15, 35));
         cam.lookAt(new Vector3f(0, 3, -10), Vector3f.UNIT_Y);
+        // Keep the image comparisons at full detail before exercising LOD.
+        lodSettings = reloadLodSettings(0.001f);
+        rootNode.attachChild(lodSettings);
+    }
+
+    private com.jme3.scene.Node reloadLodSettings(float... pixels) {
+        com.jme3.scene.Node scene = new com.jme3.scene.Node("Saved LOD settings");
+        com.jme3.post.WorldSettings settings = new com.jme3.post.WorldSettings();
+        settings.setDisplayOutput(com.jme3.post.WorldSettings.DisplayOutput.Application);
+        settings.setGpuLodThresholds(pixels);
+        scene.addControl(settings);
+        try {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            com.jme3.export.binary.BinaryExporter.getInstance().save(scene, bytes);
+            return (com.jme3.scene.Node) new com.jme3.export.binary.BinaryImporter().load(bytes.toByteArray());
+        } catch (java.io.IOException error) {
+            throw new AssertionError("Cannot reload scene LOD settings", error);
+        }
     }
 
     @Override
@@ -106,6 +132,11 @@ public final class TestGpuSceneSettings extends SimpleApplication {
             renderer.getCaps().add(Caps.OpenGL43);
             renderManager.setGpuSceneEnabled(false);
             renderManager.setGpuSceneEnabled(true);
+        } else if (frame == 21 || frame == 25) {
+            lodSettings.removeFromParent();
+        } else if (frame == 23) {
+            lodSettings = reloadLodSettings(100000, 50000, 10000, 1000);
+            rootNode.attachChild(lodSettings);
         }
     }
 
@@ -127,9 +158,27 @@ public final class TestGpuSceneSettings extends SimpleApplication {
             throw new AssertionError("Unsupported hardware did not restore Forward");
         }
         if (frame == 20) {
+            fullTriangles = visibleTriangles();
+        } else if (frame == 22) {
+            defaultTriangles = visibleTriangles();
+        } else if (frame == 24) {
+            reducedTriangles = visibleTriangles();
+        } else if (frame == 26) {
+            long restored = visibleTriangles();
+            if (fullTriangles <= defaultTriangles || defaultTriangles <= reducedTriangles
+                    || reducedTriangles <= 0 || restored != defaultTriangles) {
+                throw new AssertionError("GPU Scene LOD triangles: " + fullTriangles + ", "
+                        + defaultTriangles + ", " + reducedTriangles + ", " + restored);
+            }
+            System.out.println("GPU_SCENE_WORLD_LOD_PASS " + fullTriangles + " "
+                    + defaultTriangles + " " + reducedTriangles + " " + restored);
             System.out.println("GPU_SETTINGS_PASS automatic/runtime/material/deferred/fallback");
             stop();
         }
+    }
+
+    private long visibleTriangles() {
+        return ((GpuScenePipeline) renderManager.getPipeline(viewPort)).readVisibleTriangleCount();
     }
 
     private ByteBuffer capture() {

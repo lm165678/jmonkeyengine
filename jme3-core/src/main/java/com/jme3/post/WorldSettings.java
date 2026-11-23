@@ -49,6 +49,7 @@ public final class WorldSettings extends AbstractControl {
     private int priority;
     private long revision;
     private DisplayOutput displayOutput = DisplayOutput.Hdr;
+    private float[] gpuLodThresholds = new float[0];
     private GiStreaming giStreaming = GiStreaming.DEFAULTS;
     private boolean singleProbeVisibility;
     private boolean octahedralProbeIrradiance;
@@ -269,6 +270,42 @@ public final class WorldSettings extends AbstractControl {
         return Collections.unmodifiableMap(options);
     }
 
+    /**
+     * Sets the projected diameter thresholds for automatic GPU Scene LOD.
+     * Use up to seven finite, positive pixels in decreasing order. An empty
+     * list restores the automatic pipeline's 80, 30, 10 and 3 pixel defaults
+     * when no other scene override applies. Edit on the render thread when attached.
+     * <pre>{@code
+     * // 第一步：在 SceneComposer 设置 80, 30, 10, 3，应用并保存场景。
+     * // 第二步：游戏启动时请求 GPU Scene。
+     * AppSettings settings = new AppSettings(true);
+     * settings.setGpuSceneEnabled(true);
+     * app.setSettings(settings);
+     * app.start();
+     * // 第三步：在 simpleInitApp 中加载并挂载场景。
+     * rootNode.attachChild(assetManager.loadModel("Scenes/Level.j3o"));
+     * // 第四步：如需恢复默认，清空场景的阈值并重新保存。
+     * }</pre>
+     * @param pixels projected diameters in pixels
+     */
+    public void setGpuLodThresholds(float... pixels) {
+        com.jme3.renderer.gpuscene.GpuScenePipeline.validateLodThresholds(pixels);
+        if (!Arrays.equals(gpuLodThresholds, pixels)) {
+            gpuLodThresholds = pixels.clone();
+            revision++;
+        }
+    }
+
+    /** @return a copy of the authored thresholds, empty by default */
+    public float[] getGpuLodThresholds() {
+        return gpuLodThresholds.clone();
+    }
+
+    /** @return whether this scene supplies a GPU Scene LOD override */
+    public boolean hasGpuLodThresholds() {
+        return gpuLodThresholds.length != 0;
+    }
+
     public int getPriority() {
         return priority;
     }
@@ -303,6 +340,7 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(postProcessing, "postProcessing", new byte[0]);
         capsule.write(priority, "priority", 0);
         capsule.write(displayOutput, "displayOutput", DisplayOutput.Application);
+        capsule.write(gpuLodThresholds, "gpuLodThresholds", null);
         capsule.write(giStreaming.preloadDistance, "giPreloadDistance", GiStreaming.DEFAULTS.preloadDistance);
         capsule.write(giStreaming.maxFineProbes, "giMaxFineProbes", GiStreaming.DEFAULTS.maxFineProbes);
         capsule.write(giStreaming.atlasMiB, "giAtlasMiB", GiStreaming.DEFAULTS.atlasMiB);
@@ -328,6 +366,12 @@ public final class WorldSettings extends AbstractControl {
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);
+        gpuLodThresholds = capsule.readFloatArray("gpuLodThresholds", new float[0]);
+        try {
+            com.jme3.renderer.gpuscene.GpuScenePipeline.validateLodThresholds(gpuLodThresholds);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid GPU Scene LOD thresholds", invalid);
+        }
         halfResolutionProbeGi = capsule.readBoolean("halfResolutionProbeGi", false);
         probeGiFullFallback = capsule.readBoolean("probeGiFullFallback", true);
         try {
