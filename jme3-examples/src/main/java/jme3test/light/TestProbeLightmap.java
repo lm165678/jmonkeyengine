@@ -28,11 +28,12 @@ import java.util.List;
 
 /**
  * Offscreen OpenGL smoke for dual-format bake, overlapping-field lightmap and independent
- * sky visibility rasterization, runtime format switching and regional unloading. No input controls.
+ * sky visibility rasterization, UV chart gutters, runtime format switching and
+ * regional unloading. No input controls.
  * Run {@code gradlew :jme3-examples:probeLightmapSmoke}. Requires OpenGL 4.3.
  * <pre>
  * 第一步：用 GiSceneBaker 烘焙总漫反射，启用八面体和单次切比雪夫选项。
- * 第二步：用重叠的天空分离 Volume 和 UV2 烘焙两区域图集。
+ * 第二步：用重叠 Volume 和带留边的 UV2 烘焙双层图集，检查两个纹理层的扩边。
  * 第三步：保存带类型的资产，在 ProbeLightmapControl 中引用并验证流送。
  * </pre>
  */
@@ -88,7 +89,7 @@ public final class TestProbeLightmap extends SimpleApplication {
         recipe.separateSky = true;
         var skyBake = GiSceneBaker.bake(renderManager, rootNode, skyVolume, recipe, v -> { }, () -> false, n -> { });
         Quad mesh = new Quad(1, 1);
-        mesh.setBuffer(Type.TexCoord2, 2, new float[]{0, 0, 1, 0, 1, 1, 0, 1});
+        mesh.setBuffer(Type.TexCoord2, 2, new float[]{0, .125f, 1, .125f, 1, .875f, 0, .875f});
         receiver = new Geometry("UV2 receiver", mesh);
         receiver.setMaterial(new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md"));
         receiver.setLocalTranslation(-.5f, -.5f, 0);
@@ -112,6 +113,12 @@ public final class TestProbeLightmap extends SimpleApplication {
             throw new AssertionError("Missing irradiance or separate sky in a two-volume lightmap: "
                     + irradiance + ", " + coverage + ", " + leftSky + ", " + rightSky);
         }
+        verifyGutter(bytes, 0);
+        verifyGutter(bytes, skyBand);
+        var singleBand = ProbeLightmapBaker.bake(renderManager, assetManager, receiver, baked,
+                volume.getWorldTranslation(), 32, 32);
+        verifyGutter(singleBand.getImage().getData(0), 0);
+        singleBand.getImage().dispose();
         try {
             var directory = Files.createTempDirectory("probe-lightmap");
             directory.toFile().deleteOnExit();
@@ -143,6 +150,17 @@ public final class TestProbeLightmap extends SimpleApplication {
         receiver.addControl(new ProbeLightmapControl("map.j3o", receiver.getWorldTransform(), 20));
         cam.setLocation(new Vector3f(0, 0, 2));
         cam.lookAt(Vector3f.ZERO, Vector3f.UNIT_Y);
+    }
+
+    private static void verifyGutter(java.nio.ByteBuffer pixels, int bandOffset) {
+        int x = 30;
+        int edge = bandOffset + (4 * 32 + x) * Long.BYTES;
+        int gutter = bandOffset + (2 * 32 + x) * Long.BYTES;
+        int empty = bandOffset + (1 * 32 + x) * Long.BYTES;
+        long edgeValue = pixels.getLong(edge);
+        if (edgeValue == 0L || pixels.getLong(gutter) != edgeValue || pixels.getLong(empty) != 0L) {
+            throw new AssertionError("Expected a two-texel gutter in band " + bandOffset);
+        }
     }
 
     @Override

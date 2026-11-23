@@ -26,8 +26,11 @@ import java.util.List;
  * Requires a float-renderable OpenGL context. Call on the render thread between
  * render passes. Ownership of the returned texture and its storage passes to
  * the caller. Its alpha encodes valid coverage; missing texels retain live GI.
+ * Leave room between UV charts at the bake resolution. The bake extends the
+ * nearest rasterized texel up to two texels into empty space for bilinear
+ * filtering. Existing lightmaps need to be baked again to get the border.
  * <pre>{@code
- * // 第一步：完成 LightProbe Volume 的完整间接光烘焙，准备非重叠 UV2。
+ * // 第一步：完成 LightProbe Volume 烘焙，准备非重叠 UV2，并给 UV 岛留边。
  * Texture2D lightmap = ProbeLightmapBaker.bake(renderManager, assetManager,
  *         geometry, volume.getData(), volume.getWorldTranslation(), 256, 256);
  * // 第二步：将纹理另存为 GI/Lightmaps 下的独立 J3O 文件。
@@ -36,6 +39,8 @@ import java.util.List;
  * }</pre>
  */
 public final class ProbeLightmapBaker {
+    private static final int GUTTER_RADIUS = 2;
+    private static final int FLOAT_PIXEL_BYTES = 4 * Float.BYTES;
     private ProbeLightmapBaker() {
     }
 
@@ -119,9 +124,7 @@ public final class ProbeLightmapBaker {
             }
             renderer.readFrameBufferWithFormat(target, readback, Image.Format.RGBA32F);
             ByteBuffer half = BufferUtils.createByteBuffer(width * outputHeight * 8);
-            for (int i = 0; i < width * outputHeight * 4; i++) {
-                half.putShort(FastMath.convertFloatToHalf(readback.getFloat(i * 4)));
-            }
+            fillLightmapGutters(readback, half, width, height, atlas);
             half.flip();
             Texture2D texture = new Texture2D(new Image(Image.Format.RGBA16F, width, outputHeight, half, ColorSpace.Linear));
             texture.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
@@ -140,5 +143,65 @@ public final class ProbeLightmapBaker {
             renderer.deleteFrameBuffer(target);
             BufferUtils.destroyDirectBuffer(readback);
         }
+    }
+
+    private static void fillLightmapGutters(ByteBuffer raster, ByteBuffer half,
+            int width, int height, boolean atlas) {
+        int bandPixels = width * height;
+        int[] sources = atlas ? new int[bandPixels] : null;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = y * width + x;
+                int source = pixel;
+                if (!isRasterized(raster, pixel)) {
+                    source = nearestRasterized(raster, width, height, x, y);
+                }
+                if (atlas) {
+                    sources[pixel] = source;
+                }
+                writeTexel(raster, half, source, true);
+            }
+        }
+        if (atlas) {
+            // Both bands follow the same source to keep bent sky and irradiance aligned.
+            for (int source : sources) {
+                writeTexel(raster, half, source < 0 ? -1 : bandPixels + source, false);
+            }
+        }
+    }
+
+    private static boolean isRasterized(ByteBuffer raster, int pixel) {
+        return raster.getFloat(pixel * FLOAT_PIXEL_BYTES + 3 * Float.BYTES) >= 1f;
+    }
+
+    private static int nearestRasterized(ByteBuffer raster, int width, int height, int x, int y) {
+        int closest = -1;
+        int bestDistance = 2 * GUTTER_RADIUS * GUTTER_RADIUS + 1;
+        for (int dy = Math.max(-GUTTER_RADIUS, -y); dy <= Math.min(GUTTER_RADIUS, height - 1 - y); dy++) {
+            int row = (y + dy) * width;
+            for (int dx = Math.max(-GUTTER_RADIUS, -x); dx <= Math.min(GUTTER_RADIUS, width - 1 - x); dx++) {
+                int distance = dx * dx + dy * dy;
+                int candidate = row + x + dx;
+                if (distance < bestDistance && isRasterized(raster, candidate)) {
+                    closest = candidate;
+                    bestDistance = distance;
+                }
+            }
+        }
+        return closest;
+    }
+
+    private static void writeTexel(ByteBuffer raster, ByteBuffer half, int pixel, boolean irradiance) {
+        if (pixel < 0) {
+            half.putLong(0L);
+            return;
+        }
+        int offset = pixel * FLOAT_PIXEL_BYTES;
+        for (int channel = 0; channel < 3; channel++) {
+            half.putShort(FastMath.convertFloatToHalf(raster.getFloat(offset + channel * Float.BYTES)));
+        }
+        float alpha = raster.getFloat(offset + 3 * Float.BYTES);
+        // Remove the temporary raster occupancy marker from the stored coverage.
+        half.putShort(FastMath.convertFloatToHalf(irradiance ? alpha - 1f : alpha));
     }
 }
