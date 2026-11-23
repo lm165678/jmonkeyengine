@@ -63,6 +63,7 @@ import java.util.logging.Logger;
  */
 public class Geometry extends Spatial {
     private transient com.jme3.material.MatParamOverride residentProbeLightmap;
+    private transient com.jme3.material.MatParamOverride probeLightmapAtlasInset;
     private transient com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> probeLightmapOverrides;
 
     /**
@@ -73,11 +74,24 @@ public class Geometry extends Spatial {
      * @param value resident irradiance texture or null to restore live probes
      */
     public void setResidentProbeLightmap(com.jme3.texture.Texture2D value) {
-        if (getResidentProbeLightmap() == value) {
+        setResidentProbeLightmap(value, false);
+    }
+
+    /**
+     * Installs a streamed probe lightmap on the render thread. The atlas layout comes from
+     * {@link com.jme3.environment.gi.ProbeLightmapBaker#bakeField}; older textures use false.
+     * @param value resident texture or null to restore live sampling
+     * @param atlas whether the texture contains separate diffuse and sky bands
+     */
+    public void setResidentProbeLightmap(com.jme3.texture.Texture2D value, boolean atlas) {
+        boolean hasBands = value != null && atlas;
+        if (getResidentProbeLightmap() == value && hasBands == (probeLightmapAtlasInset != null)) {
             return;
         }
         residentProbeLightmap = value == null ? null : new com.jme3.material.MatParamOverride(
                 com.jme3.shader.VarType.Texture2D, "GiStaticLightmap", value);
+        probeLightmapAtlasInset = hasBands ? new com.jme3.material.MatParamOverride(
+                com.jme3.shader.VarType.Float, "GiLightmapAtlasInset", .5f / value.getImage().getHeight()) : null;
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
     }
 
@@ -104,6 +118,9 @@ public class Geometry extends Spatial {
         probeLightmapOverrides.clear();
         probeLightmapOverrides.addAll(inherited);
         probeLightmapOverrides.add(residentProbeLightmap);
+        if (probeLightmapAtlasInset != null) {
+            probeLightmapOverrides.add(probeLightmapAtlasInset);
+        }
         return probeLightmapOverrides;
     }
     // Version #1: removed shared meshes.
@@ -631,6 +648,7 @@ public class Geometry extends Spatial {
     public void cloneFields(Cloner cloner, Object original) {
         super.cloneFields(cloner, original);
         residentProbeLightmap = null;
+        probeLightmapAtlasInset = null;
         probeLightmapOverrides = null;
 
         // If this is a grouped node and if our group node is

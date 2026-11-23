@@ -24,6 +24,7 @@ vec3 giSkyDirection(vec3 normal) {
 #ifdef GI_PROBES
 #ifdef STATIC_PROBE_LIGHTMAP
 uniform sampler2D m_GiStaticLightmap;
+uniform float m_GiLightmapAtlasInset;
 varying vec2 probeLightmapUv;
 #endif
 uniform float m_GiEnvironmentMix;
@@ -284,10 +285,7 @@ vec3 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
         float neighbor = float(corner);
         vec3 offset = vec3(mod(neighbor, 3.0), mod(floor(neighbor / 3.0), 3.0),
                 floor(neighbor / 9.0)) - 1.0;
-        if (mod(floor(fract(atlasInfo.w) * 512.0 + 0.01), 2.0) > 0.5) {
-            visibility = giSingleVisibility(probe, direction, distanceToProbe / encoding.x,
-                    atlasInfo, dimensions);
-        } else if (!wide) {
+        if (!wide) {
             offset = giNeighborOffset(corner);
         }
         vec3 cell = base + offset;
@@ -365,7 +363,9 @@ vec3 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
             continue;
         }
         float visibility;
-        if (!wide && !surfaceLayout) {
+        if (mod(floor(fract(atlasInfo.w) * 512.0 + 0.01), 2.0) > 0.5) {
+            visibility = giSingleVisibility(probe, direction, distanceToProbe / encoding.x, atlasInfo, dimensions);
+        } else if (!wide && !surfaceLayout) {
             visibility = giCompactVisibility(probe, direction, planeNormal,
                     distanceToProbe / encoding.x, atlasInfo, dimensions, distanceToProbe);
         } else {
@@ -792,10 +792,19 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
     vec3 plane = giReceiverPlane(worldPosition, normal);
     vec4 sampleValue;
     #ifdef STATIC_PROBE_LIGHTMAP
-        vec4 cached = texture2D(m_GiStaticLightmap, probeLightmapUv);
+        float inset = m_GiLightmapAtlasInset;
+        vec2 lookup = probeLightmapUv;
+        if (inset > 0.0) {
+            lookup.y = clamp(lookup.y * 0.5, inset, 0.5 - inset);
+        }
+        vec4 cached = texture2D(m_GiStaticLightmap, lookup);
         if (m_GiEnabled && !m_GiBakeBounce && cached.a > 0.999) {
-            giTotalSkyCoverage = 1.0;
-            giSkyDiffuseWeight = 0.0;
+            vec4 sky = vec4(0.0);
+            if (inset > 0.0) {
+                sky = texture2D(m_GiStaticLightmap, vec2(lookup.x, lookup.y + 0.5));
+            }
+            giSkyBentMoment = sky.rgb;
+            giSkyDiffuseWeight = sky.a;
             giEnvironmentDiffuseWeight = clamp(m_GiEnvironmentMix, 0.0, 1.0);
             return cached.rgb;
         }

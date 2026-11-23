@@ -1,5 +1,6 @@
 MaterialDef Probe Lightmap Bake {
     MaterialParameters {
+        Int LightmapBand
         Boolean GiEnabled
         Boolean GiBakeBounce
         Texture2D GiIrradiance -LINEAR

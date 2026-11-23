@@ -14,6 +14,7 @@ MaterialDef Phong Lighting {
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiStaticLightmap -LINEAR
+        Float GiLightmapAtlasInset : 0.0
         Texture2D GiMoments -LINEAR
         Texture2D GiSkyVisibility -LINEAR
         // Single-volume boundary transition in world units; 0 disables fading.

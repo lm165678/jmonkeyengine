@@ -27,7 +27,7 @@ import java.util.logging.Logger;
  * for unloading. Missing data, changed world transform, and nonstatic
  * mobility keep the ordinary probe path available.
  * <pre>{@code
- * // 第一步：使用 ProbeLightmapBaker 烘焙，将纹理另存为独立 J3O 资产。
+ * // 第一步：使用 ProbeLightmapBaker 烘焙，将 ProbeLightmapAsset 另存为独立 J3O。
  * // 第二步：在场景线程记录资产路径和烘焙时的世界变换，再保存场景。
  * geometry.addControl(new ProbeLightmapControl("GI/Lightmaps/floor.j3o",
  *         geometry.getWorldTransform(), 100f));
@@ -40,7 +40,7 @@ public final class ProbeLightmapControl extends AbstractControl {
     private String asset;
     private Transform bakedTransform;
     private float preloadDistance;
-    private transient CompletableFuture<Texture2D> load;
+    private transient CompletableFuture<ProbeLightmapAsset> load;
     private transient Texture2D texture;
     private transient boolean missing;
 
@@ -72,24 +72,27 @@ public final class ProbeLightmapControl extends AbstractControl {
             return;
         }
         if (load != null && load.isDone()) {
-            texture = load.join();
+            ProbeLightmapAsset decoded = load.join();
             load = null;
-            missing = texture == null;
-            geometry.setResidentProbeLightmap(texture);
+            missing = decoded == null;
+            if (decoded != null) {
+                texture = decoded.getTexture();
+                geometry.setResidentProbeLightmap(texture, decoded.hasSkyBand());
+            }
         } else if (texture == null && load == null && !missing && asset != null) {
             String key = asset;
             load = CompletableFuture.supplyAsync(() -> readTexture(assets, key));
         }
     }
 
-    private static Texture2D readTexture(AssetManager assets, String key) {
+    private static ProbeLightmapAsset readTexture(AssetManager assets, String key) {
         try {
             var info = assets.locateAsset(new AssetKey<>(key));
             if (info == null) {
                 throw new IOException("Asset not found");
             }
             try (var input = info.openStream()) {
-                return (Texture2D) new BinaryImporter().load(input);
+                return ProbeLightmapAsset.fromSaved(new BinaryImporter().load(input));
             }
         } catch (IOException | RuntimeException failure) {
             LOG.log(Level.WARNING, "Could not stream lightmap " + key, failure);
