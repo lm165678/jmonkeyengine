@@ -1243,7 +1243,8 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         // Select shader to use
         Shader shader = technique.makeCurrent(renderManager, overrides, renderManager.getForcedMatParams(), lights, rendererCaps);
         Shader ordinaryShader = shader;
-        if (bindlessTextures) {
+        if (bindlessTextures || (geometry.usesResidentProbeLightmap()
+                && renderManager.isGpuSceneBindlessEnabled())) {
             shader = renderer.getBindlessShader(shader);
         }
         boolean bindless = shader != ordinaryShader;

@@ -75,6 +75,9 @@ import java.nio.ByteOrder;
  * coarse-grid lighting. Coefficients contain irradiance, not irradiance/pi.
  */
 public final class GiProbeData implements Savable {
+    /** One metadata row followed by an 8x8 octahedral tile in a 9x9 record. */
+    static final int OCT_RECORD_ROWS = 1 + GiProbeBaker.OCT_SIZE;
+    private Texture2D octahedral;
     private Vector3f origin;
     private Vector3f spacing;
     private Vector3f counts;
@@ -239,6 +242,54 @@ public final class GiProbeData implements Savable {
         return skyVisibility;
     }
 
+    /**
+     * @return whether this bake contains optional directional octahedral irradiance
+     * @see com.jme3.post.WorldSettings#setOctahedralProbeIrradiance(boolean)
+     */
+    public boolean hasOctahedralIrradiance() {
+        return octahedral != null;
+    }
+
+    Image selectedIrradiance(boolean useOctahedral) {
+        return (useOctahedral && octahedral != null ? octahedral : irradiance).getImage();
+    }
+
+    void setOctahedral(float[][] probes) {
+        Image sh = irradiance.getImage();
+        int height = Math.multiplyExact(sh.getHeight(), OCT_RECORD_ROWS);
+        boolean compact = sh.getFormat() == Image.Format.RGBA16F;
+        int width = sh.getWidth();
+        ByteBuffer pixels = BufferUtils.createByteBuffer(Math.multiplyExact(width * height, compact ? 8 : 16));
+        int size = GiProbeBaker.OCT_SIZE;
+        for (int probe = 0; probe < probes.length; probe++) {
+            float[] samples = probes[probe];
+            if (samples != null) {
+                for (int y = 0; y < size; y++) {
+                    int row = probe / columns * OCT_RECORD_ROWS + 1 + y;
+                    int destination = (row * width + probe % columns * 9) * 4;
+                    for (int x = 0; x < size; x++) {
+                        for (int channel = 0; channel < 3; channel++) {
+                            put(pixels, destination + x * 4 + channel,
+                                    samples[(y * size + x) * 3 + channel] / irradianceScale, compact);
+                        }
+                    }
+                }
+            }
+        }
+        copyOctahedralMetadata(pixels, sh, compact);
+        octahedral = texture(width, height, pixels, compact);
+    }
+
+    private static void copyOctahedralMetadata(ByteBuffer pixels, Image sh, boolean compact) {
+        int components = sh.getWidth() * 4;
+        for (int y = 0; y < sh.getHeight(); y++) {
+            for (int channel = 3; channel < components; channel += 4) {
+                put(pixels, y * OCT_RECORD_ROWS * components + channel,
+                        component(sh, y * components + channel), compact);
+            }
+        }
+    }
+
     // Repack original texels rather than reconstructing moments or SH. When
     // decimating, express the old physical position relative to the new grid.
     GiProbeData resample(int x0, int y0, int z0, int sx, int sy, int sz,
@@ -261,6 +312,8 @@ public final class GiProbeData implements Savable {
         ByteBuffer sh = BufferUtils.createByteBuffer(cols * 9 * rows * pixelBytes);
         ByteBuffer sky = hasSeparatedSky() ? BufferUtils.createByteBuffer(sh.capacity()) : null;
         ByteBuffer visibility = BufferUtils.createByteBuffer(cols * rows * tileSize * tileSize * pixelBytes);
+        ByteBuffer oct = octahedral == null ? null
+                : BufferUtils.createByteBuffer(Math.multiplyExact(sh.capacity(), OCT_RECORD_ROWS));
         GiProbeGrid sourceGrid = getGrid();
         boolean decimated = !step.equals(Vector3f.UNIT_XYZ);
         for (int p = 0; p < probes; p++) {
@@ -284,6 +337,17 @@ public final class GiProbeData implements Savable {
                 put(sh, target + 11, (component(irradiance.getImage(), source + 11) + iy - y) / step.y, compact);
                 put(sh, target + 15, (component(irradiance.getImage(), source + 15) + iz - z) / step.z, compact);
             }
+            if (oct != null) {
+                Image image = octahedral.getImage();
+                for (int row = 1; row < OCT_RECORD_ROWS; row++) {
+                    int sourceRow = (from / columns * OCT_RECORD_ROWS + row) * image.getWidth() * 4
+                            + from % columns * 36;
+                    int destinationRow = (p / cols * OCT_RECORD_ROWS + row) * cols * 36 + p % cols * 36;
+                    for (int c = 0; c < 36; c++) {
+                        put(oct, destinationRow + c, component(image, sourceRow + c), compact);
+                    }
+                }
+            }
             for (int v = 0; v < tileSize; v++) {
                 int sv = (2 * v + 1) * resolution / (2 * tileSize);
                 for (int u = 0; u < tileSize; u++) {
@@ -298,6 +362,10 @@ public final class GiProbeData implements Savable {
             }
         }
         result.irradiance = texture(cols * 9, rows, sh, compact);
+        if (oct != null) {
+            copyOctahedralMetadata(oct, result.irradiance.getImage(), compact);
+            result.octahedral = texture(cols * 9, rows * OCT_RECORD_ROWS, oct, compact);
+        }
         result.moments = texture(cols * tileSize, rows * tileSize, visibility, compact);
         if (sky != null) {
             result.skyVisibility = texture(cols * 9, rows, sky, compact);
@@ -354,7 +422,8 @@ public final class GiProbeData implements Savable {
     /** Returns the uncompressed texture size. The driver or the bindless cache may allocate additional copies. */
     public long getTextureBytes() {
         return (long) irradiance.getImage().getData(0).capacity() + moments.getImage().getData(0).capacity()
-                + (skyVisibility == null ? 0 : skyVisibility.getImage().getData(0).capacity());
+                + (skyVisibility == null ? 0 : skyVisibility.getImage().getData(0).capacity())
+                + (octahedral == null ? 0 : octahedral.getImage().getData(0).capacity());
     }
 
     private int probeComponent(int probe, int coefficient) {
@@ -398,7 +467,7 @@ public final class GiProbeData implements Savable {
         return store.set(Math.max(0, store.x), Math.max(0, store.y), Math.max(0, store.z));
     }
 
-    /** Saves a gzip-compressed binary asset. Worker-safe when the data is not modified. */
+    /** Saves the streamed asset with separately compressed irradiance payloads. */
     public void saveCompressed(java.io.OutputStream output) throws IOException {
         // The caller owns the destination. Release the deflater per brick.
         java.io.FilterOutputStream destination = new java.io.FilterOutputStream(output) {
@@ -411,21 +480,80 @@ public final class GiProbeData implements Savable {
             public void close() {
             }
         };
-        try (java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(destination)) {
-            new com.jme3.export.binary.BinaryExporter().save(this, gzip);
+        if (octahedral == null) {
+            try (java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(destination)) {
+                new com.jme3.export.binary.BinaryExporter().save(this, gzip);
+            }
+        } else {
+            GiProbeData shared = new GiProbeData();
+            shared.origin = origin;
+            shared.spacing = spacing;
+            shared.counts = counts;
+            shared.irradiance = irradiance;
+            shared.moments = moments;
+            shared.skyVisibility = skyVisibility;
+            shared.resolution = resolution;
+            shared.columns = columns;
+            shared.surfaceLayout = surfaceLayout;
+            shared.distanceScale = distanceScale;
+            shared.irradianceScale = irradianceScale;
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(destination)) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("probe-sh.j3o"));
+                new com.jme3.export.binary.BinaryExporter().save(shared, zip);
+                zip.closeEntry();
+                zip.putNextEntry(new java.util.zip.ZipEntry("probe-octahedral.j3o"));
+                new com.jme3.export.binary.BinaryExporter().save(octahedral, zip);
+                zip.closeEntry();
+            }
         }
     }
 
     /** Loads a compressed chunk on a worker; does not upload GPU resources or close the input. */
     public static GiProbeData loadCompressed(java.io.InputStream input) throws IOException {
+        return loadCompressed(input, true);
+    }
+
+    static GiProbeData loadCompressed(java.io.InputStream input, boolean loadOctahedral) throws IOException {
         java.io.FilterInputStream source = new java.io.FilterInputStream(input) {
             @Override
             public void close() {
             }
         };
-        try (java.util.zip.GZIPInputStream gzip = new java.util.zip.GZIPInputStream(source)) {
+        var header = new java.io.PushbackInputStream(source, 2);
+        byte[] signature = header.readNBytes(2);
+        header.unread(signature);
+        if (signature.length == 2 && signature[0] == 'P' && signature[1] == 'K') {
+            try (var zip = new java.util.zip.ZipInputStream(header)) {
+                var baseEntry = zip.getNextEntry();
+                if (baseEntry == null || !"probe-sh.j3o".equals(baseEntry.getName())) {
+                    throw new IOException("Missing shared and SH probe data");
+                }
+                var base = (GiProbeData) new com.jme3.export.binary.BinaryImporter().load(zip);
+                if (loadOctahedral) {
+                    try {
+                        var octahedralEntry = zip.getNextEntry();
+                        if (octahedralEntry == null || !"probe-octahedral.j3o".equals(octahedralEntry.getName())) {
+                            throw new IOException("Missing octahedral probe data");
+                        }
+                        base.octahedral = (Texture2D) new com.jme3.export.binary.BinaryImporter().load(zip);
+                        base.validateOctahedral();
+                    } catch (IOException | RuntimeException failure) {
+                        base.dispose();
+                        throw failure;
+                    }
+                }
+                return base;
+            }
+        }
+        try (java.util.zip.GZIPInputStream gzip = new java.util.zip.GZIPInputStream(header)) {
             return (GiProbeData) new com.jme3.export.binary.BinaryImporter().load(gzip);
         }
+    }
+
+    private void validateOctahedral() throws IOException {
+        validateTexture(octahedral, irradiance.getImage().getWidth(),
+                irradiance.getImage().getHeight() * OCT_RECORD_ROWS);
+        octahedral.getImage().getData(0).order(ByteOrder.nativeOrder());
     }
 
     /** Returns a new descriptor; its coordinates remain relative to the volume. */
@@ -444,6 +572,9 @@ public final class GiProbeData implements Savable {
     /** Releases GPU image storage after all bindings are closed; CPU data is retained. */
     public void dispose() {
         irradiance.getImage().dispose();
+        if (octahedral != null) {
+            octahedral.getImage().dispose();
+        }
         moments.getImage().dispose();
         if (skyVisibility != null) {
             skyVisibility.getImage().dispose();
@@ -509,6 +640,7 @@ public final class GiProbeData implements Savable {
         out.write(irradiance, "irradiance", null);
         out.write(moments, "moments", null);
         out.write(skyVisibility, "skyVisibility", null);
+        out.write(octahedral, "octahedralIrradiance", null);
         out.write(resolution, "resolution", 0);
         out.write(columns, "columns", 0);
         int expectedColumns = (int) Math.ceil(Math.sqrt(getGrid().getProbeCount()));
@@ -527,6 +659,7 @@ public final class GiProbeData implements Savable {
         irradiance = (Texture2D) in.readSavable("irradiance", null);
         moments = (Texture2D) in.readSavable("moments", null);
         skyVisibility = (Texture2D) in.readSavable("skyVisibility", null);
+        octahedral = (Texture2D) in.readSavable("octahedralIrradiance", null);
         resolution = in.readInt("resolution", 0);
         columns = in.readInt("columns", 0);
         int version = in.readInt("giFormatVersion", 0);
@@ -554,6 +687,9 @@ public final class GiProbeData implements Savable {
             }
             int rows = (grid.getProbeCount() + columns - 1) / columns;
             validateTexture(irradiance, columns * 9, rows);
+            if (octahedral != null) {
+                validateOctahedral();
+            }
             if (version == 3 || skyVisibility != null) {
                 if (skyVisibility == null) {
                     throw new IOException("Missing separated sky visibility");

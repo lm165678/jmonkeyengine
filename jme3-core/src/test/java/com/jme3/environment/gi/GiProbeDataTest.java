@@ -52,6 +52,25 @@ public class GiProbeDataTest {
     }
 
     @Test
+    public void streamedPayloadLoadsOnlyTheRequestedIrradiance() throws IOException {
+        GiProbeData original = data();
+        ByteArrayOutputStream legacy = new ByteArrayOutputStream();
+        original.saveCompressed(legacy);
+        assertFalse(GiProbeData.loadCompressed(new ByteArrayInputStream(legacy.toByteArray()))
+                .hasOctahedralIrradiance());
+
+        float[][] oct = new float[12][8 * 8 * 3];
+        java.util.Arrays.fill(oct[2], .25f);
+        original.setOctahedral(oct);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        original.saveCompressed(bytes);
+        GiProbeData sh = GiProbeData.loadCompressed(new ByteArrayInputStream(bytes.toByteArray()), false);
+        GiProbeData both = GiProbeData.loadCompressed(new ByteArrayInputStream(bytes.toByteArray()), true);
+        assertFalse(sh.hasOctahedralIrradiance());
+        assertTrue(both.hasOctahedralIrradiance());
+    }
+
+    @Test
     public void cloneEditsDoNotChangeOriginalVolume() {
         GiProbeVolume original = new GiProbeVolume();
         original.publish(data());

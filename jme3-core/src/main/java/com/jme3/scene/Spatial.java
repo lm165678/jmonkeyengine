@@ -152,6 +152,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
             = Camera.FrustumIntersect.Intersects;
     protected RenderQueue.Bucket queueBucket = RenderQueue.Bucket.Inherit;
     protected ShadowMode shadowMode = RenderQueue.ShadowMode.Inherit;
+    private Mobility localMobility = Mobility.Inherit;
     public transient float queueDistance = Float.NEGATIVE_INFINITY;
     protected Transform localTransform;
     protected Transform worldTransform;
@@ -1730,6 +1731,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
         capsule.write(batchHint, "batch_hint", BatchHint.Inherit);
         capsule.write(queueBucket, "queue", RenderQueue.Bucket.Inherit);
         capsule.write(shadowMode, "shadow_mode", ShadowMode.Inherit);
+        capsule.write(localMobility, "mobility", Mobility.Inherit);
         capsule.write(localTransform, "transform", Transform.IDENTITY);
         capsule.write(localLights, "lights", null);
         capsule.writeSavableArrayList(new ArrayList(localOverrides), "overrides", null);
@@ -1752,6 +1754,7 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
                 RenderQueue.Bucket.Inherit);
         shadowMode = ic.readEnum("shadow_mode", ShadowMode.class,
                 ShadowMode.Inherit);
+        localMobility = ic.readEnum("mobility", Mobility.class, Mobility.Inherit);
 
         localTransform = (Transform) ic.readSavable("transform", Transform.IDENTITY.clone());
 
@@ -1874,6 +1877,44 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
     public void setShadowMode(RenderQueue.ShadowMode shadowMode) {
         this.shadowMode = shadowMode;
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
+    }
+
+    /**
+     * Authors a movement policy on the scene's owning thread. Unanimated roots
+     * default to Static; skeletal deformation defaults to Dynamic. This
+     * metadata leaves transform operations available for authoring.
+     * <pre>{@code
+     * // 第一步：声明父节点静态，普通子节点默认继承。
+     * building.setMobility(Mobility.Static);
+     * // 第二步：为原地旋转的子节点覆盖运动类型。
+     * fan.setMobility(Mobility.LocalDynamic);
+     * // 第三步：恢复自动继承；查询实际值使用 getMobility()。
+     * fan.setMobility(Mobility.Inherit);
+     * }</pre>
+     * @param mobility authored value or Inherit
+     */
+    public void setMobility(Mobility mobility) {
+        assert SceneGraphThreadWarden.assertOnCorrectThread(this);
+        localMobility = java.util.Objects.requireNonNull(mobility);
+    }
+
+    /** @return this object's authored policy, which may be Inherit */
+    public Mobility getLocalMobility() {
+        return localMobility;
+    }
+
+    /** @return the resolved movement policy for this object */
+    public Mobility getMobility() {
+        if (localMobility != Mobility.Inherit) {
+            return localMobility;
+        }
+        if (getControl(com.jme3.anim.SkinningControl.class) != null
+                || getControl(com.jme3.animation.SkeletonControl.class) != null
+                || this instanceof Geometry && ((Geometry) this).getMesh() != null
+                && ((Geometry) this).getMesh().isAnimated()) {
+            return Mobility.Dynamic;
+        }
+        return parent == null ? Mobility.Static : parent.getMobility();
     }
 
     /**

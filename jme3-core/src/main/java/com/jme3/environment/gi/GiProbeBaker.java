@@ -32,6 +32,24 @@ public final class GiProbeBaker {
     private GiProbeBaker() {
     }
 
+    static final int OCT_SIZE = 8;
+    private static final Vector3f[] OCT_NORMALS = octNormals();
+
+    private static Vector3f[] octNormals() {
+        Vector3f[] normals = new Vector3f[OCT_SIZE * OCT_SIZE];
+        for (int y = 0; y < OCT_SIZE; y++) {
+            for (int x = 0; x < OCT_SIZE; x++) {
+                float u = 2f * (x + .5f) / OCT_SIZE - 1f;
+                float v = 2f * (y + .5f) / OCT_SIZE - 1f;
+                float z = 1f - Math.abs(u) - Math.abs(v);
+                float fold = Math.max(-z, 0);
+                normals[y * OCT_SIZE + x] = new Vector3f(u + (u >= 0 ? -fold : fold),
+                        v + (v >= 0 ? -fold : fold), z).normalizeLocal();
+            }
+        }
+        return normals;
+    }
+
     /** Callback must write finite, nonnegative, linear RGB radiance to result. */
     @FunctionalInterface
     public interface RadianceSource {
@@ -64,6 +82,13 @@ public final class GiProbeBaker {
 
     /** Projects one captured probe. Worker threads must receive a CPU copy of the radiance. */
     public static float[] project(Vector3f position, int samples, RadianceSource source, BooleanSupplier cancelled) {
+        return project(position, samples, source, cancelled, null);
+    }
+
+    // Integrate the same captured radiance into SH and independently convolved
+    // octahedral irradiance. Both paths store irradiance before receiver albedo.
+    static float[] project(Vector3f position, int samples, RadianceSource source,
+            BooleanSupplier cancelled, float[] octahedral) {
         if (samples < 32 || !Vector3f.isValidVector(position)) {
             throw new IllegalArgumentException("Valid position and at least 32 samples required");
         }
@@ -71,6 +96,7 @@ public final class GiProbeBaker {
         Vector3f radiance = new Vector3f();
         double[] basis = new double[9];
         double[] sums = new double[27];
+        double[] weights = octahedral == null ? null : new double[OCT_NORMALS.length];
         for (int sample = 0; sample < samples; sample++) {
             if (cancelled.getAsBoolean()) {
                 throw new java.util.concurrent.CancellationException("GI bake cancelled");
@@ -87,6 +113,15 @@ public final class GiProbeBaker {
                 throw new IllegalArgumentException("Capture must return finite nonnegative radiance");
             }
             basis(direction, basis);
+            if (octahedral != null) {
+                for (int i = 0; i < OCT_NORMALS.length; i++) {
+                    float cosine = Math.max(0f, OCT_NORMALS[i].dot(direction));
+                    weights[i] += cosine;
+                    octahedral[i * 3] += cosine * radiance.x;
+                    octahedral[i * 3 + 1] += cosine * radiance.y;
+                    octahedral[i * 3 + 2] += cosine * radiance.z;
+                }
+            }
             for (int coefficient = 0; coefficient < 9; coefficient++) {
                 sums[coefficient * 3] += basis[coefficient] * radiance.x;
                 sums[coefficient * 3 + 1] += basis[coefficient] * radiance.y;
@@ -94,6 +129,17 @@ public final class GiProbeBaker {
             }
         }
         float[] output = new float[27];
+        if (octahedral != null) {
+            for (int i = 0; i < OCT_NORMALS.length; i++) {
+                float normalization = (float) (Math.PI / weights[i]);
+                for (int channel = 0; channel < 3; channel++) {
+                    octahedral[i * 3 + channel] *= normalization;
+                    if (!Float.isFinite(octahedral[i * 3 + channel])) {
+                        throw new IllegalArgumentException("Octahedral irradiance exceeds float storage range");
+                    }
+                }
+            }
+        }
         for (int coefficient = 0; coefficient < 9; coefficient++) {
             double convolution = coefficient == 0 ? Math.PI
                     : coefficient < 4 ? 2.0 * Math.PI / 3.0 : Math.PI / 4.0;

@@ -37,6 +37,7 @@ import com.jme3.export.*;
 import com.jme3.math.ColorRGBA;
 import com.jme3.renderer.Camera;
 import com.jme3.scene.Spatial;
+import com.jme3.scene.Mobility;
 import com.jme3.util.TempVars;
 import java.io.IOException;
 
@@ -403,6 +404,7 @@ public abstract class Light implements Savable, Cloneable {
         oc.write(shadowSettings, "shadowSettings", null);
         oc.write(name, "name", null);
         oc.write(global, "global", false);
+        oc.write(mobility, "mobility", Mobility.Static);
     }
 
     @Override
@@ -417,6 +419,32 @@ public abstract class Light implements Savable, Cloneable {
                 new com.jme3.shadow.LightShadowSettings());
         name = ic.readString("name", null);
         global = ic.readBoolean("global", false);
+        setMobility(ic.readEnum("mobility", Mobility.class, Mobility.Static));
+    }
+
+    private Mobility mobility = Mobility.Static;
+
+    /**
+     * Records the light's motion policy on the scene's owning thread.
+     * Old and newly created lights default to Static.
+     * <pre>{@code
+     * // 第一步：声明会移动的灯为动态。
+     * flashlight.setMobility(Mobility.Dynamic);
+     * // 第二步：仅原地转向的灯可设为局部动态。
+     * flashlight.setMobility(Mobility.LocalDynamic);
+     * // 第三步：固定后恢复静态。
+     * flashlight.setMobility(Mobility.Static);
+     * }</pre>
+     * @param mobility motion policy; Inherit resolves to Static for a shared light
+     */
+    public void setMobility(Mobility mobility) {
+        java.util.Objects.requireNonNull(mobility);
+        this.mobility = mobility == Mobility.Inherit ? Mobility.Static : mobility;
+    }
+
+    /** @return the light's authored motion policy */
+    public Mobility getMobility() {
+        return mobility;
     }
 
     /**

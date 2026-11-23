@@ -50,6 +50,54 @@ public final class WorldSettings extends AbstractControl {
     private long revision;
     private DisplayOutput displayOutput = DisplayOutput.Hdr;
     private GiStreaming giStreaming = GiStreaming.DEFAULTS;
+    private boolean singleProbeVisibility;
+    private boolean octahedralProbeIrradiance;
+
+    /**
+     * Selects the baked octahedral irradiance atlas instead of SH9. The
+     * automatic scene service uses one representation per resident chunk.
+     * Old SH-only data and chunks that cannot fit fall back to SH. Call on
+     * the render thread; changing the format repopulates resident GPU pages.
+     * <pre>{@code
+     * // 第一步：用当前引擎烘焙并保存双格式探针。
+     * // 第二步：场景 WorldSettings 选用八面体方向辐照度。
+     * world.setOctahedralProbeIrradiance(true);
+     * // 第三步：恢复 SH9，无需再次烘焙。
+     * world.setOctahedralProbeIrradiance(false);
+     * }</pre>
+     * @param enabled whether to prefer octahedral irradiance
+     */
+    public void setOctahedralProbeIrradiance(boolean enabled) {
+        octahedralProbeIrradiance = enabled;
+    }
+
+    /** @return whether octahedral irradiance is preferred */
+    public boolean isOctahedralProbeIrradiance() {
+        return octahedralProbeIrradiance;
+    }
+
+    /**
+     * Selects one Chebyshev evaluation per probe after bilinear moment filtering.
+     * The default preserves probability filtering. Set on the render thread;
+     * the scene service applies it before rendering, including half-resolution GI.
+     * <pre>{@code
+     * // 第一步：给场景挂上 WorldSettings 并启用自动场景服务。
+     * WorldSettings world = scene.getControl(WorldSettings.class);
+     * // 第二步：启用单次评估，复用已有烘焙数据，无需重新烘焙。
+     * world.setSingleProbeVisibility(true);
+     * // 第三步：恢复原有逐采样点遮挡评估。
+     * world.setSingleProbeVisibility(false);
+     * }</pre>
+     * @param enabled whether to filter moments before evaluating visibility
+     */
+    public void setSingleProbeVisibility(boolean enabled) {
+        singleProbeVisibility = enabled;
+    }
+
+    /** @return whether the scene uses a single visibility evaluation per probe */
+    public boolean isSingleProbeVisibility() {
+        return singleProbeVisibility;
+    }
     private boolean halfResolutionProbeGi;
     private boolean probeGiFullFallback = true;
 
@@ -260,6 +308,8 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(giStreaming.atlasMiB, "giAtlasMiB", GiStreaming.DEFAULTS.atlasMiB);
         capsule.write(halfResolutionProbeGi, "halfResolutionProbeGi", false);
         capsule.write(probeGiFullFallback, "probeGiFullFallback", true);
+        capsule.write(singleProbeVisibility, "singleProbeVisibility", false);
+        capsule.write(octahedralProbeIrradiance, "octahedralProbeIrradiance", false);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -273,6 +323,8 @@ public final class WorldSettings extends AbstractControl {
     public void read(JmeImporter importer) throws IOException {
         super.read(importer);
         InputCapsule capsule = importer.getCapsule(this);
+        singleProbeVisibility = capsule.readBoolean("singleProbeVisibility", false);
+        octahedralProbeIrradiance = capsule.readBoolean("octahedralProbeIrradiance", false);
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);

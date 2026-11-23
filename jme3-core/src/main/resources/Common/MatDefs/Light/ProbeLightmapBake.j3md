@@ -1,0 +1,34 @@
+MaterialDef Probe Lightmap Bake {
+    MaterialParameters {
+        Boolean GiEnabled
+        Boolean GiBakeBounce
+        Texture2D GiIrradiance -LINEAR
+        Texture2D GiMoments -LINEAR
+        Texture2D GiSkyVisibility -LINEAR
+        Texture2D GiVolumeData -LINEAR
+        Int GiVolumeCount
+        Int GiVolumeDataHeight
+        Float GiBias
+        Float GiEnvironmentMix
+        Float GiFadeDistance
+        Vector3 GiOrigin
+        Vector3 GiSpacing
+        Vector3 GiCounts
+        Vector4 GiAtlas
+        Vector2 GiEncoding
+        Vector4 GiTextureSize
+    }
+    Technique {
+        VertexShader GLSL150: Common/MatDefs/Light/ProbeLightmapBake.vert
+        FragmentShader GLSL150: Common/MatDefs/Light/ProbeLightmapBake.frag
+        WorldParameters {
+            WorldMatrix
+            WorldNormalMatrix
+        }
+        RenderState {
+            DepthTest Off
+            DepthWrite Off
+            FaceCull Off
+        }
+    }
+}

@@ -43,6 +43,9 @@ import java.util.*;
  * maxBytes bounds logical texture payload, not driver/bindless duplicate caches.
  */
 public final class GiProbeSet implements AutoCloseable {
+    // Unused bit in the exact binary fraction of the descriptor's resolution.
+    static final float SINGLE_VISIBILITY = 1f / 512;
+    static final float OCTAHEDRAL_IRRADIANCE = 1f / 256;
     public static final int MAX_VOLUMES = 16;
     private Texture2D legacyMetadata;
 
@@ -118,6 +121,10 @@ public final class GiProbeSet implements AutoCloseable {
     private boolean closed;
 
     public GiProbeSet(List<Entry> entries, int maxTextureSize, long maxBytes) {
+        this(entries, maxTextureSize, maxBytes, false, false);
+    }
+
+    GiProbeSet(List<Entry> entries, int maxTextureSize, long maxBytes, boolean singleVisibility, boolean octahedral) {
         if (entries.isEmpty() || entries.size() > MAX_VOLUMES) {
             throw new IllegalArgumentException("A resident set requires 1..16 volumes");
         }
@@ -128,7 +135,7 @@ public final class GiProbeSet implements AutoCloseable {
         int visHeight = 0;
         boolean compact = true;
         for (Entry entry : entries) {
-            Image a = entry.data.irradiance().getImage();
+            Image a = entry.data.selectedIrradiance(octahedral);
             Image b = entry.data.moments().getImage();
             shWidth = Math.max(shWidth, a.getWidth());
             visWidth = Math.max(visWidth, b.getWidth());
@@ -150,6 +157,8 @@ public final class GiProbeSet implements AutoCloseable {
         for (int i = 0; i < count; i++) {
             Entry entry = entries.get(i);
             GiProbeData data = entry.data;
+            boolean oct = octahedral && data.hasOctahedralIrradiance();
+            Image irradiance = data.selectedIrradiance(oct);
             GiProbeGrid grid = data.getGrid();
             Vector3f origin = grid.getOrigin().add(entry.offset);
             Vector3f spacing = grid.getSpacing();
@@ -157,16 +166,19 @@ public final class GiProbeSet implements AutoCloseable {
             float[] descriptor = {origin.x, origin.y, origin.z, entry.fade,
                 spacing.x, spacing.y, spacing.z, data.distanceScale(),
                 counts.x, counts.y, counts.z, data.irradianceScale() * entry.intensity,
-                data.columns(), shRow, visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0f) + (entry.stabilized ? 0.125f : 0f) + (entry.wide ? 0.015625f : 0f) + (entry.curved ? 0.0078125f : 0f)};
+                data.columns(), shRow, visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0f) + (entry.stabilized ? 0.125f : 0f) + (entry.wide ? 0.015625f : 0f) + (entry.curved ? 0.0078125f : 0f)
+                        + (singleVisibility ? SINGLE_VISIBILITY : 0f)
+                        + (oct ? OCTAHEDRAL_IRRADIANCE : 0f)};
             for (int c = 0; c < 16; c++) {
                 descriptors.putFloat((i * 16 + c) * 4, descriptor[c]);
             }
-            copy(data.irradiance().getImage(), shBytes, shWidth, shRow, compact);
+            copy(irradiance, shBytes, shWidth, shRow, compact);
             if (data.hasSeparatedSky()) {
-                copy(data.skyVisibility().getImage(), skyBytes, shWidth, shRow, compact);
+                copy(data.skyVisibility().getImage(), skyBytes, shWidth, shRow, compact,
+                        oct ? GiProbeData.OCT_RECORD_ROWS : 1);
             }
             copy(data.moments().getImage(), visBytes, visWidth, visRow, compact);
-            shRow += data.irradiance().getImage().getHeight();
+            shRow += irradiance.getHeight();
             visRow += data.moments().getImage().getHeight();
         }
         sh = GiProbeData.texture(shWidth, shHeight, shBytes, compact);
@@ -186,10 +198,14 @@ public final class GiProbeSet implements AutoCloseable {
     }
 
     private static void copy(Image source, ByteBuffer target, int width, int row, boolean compact) {
+        copy(source, target, width, row, compact, 1);
+    }
+
+    private static void copy(Image source, ByteBuffer target, int width, int row, boolean compact, int rowStep) {
         for (int y = 0; y < source.getHeight(); y++) {
             for (int x = 0; x < source.getWidth(); x++) {
                 for (int c = 0; c < 4; c++) {
-                    GiProbeData.put(target, ((row + y) * width + x) * 4 + c,
+                    GiProbeData.put(target, ((row + y * rowStep) * width + x) * 4 + c,
                             GiProbeData.component(source, (y * source.getWidth() + x) * 4 + c), compact);
                 }
             }

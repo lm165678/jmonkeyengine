@@ -22,6 +22,10 @@ vec3 giSkyDirection(vec3 normal) {
     return normalize(mix(normal, bent, amount));
 }
 #ifdef GI_PROBES
+#ifdef STATIC_PROBE_LIGHTMAP
+uniform sampler2D m_GiStaticLightmap;
+varying vec2 probeLightmapUv;
+#endif
 uniform float m_GiEnvironmentMix;
 uniform float m_GiFadeDistance;
 uniform sampler2D m_GiIrradiance;
@@ -40,8 +44,15 @@ uniform int m_GiVolumeCount;
 uniform int m_GiVolumeDataHeight;
 uniform vec4 m_GiTextureSize;
 
+bool giUsesOctahedralIrradiance(vec4 atlasInfo) {
+    return mod(floor(fract(atlasInfo.w) * 256.0 + 0.01), 2.0) > 0.5;
+}
+
 vec4 giReadCoefficient(float probe, float coefficient, vec4 atlasInfo, vec4 dimensions) {
     vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));
+    if (giUsesOctahedralIrradiance(atlasInfo)) {
+        tile.y *= 9.0;
+    }
     vec2 pixel = vec2(tile.x * 9.0 + coefficient + 0.5, tile.y + atlasInfo.y + 0.5);
     return texture2D(m_GiIrradiance, pixel / dimensions.xy);
 }
@@ -66,6 +77,21 @@ vec2 giWrapMomentPixel(vec2 pixel, float size) {
         pixel.x = size - 1.0 - pixel.x;
     }
     return pixel;
+}
+
+// Neighboring records are independent. Mirror the bilinear taps across the
+// octahedral seam and leave the first atlas row for relocation metadata.
+vec3 giReadOctahedralIrradiance(float probe, vec3 normal, vec4 atlasInfo, vec4 dimensions) {
+    vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x)) * 9.0;
+    tile.y += atlasInfo.y + 1.0;
+    vec2 p = (giOctEncode(normalize(normal)) * 0.5 + 0.5) * 8.0 - 0.5;
+    vec2 base = floor(p);
+    vec2 f = fract(p);
+    vec3 ll = texture2D(m_GiIrradiance, (tile + giWrapMomentPixel(base, 8.0) + 0.5) / dimensions.xy).rgb;
+    vec3 lr = texture2D(m_GiIrradiance, (tile + giWrapMomentPixel(base + vec2(1.0, 0.0), 8.0) + 0.5) / dimensions.xy).rgb;
+    vec3 ul = texture2D(m_GiIrradiance, (tile + giWrapMomentPixel(base + vec2(0.0, 1.0), 8.0) + 0.5) / dimensions.xy).rgb;
+    vec3 ur = texture2D(m_GiIrradiance, (tile + giWrapMomentPixel(base + 1.0, 8.0) + 0.5) / dimensions.xy).rgb;
+    return mix(mix(ll, lr, f.x), mix(ul, ur, f.x), f.y);
 }
 
 vec2 giMomentTexel(float probe, vec2 pixel, vec4 atlasInfo, vec4 dimensions) {
@@ -101,6 +127,29 @@ float giVisibilityTap(float probe, vec2 pixel, vec3 direction, vec3 normal,
     // Tolerance for roundoff in this comparison.
     float tolerance = 1.0e-6 * max(abs(tapDistance), abs(moments.x));
     return giVisibilityFromVariance(moments, max(0.0, tapDistance - tolerance));
+}
+
+// Filter E[d] and E[d^2] in the central direction before evaluating the
+// one-sided Chebyshev bound. Reconstruct each tap's second moment from the
+// stable mean/variance pair to support both historical distance encodings.
+float giSingleVisibility(float probe, vec3 direction, float distanceToProbe,
+        vec4 atlasInfo, vec4 dimensions) {
+    float size = floor(atlasInfo.w);
+    vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * size - 0.5;
+    vec2 base = floor(p);
+    vec2 f = fract(p);
+    vec2 lower = giMomentTexel(probe, base, atlasInfo, dimensions);
+    vec2 right = giMomentTexel(probe, base + vec2(1.0, 0.0), atlasInfo, dimensions);
+    vec2 top = giMomentTexel(probe, base + vec2(0.0, 1.0), atlasInfo, dimensions);
+    vec2 upper = giMomentTexel(probe, base + 1.0, atlasInfo, dimensions);
+    // The variance of a mixture includes the variance of its component means.
+    // Centering before the sum avoids subtracting two large second moments.
+    float mean = mix(mix(lower.x, right.x, f.x), mix(top.x, upper.x, f.x), f.y);
+    vec4 delta = vec4(lower.x, right.x, top.x, upper.x) - mean;
+    vec4 variances = vec4(lower.y, right.y, top.y, upper.y) + delta * delta;
+    float variance = mix(mix(variances.x, variances.y, f.x),
+            mix(variances.z, variances.w, f.x), f.y);
+    return giVisibilityFromVariance(vec2(mean, variance), distanceToProbe);
 }
 // Blending depth moments would let a blocked foreground tap borrow
 // background depth and introduce variance at silhouettes.
@@ -235,7 +284,10 @@ vec3 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
         float neighbor = float(corner);
         vec3 offset = vec3(mod(neighbor, 3.0), mod(floor(neighbor / 3.0), 3.0),
                 floor(neighbor / 9.0)) - 1.0;
-        if (!wide) {
+        if (mod(floor(fract(atlasInfo.w) * 512.0 + 0.01), 2.0) > 0.5) {
+            visibility = giSingleVisibility(probe, direction, distanceToProbe / encoding.x,
+                    atlasInfo, dimensions);
+        } else if (!wide) {
             offset = giNeighborOffset(corner);
         }
         vec3 cell = base + offset;
@@ -357,15 +409,20 @@ vec3 giSampleVolume(vec3 worldPosition, vec3 normal, vec3 planeNormal, vec3 orig
             weightScale = weight;
         }
         weight /= weightScale;
-        vec3 irradiance = giEvaluateDiffuseSh9(c0.rgb, c1.rgb, c2.rgb, c3.rgb,
+        bool octahedral = giUsesOctahedralIrradiance(atlasInfo);
+        vec3 irradiance = (octahedral ? giReadOctahedralIrradiance(probe, normal, atlasInfo, dimensions)
+                : giEvaluateDiffuseSh9(c0.rgb, c1.rgb, c2.rgb, c3.rgb,
                 giReadCoefficient(probe, 4.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 5.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 6.0, atlasInfo, dimensions).rgb,
                 giReadCoefficient(probe, 7.0, atlasInfo, dimensions).rgb,
-                giReadCoefficient(probe, 8.0, atlasInfo, dimensions).rgb, normal, m_GiBakeBounce ? 1.0 : 0.5) * encoding.y;
+                giReadCoefficient(probe, 8.0, atlasInfo, dimensions).rgb, normal, m_GiBakeBounce ? 1.0 : 0.5)) * encoding.y;
         if (separated) {
             vec3 skyCoefficients[9];
             vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x));
+            if (octahedral) {
+                tile.y *= 9.0;
+            }
             for (int c = 0; c < 9; c++) {
                 vec2 pixel = vec2(tile.x * 9.0 + float(c) + 0.5, tile.y + atlasInfo.y + 0.5);
                 skyCoefficients[c] = texture2D(m_GiSkyVisibility, pixel / dimensions.xy).rgb;
@@ -732,7 +789,18 @@ float giCurvature(vec3 worldPosition, vec3 geometryNormal) {
 
 vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
     giReceiverCurvature = giCurvature(worldPosition, geometryNormal);
-    vec4 sampleValue = giSampleIndirect(worldPosition, normal);
+    vec3 plane = giReceiverPlane(worldPosition, normal);
+    vec4 sampleValue;
+    #ifdef STATIC_PROBE_LIGHTMAP
+        vec4 cached = texture2D(m_GiStaticLightmap, probeLightmapUv);
+        if (m_GiEnabled && !m_GiBakeBounce && cached.a > 0.999) {
+            giTotalSkyCoverage = 1.0;
+            giSkyDiffuseWeight = 0.0;
+            giEnvironmentDiffuseWeight = clamp(m_GiEnvironmentMix, 0.0, 1.0);
+            return cached.rgb;
+        }
+    #endif
+    sampleValue = giSampleIndirectOnPlane(worldPosition, normal, plane);
     giEnvironmentDiffuseWeight = 1.0 - sampleValue.a * (1.0 - clamp(m_GiEnvironmentMix, 0.0, 1.0));
     // Separated captures add direct sky to bounced radiance. Total captures
     // already contain sky: never inject it again into the next bounce.

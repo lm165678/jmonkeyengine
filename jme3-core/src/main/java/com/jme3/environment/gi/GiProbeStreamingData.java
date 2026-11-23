@@ -169,13 +169,17 @@ public final class GiProbeStreamingData implements Savable {
     }
 
     GiProbeData load(AssetManager assets, int i) throws IOException {
+        return load(assets, i, true);
+    }
+
+    GiProbeData load(AssetManager assets, int i, boolean octahedral) throws IOException {
         String key = assetKey(i);
         AssetInfo info = assets.locateAsset(new AssetKey<>(key));
         if (info == null) {
             throw new FileNotFoundException(key);
         }
         try (InputStream input = info.openStream()) {
-            return GiProbeData.loadCompressed(input);
+            return GiProbeData.loadCompressed(input, octahedral);
         }
     }
 

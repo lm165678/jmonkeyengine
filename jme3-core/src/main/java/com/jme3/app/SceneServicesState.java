@@ -75,6 +75,8 @@ public final class SceneServicesState extends AbstractAppState {
     private final SceneServiceCatalog catalog = new SceneServiceCatalog();
     private final Map<GiProbeVolume, Source> sources = new IdentityHashMap<>();
     private final Set<Material> bound = Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<com.jme3.environment.gi.ProbeLightmapControl> lightmaps =
+            Collections.newSetFromMap(new IdentityHashMap<>());
     private GiProbeStreamer gi;
     private ExecutorService io;
     private long sequence;
@@ -184,6 +186,20 @@ public final class SceneServicesState extends AbstractAppState {
             }
             bricks |= streaming != null;
         }
+        lightmaps.removeIf(lightmap -> {
+            if (!catalog.controls.contains(lightmap)) {
+                lightmap.clearResidency();
+                return true;
+            }
+            return false;
+        });
+        for (var control : catalog.controls) {
+            if (control instanceof com.jme3.environment.gi.ProbeLightmapControl) {
+                var lightmap = (com.jme3.environment.gi.ProbeLightmapControl) control;
+                lightmaps.add(lightmap);
+                lightmap.updateResidency(app.getAssetManager(), app.getCamera().getLocation(), !seen.isEmpty());
+            }
+        }
         if (seen.isEmpty()) {
             closeGi();
             return;
@@ -207,6 +223,8 @@ public final class SceneServicesState extends AbstractAppState {
             gi.setUnloadMultiplier(1.3);
         }
         gi.setFineStreaming(settings.getPreloadDistance(), settings.getMaxFineProbes());
+        gi.setSingleProbeVisibility(world != null && world.isSingleProbeVisibility());
+        gi.setOctahedralProbeIrradiance(world != null && world.isOctahedralProbeIrradiance());
         Iterator<Map.Entry<GiProbeVolume, Source>> iterator = sources.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<GiProbeVolume, Source> entry = iterator.next();
@@ -290,6 +308,7 @@ public final class SceneServicesState extends AbstractAppState {
             displayOutput = DisplayOutput.Application;
             worldSettings.close();
             closeGi();
+            clearLightmaps();
             physics.close();
             catalog.close();
             activeStart = null;
@@ -306,10 +325,16 @@ public final class SceneServicesState extends AbstractAppState {
         displayOutput = DisplayOutput.Application;
         worldSettings.close();
         closeGi();
+        clearLightmaps();
         physics.close();
         catalog.close();
         activeStart = null;
         app = null;
         super.cleanup();
+    }
+
+    private void clearLightmaps() {
+        lightmaps.forEach(com.jme3.environment.gi.ProbeLightmapControl::clearResidency);
+        lightmaps.clear();
     }
 }

@@ -42,7 +42,16 @@ varying vec4 wTangent;
 
 #import "Common/ShaderLib/TemporalVertex.glsllib"
 
-void main(){    
+#ifdef STATIC_PROBE_LIGHTMAP
+    #ifndef SEPARATE_TEXCOORD
+        attribute vec2 inTexCoord2;
+    #endif
+    varying vec2 probeLightmapUv;
+#endif
+void main(){
+    #ifdef STATIC_PROBE_LIGHTMAP
+        probeLightmapUv = inTexCoord2;
+    #endif
     
     vec4 modelSpacePos = vec4(inPosition, 1.0);
     vec3 modelSpaceNorm = inNormal;

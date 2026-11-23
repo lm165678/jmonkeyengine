@@ -31,6 +31,26 @@ final class GiPagePool implements AutoCloseable {
     private final int height;
     private final boolean bricks;
     private long uploaded;
+    private boolean singleProbeVisibility;
+    private boolean octahedralIrradiance;
+
+    void setOctahedralIrradiance(boolean enabled) {
+        if (octahedralIrradiance != enabled) {
+            octahedralIrradiance = enabled;
+            retain(java.util.Collections.emptySet());
+        }
+    }
+
+    void setSingleProbeVisibility(boolean enabled) {
+        if (singleProbeVisibility != enabled) {
+            singleProbeVisibility = enabled;
+            for (Slot slot : slots.values()) {
+                if (slot.published) {
+                    descriptor(slot, true);
+                }
+            }
+        }
+    }
 
     private static final class Slot {
         String id;
@@ -50,6 +70,7 @@ final class GiPagePool implements AutoCloseable {
         int stage;
         int row;
         boolean published;
+        boolean octahedral;
         Slot parent;
         int brick;
         GiProbeStreamingData directory;
@@ -198,7 +219,18 @@ final class GiPagePool implements AutoCloseable {
         }
         slot.shPages = pages(data.irradiance());
         slot.visPages = pages(data.moments());
-        slot.shRow = allocate(0, slot.shPages);
+        slot.shRow = -1;
+        if (octahedralIrradiance && data.hasOctahedralIrradiance()) {
+            int octPages = (data.selectedIrradiance(true).getHeight() + PAGE_ROWS - 1) / PAGE_ROWS;
+            slot.shRow = allocate(0, octPages);
+            if (slot.shRow >= 0) {
+                slot.octahedral = true;
+                slot.shPages = octPages;
+            }
+        }
+        if (slot.shRow < 0) {
+            slot.shRow = allocate(0, slot.shPages);
+        }
         slot.visRow = allocate(1, slot.visPages);
         if (slot.shRow < 0 || slot.visRow < 0) {
             if (slot.shRow >= 0) {
@@ -278,16 +310,18 @@ final class GiPagePool implements AutoCloseable {
                 continue;
             }
             while (slot.stage < 3) {
-                Image source = slot.stage == 0 ? slot.data.irradiance().getImage()
+                Image source = slot.stage == 0 ? slot.data.selectedIrradiance(slot.octahedral)
                         : slot.stage == 1 ? (slot.data.hasSeparatedSky() ? slot.data.skyVisibility().getImage() : null)
                         : slot.data.moments().getImage();
-                Image shape = slot.stage < 2 ? slot.data.irradiance().getImage() : slot.data.moments().getImage();
+                Image shape = slot.stage == 0 ? slot.data.selectedIrradiance(slot.octahedral)
+                        : slot.stage == 1 ? slot.data.irradiance().getImage() : slot.data.moments().getImage();
                 int rowBytes = shape.getWidth() * 16;
                 if (bytes + rowBytes > byteBudget || System.nanoTime() - start >= nanos) {
                     return;
                 }
                 Texture2D target = textures[slot.stage];
-                int targetRow = (slot.stage < 2 ? slot.shRow : slot.visRow) + slot.row;
+                int rowStep = slot.stage == 1 && slot.octahedral ? GiProbeData.OCT_RECORD_ROWS : 1;
+                int targetRow = (slot.stage < 2 ? slot.shRow : slot.visRow) + slot.row * rowStep;
                 ByteBuffer cpu = target.getImage().getData(0);
                 for (int x = 0; x < shape.getWidth(); x++) {
                     for (int c = 0; c < 4; c++) {
@@ -340,7 +374,9 @@ final class GiPagePool implements AutoCloseable {
         float[] values = {origin.x, origin.y, origin.z, slot.fade,
             spacing.x, spacing.y, spacing.z, data.distanceScale(),
             counts.x, counts.y, counts.z, data.irradianceScale() * slot.intensity,
-            data.columns(), slot.shRow, slot.visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0) + (slot.stabilized ? 0.125f : 0) + (slot.wide ? 0.015625f : 0) + (slot.curved ? 0.0078125f : 0)};
+            data.columns(), slot.shRow, slot.visRow, data.resolution() + (data.isSurfaceLayout() ? 0.0625f : 0f) + (data.hasSeparatedSky() ? 0.5f : 0) + (slot.stabilized ? 0.125f : 0) + (slot.wide ? 0.015625f : 0) + (slot.curved ? 0.0078125f : 0)
+                    + (singleProbeVisibility ? GiProbeSet.SINGLE_VISIBILITY : 0f)
+                    + (slot.octahedral ? GiProbeSet.OCTAHEDRAL_IRRADIANCE : 0f)};
         int rowOffset = slot.index * metadata.getImage().getWidth() * 16;
         ByteBuffer buffer = metadata.getImage().getData(0);
         for (int c = 0; c < values.length; c++) {

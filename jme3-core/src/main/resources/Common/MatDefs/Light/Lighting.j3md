@@ -13,6 +13,7 @@ MaterialDef Phong Lighting {
         // Bind these parameters to enable baked diffuse GI.
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
+        Texture2D GiStaticLightmap -LINEAR
         Texture2D GiMoments -LINEAR
         Texture2D GiSkyVisibility -LINEAR
         // Single-volume boundary transition in world units; 0 disables fading.
@@ -196,6 +197,7 @@ MaterialDef Phong Lighting {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
+            STATIC_PROBE_LIGHTMAP : GiStaticLightmap
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer         
             VERTEX_COLOR : UseVertexColor
@@ -252,6 +254,7 @@ MaterialDef Phong Lighting {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
+            STATIC_PROBE_LIGHTMAP : GiStaticLightmap
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             VERTEX_COLOR : UseVertexColor
@@ -439,6 +442,7 @@ MaterialDef Phong Lighting {
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
+            STATIC_PROBE_LIGHTMAP : GiStaticLightmap
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
             DEFERRED_GI_PAYLOAD : DeferredGiPayload

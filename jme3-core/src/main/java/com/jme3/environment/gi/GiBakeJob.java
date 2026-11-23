@@ -75,6 +75,7 @@ public final class GiBakeJob implements AutoCloseable {
     private final BooleanSupplier cancelled;
     private final IntConsumer progress;
     private final float[][] sh;
+    private final float[][] octahedral;
     private final float[][] skyVisibility;
     private final float[][] moments;
     private final Vector3f[] offsets;
@@ -121,6 +122,7 @@ public final class GiBakeJob implements AutoCloseable {
         worldOffset = volume.getWorldTranslation().clone();
         worldScale = volume.getWorldScale().clone();
         sh = new float[grid.getProbeCount()][];
+        octahedral = new float[grid.getProbeCount()][];
         skyVisibility = settings.separateSky ? new float[grid.getProbeCount()][] : null;
         moments = new float[grid.getProbeCount()][];
         offsets = new Vector3f[grid.getProbeCount()];
@@ -183,6 +185,7 @@ public final class GiBakeJob implements AutoCloseable {
                         stage = 0;
                         continue;
                     }
+                    ready.setOctahedral(octahedral);
                     close();
                     volume.publish(ready, skyState);
                     result = ready;
@@ -272,8 +275,11 @@ public final class GiBakeJob implements AutoCloseable {
                 }
             }
         } else if (stage == 6) {
+            if (bounce + 1 == settings.bounceCount) {
+                octahedral[probe] = new float[GiProbeBaker.OCT_SIZE * GiProbeBaker.OCT_SIZE * 3];
+            }
             sh[probe] = GiProbeBaker.project(position, settings.radianceSamples,
-                    (p, direction, color) -> capture.color(direction, color), cancelled);
+                    (p, direction, color) -> capture.color(direction, color), cancelled, octahedral[probe]);
             if (skyVisibility != null && bounce == 0) {
                 skyVisibility[probe] = GiProbeBaker.project(position, settings.radianceSamples,
                         (p, direction, color) -> {
@@ -352,7 +358,7 @@ public final class GiBakeJob implements AutoCloseable {
         String identity = identity();
         GZIPOutputStream gzip = new GZIPOutputStream(output);
         DataOutputStream out = new DataOutputStream(gzip);
-        out.writeInt(0x47494233);
+        out.writeInt(0x47494234);
         out.writeUTF(identity);
         out.writeInt(grid.getProbeCount());
         for (int p = 0; p < grid.getProbeCount(); p++) {
@@ -364,6 +370,11 @@ public final class GiBakeJob implements AutoCloseable {
                 out.writeFloat(offsets[p].z);
                 for (float value : sh[p]) {
                     out.writeFloat(value);
+                }
+                if (valid[p]) {
+                    for (float value : octahedral[p]) {
+                        out.writeFloat(value);
+                    }
                 }
                 if (skyVisibility != null) {
                     for (float value : skyVisibility[p]) {
@@ -388,7 +399,7 @@ public final class GiBakeJob implements AutoCloseable {
             throw new IllegalStateException("Restore into a fresh job");
         }
         DataInputStream in = new DataInputStream(new GZIPInputStream(input));
-        if (in.readInt() != 0x47494233 || !in.readUTF().equals(identity()) || in.readInt() != grid.getProbeCount()) {
+        if (in.readInt() != 0x47494234 || !in.readUTF().equals(identity()) || in.readInt() != grid.getProbeCount()) {
             throw new IOException("Checkpoint scene or capture settings do not match");
         }
         try {
@@ -407,6 +418,12 @@ public final class GiBakeJob implements AutoCloseable {
                 moments[p] = new float[settings.visibilityResolution * settings.visibilityResolution * 2];
                 for (int c = 0; c < 27; c++) {
                     sh[p][c] = readFinite(in);
+                }
+                if (valid[p]) {
+                    octahedral[p] = new float[GiProbeBaker.OCT_SIZE * GiProbeBaker.OCT_SIZE * 3];
+                    for (int c = 0; c < octahedral[p].length; c++) {
+                        octahedral[p][c] = readFinite(in);
+                    }
                 }
                 if (skyVisibility != null) {
                     skyVisibility[p] = new float[27];

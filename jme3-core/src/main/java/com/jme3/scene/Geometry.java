@@ -62,6 +62,50 @@ import java.util.logging.Logger;
  * @author Kirill Vainer
  */
 public class Geometry extends Spatial {
+    private transient com.jme3.material.MatParamOverride residentProbeLightmap;
+    private transient com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> probeLightmapOverrides;
+
+    /**
+     * Sets the transient texture used by the probe lightmap streamer.
+     * The texture remains owned by the streamer, and scene saves retain
+     * only its control's asset reference.
+     * Simplified LODs sample live probes because their triangles may cross UV charts.
+     * @param value resident irradiance texture or null to restore live probes
+     */
+    public void setResidentProbeLightmap(com.jme3.texture.Texture2D value) {
+        if (getResidentProbeLightmap() == value) {
+            return;
+        }
+        residentProbeLightmap = value == null ? null : new com.jme3.material.MatParamOverride(
+                com.jme3.shader.VarType.Texture2D, "GiStaticLightmap", value);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
+    }
+
+    /** @return resident probe lightmap, or null */
+    public com.jme3.texture.Texture2D getResidentProbeLightmap() {
+        return residentProbeLightmap == null ? null
+                : (com.jme3.texture.Texture2D) residentProbeLightmap.getValue();
+    }
+
+    /** @return whether the current draw can use its resident probe lightmap */
+    public boolean usesResidentProbeLightmap() {
+        return lodLevel == 0 && residentProbeLightmap != null;
+    }
+
+    @Override
+    public com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> getWorldMatParamOverrides() {
+        var inherited = super.getWorldMatParamOverrides();
+        if (!usesResidentProbeLightmap()) {
+            return inherited;
+        }
+        if (probeLightmapOverrides == null) {
+            probeLightmapOverrides = new com.jme3.util.SafeArrayList<>(com.jme3.material.MatParamOverride.class);
+        }
+        probeLightmapOverrides.clear();
+        probeLightmapOverrides.addAll(inherited);
+        probeLightmapOverrides.add(residentProbeLightmap);
+        return probeLightmapOverrides;
+    }
     // Version #1: removed shared meshes.
     // models loaded with shared mesh will be automatically fixed.
     public static final int SAVABLE_VERSION = 1;
@@ -193,7 +237,11 @@ public class Geometry extends Spatial {
             throw new IllegalArgumentException("LOD level is out of range: " + lod);
         }
 
+        boolean usedProbeLightmap = usesResidentProbeLightmap();
         lodLevel = lod;
+        if (usedProbeLightmap != usesResidentProbeLightmap()) {
+            notifySceneChanged(SceneChangeListener.Change.RENDERING);
+        }
 
         if (isGrouped()) {
             groupNode.onMeshChange(this);
@@ -582,6 +630,8 @@ public class Geometry extends Spatial {
     @Override
     public void cloneFields(Cloner cloner, Object original) {
         super.cloneFields(cloner, original);
+        residentProbeLightmap = null;
+        probeLightmapOverrides = null;
 
         // If this is a grouped node and if our group node is
         // also cloned then we'll grab its reference.

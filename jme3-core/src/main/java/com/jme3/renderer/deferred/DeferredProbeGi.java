@@ -37,7 +37,8 @@ final class DeferredProbeGi {
                 // Every draw must initialize the payload for the winning surface.
                 return null;
             }
-            if (!Boolean.TRUE.equals(GBufferPass.parameter(geometry, "GiEnabled"))
+            if (geometry.usesResidentProbeLightmap()
+                    || !Boolean.TRUE.equals(GBufferPass.parameter(geometry, "GiEnabled"))
                     || !(GBufferPass.parameter(geometry, "GiIrradiance") instanceof Texture)
                     || !(GBufferPass.parameter(geometry, "GiMoments") instanceof Texture)
                     || Boolean.TRUE.equals(GBufferPass.parameter(geometry, "GiBakeBounce"))

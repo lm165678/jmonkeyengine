@@ -61,6 +61,53 @@ import java.util.concurrent.*;
  * nearby directory branches, instead of sorting the entire world every frame.
  */
 public final class GiProbeStreamer implements AutoCloseable {
+    private boolean singleProbeVisibility;
+    private volatile boolean octahedralProbeIrradiance;
+
+    /**
+     * Changes the resident irradiance representation on the render thread.
+     * @see com.jme3.post.WorldSettings#setOctahedralProbeIrradiance(boolean)
+     * @param enabled whether to load octahedral irradiance into GPU pages
+     */
+    public void setOctahedralProbeIrradiance(boolean enabled) {
+        if (octahedralProbeIrradiance != enabled) {
+            octahedralProbeIrradiance = enabled;
+            attempted = null;
+            if (pages != null) {
+                pages.setOctahedralIrradiance(enabled);
+            }
+            pending.entrySet().removeIf(entry -> {
+                if (entry.getKey().selectableFile) {
+                    entry.getValue().discard();
+                    return true;
+                }
+                return false;
+            });
+            resident.entrySet().removeIf(entry -> {
+                if (entry.getKey().selectableFile) {
+                    entry.getValue().dispose();
+                    return true;
+                }
+                return false;
+            });
+        }
+    }
+
+    /**
+     * Selects filtered moments with one Chebyshev evaluation per probe.
+     * Call on the render thread before updating or binding the streamer.
+     * @see com.jme3.post.WorldSettings#setSingleProbeVisibility(boolean)
+     * @param enabled whether to use a single evaluation
+     */
+    public void setSingleProbeVisibility(boolean enabled) {
+        if (singleProbeVisibility != enabled) {
+            singleProbeVisibility = enabled;
+            attempted = null;
+            if (pages != null) {
+                pages.setSingleProbeVisibility(enabled);
+            }
+        }
+    }
     /** Retains ownership even when an IO provider ignores interruption. */
     private static final class Load extends FutureTask<GiProbeData> {
         Load(Callable<GiProbeData> loader) {
@@ -100,6 +147,7 @@ public final class GiProbeStreamer implements AutoCloseable {
         final long bytes;
         final Callable<GiProbeData> loader;
         boolean borrowed;
+        boolean selectableFile;
         float intensity = 1;
         float fadeDistance = -1;
         boolean stabilized;
@@ -391,9 +439,10 @@ public final class GiProbeStreamer implements AutoCloseable {
                     throw new FileNotFoundException(asset);
                 }
                 try (InputStream input = info.openStream()) {
-                    return GiProbeData.loadCompressed(input);
+                    return GiProbeData.loadCompressed(input, octahedralProbeIrradiance);
                 }
             });
+            root.selectableFile = true;
         }
         root.dataOffset = offset.clone();
         root.bricks = directory;
@@ -418,7 +467,8 @@ public final class GiProbeStreamer implements AutoCloseable {
                     Math.min(size.y, full.y - y), Math.min(size.z, full.z - z));
             String childId = id + "/fine/" + i;
             Chunk child = new Chunk(childId, root.x + x, root.y + y, root.z + z, coverage,
-                    directory.bytes(i), () -> directory.load(assets, index));
+                    directory.bytes(i), () -> directory.load(assets, index, octahedralProbeIrradiance));
+            child.selectableFile = true;
             child.parent = root;
             child.brick = i;
             child.probes = directory.probes(i);
@@ -668,9 +718,20 @@ public final class GiProbeStreamer implements AutoCloseable {
                 }
                 try {
                     replacement = new GiProbeSet(entries, textureLimit,
-                            Math.max(0, (budget - getResidentBytes() - pendingBytes() - getAtlasBytes() * 2) / 2));
+                            Math.max(0, (budget - getResidentBytes() - pendingBytes() - getAtlasBytes() * 2) / 2),
+                            singleProbeVisibility, octahedralProbeIrradiance);
                     break;
                 } catch (IllegalArgumentException budgetExceeded) {
+                    if (octahedralProbeIrradiance) {
+                        try {
+                            replacement = new GiProbeSet(entries, textureLimit,
+                                    Math.max(0, (budget - getResidentBytes() - pendingBytes() - getAtlasBytes() * 2) / 2),
+                                    singleProbeVisibility, false);
+                            break;
+                        } catch (IllegalArgumentException shBudgetExceeded) {
+                            // Reduce the requested set only if both representations fail.
+                        }
+                    }
                     selected.remove(selected.size() - 1);
                 }
             }
