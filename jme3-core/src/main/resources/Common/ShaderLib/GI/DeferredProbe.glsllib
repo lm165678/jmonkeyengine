@@ -1,0 +1,61 @@
+// Deferred GI cache stores incident irradiance, before material response.
+// Attachment0: irradiance RGB / volume coverage. Attachment1: weighted bent
+// moment XYZ / sky diffuse weight. No sky radiance or reflection is added here.
+uniform sampler2D m_DeferredGiReceivers;
+
+vec3 deferredGiPlane(float receiverHeader) {
+    float packedNormal = abs(receiverHeader) - 1.0;
+    vec2 octPlane = vec2(mod(packedNormal, 1024.0), floor(packedNormal / 1024.0));
+    return giOctDecode(octPlane * (2.0 / 1023.0) - 1.0);
+}
+
+void deferredGiQuery(vec4 receiver, out vec4 irradiance, out vec4 sky) {
+    vec3 normal = normalize(getGBuffer1().xyz);
+    giReceiverCurvature = getGBuffer2().a;
+    irradiance = giSampleIndirectOnPlane(getWorldPosition(), normal, deferredGiPlane(receiver.a));
+    sky = vec4(giSkyBentMoment, giSkyDiffuseWeight);
+}
+
+float deferredGiBoxDistance(vec3 position, vec3 origin, vec3 size) {
+    vec3 low = position - origin;
+    vec3 high = size - low;
+    if (all(greaterThanEqual(low, vec3(0.0))) && all(greaterThanEqual(high, vec3(0.0)))) {
+        return min(min(low.x, high.x), min(min(low.y, high.y), min(low.z, high.z)));
+    }
+    return length(max(max(-low, -high), vec3(0.0)));
+}
+
+// Conservative distance to any volume/brick selection boundary. Evaluated only
+// at half resolution; reconstruction never carries a sample across that bound.
+float deferredGiBoundaryDistance(vec3 position) {
+    if (m_GiVolumeCount == 0) {
+        return deferredGiBoxDistance(position, m_GiOrigin, (m_GiCounts - 1.0) * m_GiSpacing);
+    }
+    float distance = 1.0e20;
+    for (int volume = 0; volume < 16; volume++) {
+        if (volume >= m_GiVolumeCount) {
+            break;
+        }
+        float row = float(volume);
+        vec3 counts = giVolumeField(row, 2.0).xyz;
+        if (any(lessThan(counts, vec3(2.0)))) {
+            continue;
+        }
+        vec3 origin = giVolumeField(row, 0.0).xyz;
+        vec3 spacing = giVolumeField(row, 1.0).xyz;
+        vec3 size = (counts - 1.0) * spacing;
+        distance = min(distance, deferredGiBoxDistance(position, origin, size));
+        vec3 local = position - origin;
+        if (m_GiVolumeDataHeight > 0 && all(greaterThanEqual(local, vec3(0.0)))
+                && all(lessThanEqual(local, size))) {
+            vec3 blocks = giVolumeField(row, 4.0).xyz;
+            if (all(greaterThan(blocks, vec3(0.0)))) {
+                vec3 blockSize = giVolumeField(row, 5.0).xyz;
+                vec3 edge = fract(local / blockSize) * blockSize;
+                edge = min(edge, blockSize - edge);
+                distance = min(distance, min(edge.x, min(edge.y, edge.z)));
+            }
+        }
+    }
+    return distance;
+}

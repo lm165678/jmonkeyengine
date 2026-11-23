@@ -19,7 +19,11 @@ const int SHADING_MODEL_PBR = 2;
 const int SHADING_MODEL_UNSHADED = 3;
 
 ivec2 getGBufferPixel() {
+    #ifdef GI_HALF_SAMPLE
+    return min(ivec2(gl_FragCoord.xy) * 2, ivec2(Resolution) - 1);
+    #else
     return ivec2(gl_FragCoord.xy);
+    #endif
 }
 vec4 getGBuffer0() {
     return texelFetch(gbuffer0, getGBufferPixel(), 0);
@@ -47,7 +51,11 @@ float getSurfaceDepth() {
     return texelFetch(gbufferDepth, getGBufferPixel(), 0).r;
 }
 vec3 getWorldPosition() {
+    #ifdef GI_HALF_SAMPLE
+    vec2 ndc = (vec2(getGBufferPixel()) + 0.5) / Resolution * 2.0 - 1.0;
+    #else
     vec2 ndc = gl_FragCoord.xy / Resolution * 2.0 - 1.0;
+    #endif
     vec4 world = InverseViewProjection * vec4(ndc, getSurfaceDepth() * 2.0 - 1.0, 1.0);
     return world.xyz / world.w;
 }

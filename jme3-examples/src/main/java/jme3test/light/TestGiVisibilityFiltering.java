@@ -20,6 +20,11 @@ import java.nio.ByteBuffer;
  * behind the receiving plane (strict and stabilized blending). A tangential sweep
  * near front-side probes rejects projection-centered interpolation hotspots. Requires OpenGL 4.3 and floating point targets.
  * Entry main; no controls. Tests Lighting/PBR on four render paths.
+ * Add -Dgi.test.halfResolution=true to test deferred half-resolution reconstruction.
+ * -Dgi.test.halfResolutionCompare=true instead compares Off/On/Off images for all
+ * 56 material/path/occlusion cases. It checks differences, not absolute transport;
+ * the ordinary compact/wide assertions remain separate and unchanged. Add
+ * -Dgi.test.fullFallback=false to compare the cache-only reconstruction.
  * Run {@code gradlew :jme3-examples:giVisibilityFilteringSmoke}; GI_VISIBILITY_PASS
  * indicates completion. Uses material declarations; synthetic data binding below
  * is a low-level test fixture, not normal application setup.
@@ -87,6 +92,9 @@ import java.nio.ByteBuffer;
 public final class TestGiVisibilityFiltering extends SimpleApplication {
     private static final RenderPath[] PATHS = {RenderPath.Forward, RenderPath.Deferred,
         RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
+    private static final boolean HALF_COMPARE = Boolean.getBoolean("gi.test.halfResolutionCompare");
+    private byte[] halfReference;
+    private int halfMaximum;
     private static final boolean CONFIDENCE_SWEEP = Boolean.getBoolean("gi.test.confidenceSweep");
     private static final int CONFIDENCE_STEPS = 33;
     private final int[] confidenceValues = new int[CONFIDENCE_STEPS];
@@ -114,6 +122,8 @@ public final class TestGiVisibilityFiltering extends SimpleApplication {
     public void simpleInitApp() {
         // Low-level GI ownership test; ordinary loaded scenes use automatic services.
         getSceneServices().setEnabled(false);
+        viewPort.setHalfResolutionProbeGi(Boolean.getBoolean("gi.test.halfResolution"));
+        viewPort.setProbeGiFullFallback(Boolean.parseBoolean(System.getProperty("gi.test.fullFallback", "true")));
         // 第一步：先烘焙均匀环境，保证八个探针具有相同的有效光照。
         GiProbeVolume volume = new GiProbeVolume();
         volume.configure(new Vector3f(4, 4, 4), 2, 2, 2);
@@ -140,6 +150,9 @@ public final class TestGiVisibilityFiltering extends SimpleApplication {
 
     @Override
     public void simpleUpdate(float tpf) {
+        if (HALF_COMPARE) {
+            viewPort.setHalfResolutionProbeGi(frame % 3 == 1);
+        }
         if (CONFIDENCE_SWEEP) {
             updateConfidenceSweep();
             return;
@@ -238,6 +251,11 @@ public final class TestGiVisibilityFiltering extends SimpleApplication {
 
     @Override
     public void simpleRender(RenderManager manager) {
+        if (HALF_COMPARE) {
+            compareHalfResolution();
+            frame++;
+            return;
+        }
         if (CONFIDENCE_SWEEP) {
             readConfidenceSweep();
             return;
@@ -314,6 +332,32 @@ public final class TestGiVisibilityFiltering extends SimpleApplication {
         }
         frame++;
     }
+    /** Differential test; does not replace the absolute visibility assertions above. */
+    private void compareHalfResolution() {
+        ByteBuffer pixels = BufferUtils.createByteBuffer(64 * 64 * 4);
+        renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
+        if (frame % 3 == 0) {
+            halfReference = new byte[pixels.capacity()];
+            pixels.get(halfReference);
+        } else {
+            int maximum = 0;
+            for (int i = 0; i < halfReference.length; i++) {
+                maximum = Math.max(maximum, Math.abs((pixels.get(i) & 255) - (halfReference[i] & 255)));
+            }
+            halfMaximum = Math.max(halfMaximum, maximum);
+            if (maximum > (frame % 3 == 1 ? 3 : 0)) {
+                throw new AssertionError("Half visibility difference frame=" + frame + " max=" + maximum);
+            }
+        }
+        BufferUtils.destroyDirectBuffer(pixels);
+        if (frame == 56 * 3 - 1) {
+            binding.close();
+            data.dispose();
+            System.out.println("GI_HALF_VISIBILITY_COMPARE_PASS max=" + halfMaximum + " restored=0");
+            stop();
+        }
+    }
+
     /** Sweep uncertainty while holding geometry and baked radiance fixed. */
     private void updateConfidenceSweep() {
         if (frame % 3 != 0) {

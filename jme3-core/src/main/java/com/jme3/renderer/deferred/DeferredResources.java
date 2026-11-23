@@ -55,11 +55,14 @@ final class DeferredResources {
     FrameBuffer gbuffer;
     Texture2D velocity;
     Texture2D giReceivers;
+    com.jme3.renderer.framegraph.RenderTarget resolvedProbeGi;
+    com.jme3.renderer.framegraph.RenderTarget fallbackProbeGi;
     final Texture2D[] targets = new Texture2D[6];
     Texture2D lightTexture, tileTexture;
     BufferObject gpuIndices;
     final Mesh quad = new Quad(1, 1);
-    private final Shader[] lightingShaders = new Shader[4];
+    private final Shader[] lightingShaders = new Shader[8];
+    private final Shader[] probeGiShaders = new Shader[4];
     private Shader computeShader;
     private int gpuRecords;
     private long modelVersion = -1;
@@ -127,13 +130,17 @@ final class DeferredResources {
         return lightingShader(gpu, models, false);
     }
     Shader lightingShader(boolean gpu, ShadingModelRegistry models, boolean probeGi) {
+        return lightingShader(gpu, models, probeGi, false);
+    }
+
+    Shader lightingShader(boolean gpu, ShadingModelRegistry models, boolean probeGi, boolean halfGi) {
         requireOpen();
         if (modelVersion != models.getVersion()) {
             deleteLightingShaders();
             modelVersion = models.getVersion();
         }
         Map<Integer, String> customModels = models.getSources();
-        int variant = (gpu ? 1 : 0) + (probeGi ? 2 : 0);
+        int variant = (gpu ? 1 : 0) + (probeGi ? 2 : 0) + (halfGi ? 4 : 0);
         Shader shader = lightingShaders[variant];
         if (shader == null) {
             String source = (String) assets.loadAsset(ROOT + "Lighting.frag");
@@ -144,8 +151,28 @@ final class DeferredResources {
                 (String) assets.loadAsset(ROOT + "Fullscreen.vert"), "", language);
             shader.addSource(Shader.ShaderType.Fragment, ROOT + "Lighting.frag", source,
                 DeferredRenderContext.uniformDefines() + (gpu ? "#define GPU_TILES\n" : "")
-                        + (probeGi ? "#define DEFERRED_GI_LIGHT\n#define GI_PROBES\n" : ""), language);
+                        + (probeGi ? "#define DEFERRED_GI_LIGHT\n#define GI_PROBES\n" : "")
+                        + (halfGi ? "#define DEFERRED_GI_HALF\n" : ""), language);
             lightingShaders[variant] = shader;
+        }
+        return shader;
+    }
+
+    Shader probeGiShader(int phase) {
+        requireOpen();
+        int index = phase;
+        Shader shader = probeGiShaders[index];
+        if (shader == null) {
+            shader = new Shader();
+            shader.addSource(Shader.ShaderType.Vertex, ROOT + "Fullscreen.vert",
+                    (String) assets.loadAsset(ROOT + "Fullscreen.vert"), "", "GLSL330");
+            String name = ROOT + (phase == 0 ? "ProbeGiHalf.frag"
+                    : phase == 2 ? "ProbeGiFallback.frag" : "ProbeGiResolve.frag");
+            shader.addSource(Shader.ShaderType.Fragment, name, (String) assets.loadAsset(name),
+                    DeferredRenderContext.uniformDefines() + "#define GI_PROBES\n"
+                            + (phase == 0 ? "#define GI_HALF_SAMPLE\n" : "")
+                            + (phase == 1 ? "#define GI_FULL_FALLBACK\n" : ""), "GLSL330");
+            probeGiShaders[index] = shader;
         }
         return shader;
     }
@@ -208,6 +235,8 @@ final class DeferredResources {
         gbuffer = null;
         velocity = null;
         giReceivers = null;
+        resolvedProbeGi = null;
+        fallbackProbeGi = null;
         java.util.Arrays.fill(targets, null);
     }
     private void deleteLightingShaders() {
@@ -232,6 +261,12 @@ final class DeferredResources {
         closed = true;
         releaseTargets();
         deleteLightingShaders();
+        for (Shader shader : probeGiShaders) {
+            if (shader != null) {
+                shader.dispose();
+            }
+        }
+        java.util.Arrays.fill(probeGiShaders, null);
         if (computeShader != null && computeShader.getId() != -1) {
             computeShader.dispose();
         }

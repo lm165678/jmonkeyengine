@@ -1181,3 +1181,10 @@ tasks.register('defaultShaderOutputSmoke', JavaExec) {
     systemProperty 'presentation.samples', project.findProperty('presentationSamples') ?: '0'
     enableAssertions = true
 }
+
+tasks.register('halfResolutionProbeGiSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestHalfResolutionProbeGi'
+    classpath = sourceSets.main.runtimeClasspath
+}

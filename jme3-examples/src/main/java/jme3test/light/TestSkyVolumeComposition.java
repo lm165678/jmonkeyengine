@@ -24,6 +24,7 @@ import java.util.ArrayList;
  * Tests sky / sky+GI / sky+reflection / all, intensity 0/1/2, Phong/PBR and four
  * paths. Add -Dgi.test.totalSky=true to test the new default total-light mode,
  * including volume exit, GI disable and bake-bounce sky suppression.
+ * Add -Dgi.test.halfResolution=true to exercise opt-in deferred GI reconstruction.
  * This isolates composition; black walls do not validate multibounce transport.
  * <pre>
  * 第一步：SkyFactory 创建独立天光，等待捕捉完成。
@@ -67,6 +68,7 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
     @Override
     public void simpleInitApp() {
         getSceneServices().setEnabled(false);
+        viewPort.setHalfResolutionProbeGi(Boolean.getBoolean("gi.test.halfResolution"));
         ArrayList<ByteBuffer> faces = new ArrayList<>();
         for (int face = 0; face < 6; face++) {
             ByteBuffer pixels = BufferUtils.createByteBuffer(4 * 4 * 16);

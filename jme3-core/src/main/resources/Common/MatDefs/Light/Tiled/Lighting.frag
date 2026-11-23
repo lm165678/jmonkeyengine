@@ -15,18 +15,40 @@
 uniform sampler2D m_DeferredGiReceivers;
 uniform vec3 m_DeferredGiSky[9];
 uniform float m_DeferredGiSkyIntensity;
+#ifdef DEFERRED_GI_HALF
+uniform sampler2D m_GiResolvedIrradiance;
+uniform sampler2D m_GiResolvedSky;
+uniform sampler2D m_GiReconstructionMask;
+uniform sampler2D m_GiFallbackIrradiance;
+uniform sampler2D m_GiFallbackSky;
+#endif
 
 vec3 evaluateDeferredProbeGi() {
     vec4 receiver = texelFetch(m_DeferredGiReceivers, getGBufferPixel(), 0);
     if (receiver.a == 0.0) {
         return vec3(0.0);
     }
+    #ifdef DEFERRED_GI_HALF
+    vec3 normal = normalize(getGBuffer1().xyz);
+    vec3 irradiance;
+    vec4 sky;
+    if (texelFetch(m_GiReconstructionMask, getGBufferPixel(), 0).r > 0.5) {
+        irradiance = texelFetch(m_GiFallbackIrradiance, getGBufferPixel(), 0).rgb;
+        sky = texelFetch(m_GiFallbackSky, getGBufferPixel(), 0);
+    } else {
+        irradiance = texelFetch(m_GiResolvedIrradiance, getGBufferPixel(), 0).rgb;
+        sky = texelFetch(m_GiResolvedSky, getGBufferPixel(), 0);
+    }
+    giSkyBentMoment = sky.xyz;
+    giSkyDiffuseWeight = sky.w;
+    #else
     float packedNormal = abs(receiver.a) - 1.0;
     vec2 octPlane = vec2(mod(packedNormal, 1024.0), floor(packedNormal / 1024.0));
     vec3 plane = giOctDecode(octPlane * (2.0 / 1023.0) - 1.0);
     vec3 normal = normalize(getGBuffer1().xyz);
     giReceiverCurvature = getGBuffer2().a;
     vec3 irradiance = giSampleIndirectOnPlane(getWorldPosition(), normal, plane).rgb;
+    #endif
     if (receiver.a < 0.0) {
         irradiance += shNativeIrradiance(m_DeferredGiSky, giSkyDirection(normal))
                 * (giSkyDiffuseWeight * m_DeferredGiSkyIntensity);

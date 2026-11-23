@@ -105,6 +105,8 @@ public final class SceneServicesState extends AbstractAppState {
         catalog.refresh(app.getRootNode());
         physics.update(app, catalog.controls);
         WorldSettings selected = selectWorld();
+        app.getViewPort().setHalfResolutionProbeGi(selected != null && selected.isHalfResolutionProbeGi());
+        app.getViewPort().setProbeGiFullFallback(selected == null || selected.isProbeGiFullFallback());
         worldSettings.sync(selected, app.getAssetManager(), app.getViewPort(), app.getRenderer().getCaps());
         displayOutput = selected == null ? DisplayOutput.Application : selected.getDisplayOutput();
     }
@@ -281,6 +283,10 @@ public final class SceneServicesState extends AbstractAppState {
     @Override
     public void setEnabled(boolean enabled) {
         if (!enabled) {
+            if (app != null) {
+                app.getViewPort().setHalfResolutionProbeGi(false);
+                app.getViewPort().setProbeGiFullFallback(true);
+            }
             displayOutput = DisplayOutput.Application;
             worldSettings.close();
             closeGi();
@@ -293,6 +299,10 @@ public final class SceneServicesState extends AbstractAppState {
 
     @Override
     public void cleanup() {
+        if (app != null) {
+            app.getViewPort().setHalfResolutionProbeGi(false);
+            app.getViewPort().setProbeGiFullFallback(true);
+        }
         displayOutput = DisplayOutput.Application;
         worldSettings.close();
         closeGi();

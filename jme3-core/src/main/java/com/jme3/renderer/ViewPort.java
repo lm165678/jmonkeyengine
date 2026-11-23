@@ -65,6 +65,110 @@ import com.jme3.util.SafeArrayList;
  * @see Camera
  */
 public class ViewPort {
+    private boolean halfResolutionProbeGi;
+    private boolean probeGiFullFallback = true;
+    private ProbeGiObserver probeGiObserver;
+
+    /**
+     * Requests spatial half-resolution diffuse probe GI, default false.
+     * Eligible deferred Lighting batches use a quarter-pixel-count evaluation
+     * and depth/normal/coverage-guided reconstruction. Rejected pixels execute
+     * the original full query. Forward, MSAA and unsupported draws keep their
+     * original path. Direct lights, reflections and UI keep their resolution.
+     * No history is reused and no bake changes. Switching Off restores the
+     * original query; graph resources are viewport-owned and released normally.
+     * This is an approximation, not pixel-identical GI. Call on the render thread.
+     * At least 24 fragment texture units are required. Reconstruction and fallback
+     * can outweigh saved queries; this experimental option is not a speed guarantee.
+     * <pre>{@code
+     * // 第一步：选择延迟渲染；手动管理场景服务时直接配置视口。
+     * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
+     * // 第二步：开启独立 GI 半分辨率选项，先对照边缘、薄墙和曲面。
+     * viewPort.setHalfResolutionProbeGi(true);
+     * // 第三步：传 false 恢复原全分辨率；普通场景使用 WorldSettings 同名设置。
+     * }</pre>
+     * @param enabled whether to request half-resolution probe evaluation
+     */
+    public void setHalfResolutionProbeGi(boolean enabled) {
+        if (halfResolutionProbeGi != enabled) {
+            halfResolutionProbeGi = enabled;
+            if (temporalScene != null) {
+                temporalScene.resetHistory();
+            }
+        }
+    }
+
+    /**
+     * Controls full probe queries at pixels rejected by half-resolution reconstruction.
+     * Defaults true; ignored when half-resolution GI is off. Disabling this diagnostic
+     * option reconstructs rejected pixels with normalized, surface-guided neighboring
+     * cache samples, expanding the search when needed. Missing compatible samples
+     * remain dark; no full queries are issued. This may leak light
+     * or miss contact shadows. No fallback pass is scheduled when disabled.
+     * Call on the render thread; changing the active option resets temporal history.
+     * <pre>{@code
+     * // 第一步：先开启半分辨率 GI，默认保留完整查询回退。
+     * viewPort.setHalfResolutionProbeGi(true);
+     * // 第二步：仅做性能/画质对照时关闭回退；不改变烘焙数据。
+     * viewPort.setProbeGiFullFallback(false);
+     * // 第三步：恢复 true 保留画质保护，或关闭半分辨率恢复原路径。
+     * viewPort.setProbeGiFullFallback(true);
+     * }</pre>
+     * @param enabled whether rejected pixels execute the original probe query
+     */
+    public void setProbeGiFullFallback(boolean enabled) {
+        if (probeGiFullFallback != enabled) {
+            probeGiFullFallback = enabled;
+            if (halfResolutionProbeGi && temporalScene != null) {
+                temporalScene.resetHistory();
+            }
+        }
+    }
+
+    /** @return full-query fallback policy, default true */
+    public boolean isProbeGiFullFallback() {
+        return probeGiFullFallback;
+    }
+
+    /** @return requested GI resolution policy, not a guarantee of hardware support */
+    public boolean isHalfResolutionProbeGi() {
+        return halfResolutionProbeGi;
+    }
+
+    /** Render-thread diagnostic callback. Targets are borrowed only during this call.
+     * Resolved attachment2 has R=full-query fallback, G=GI receiver, B=rejected, A=1.
+     * Half attachment2 has world position XYZ and boundary distance W (-1 invalid).
+     * Do not dispose/retain targets or block on per-frame GPU readbacks in production.
+     */
+    public interface ProbeGiObserver {
+        void completed(int batch, com.jme3.renderer.framegraph.RenderTarget half,
+                com.jme3.renderer.framegraph.RenderTarget resolved);
+    }
+
+    /**
+     * Installs a borrowed-target observer, or null to remove it. No observer by default.
+     * <pre>{@code
+     * // 第一步：仅在诊断时观察 GI 重建输出，回调运行于渲染线程。
+     * viewPort.setProbeGiObserver((batch, half, resolved) -> {
+     *     // 第二步：统计 resolved.getColorTexture(2) 的 R/G；避免逐帧同步读回。
+     * });
+     * // 第三步：诊断结束后恢复 null。
+     * viewPort.setProbeGiObserver(null);
+     * }</pre>
+     * @param observer optional render-thread diagnostic observer
+     */
+    public void setProbeGiObserver(ProbeGiObserver observer) {
+        probeGiObserver = observer;
+    }
+
+    /** Internal graph notification; target ownership remains with the graph. */
+    public void notifyProbeGi(int batch, com.jme3.renderer.framegraph.RenderTarget half,
+            com.jme3.renderer.framegraph.RenderTarget resolved) {
+        if (probeGiObserver != null) {
+            probeGiObserver.completed(batch, half, resolved);
+        }
+    }
+
     private com.jme3.renderer.temporal.TemporalScene temporalScene;
 
     /** @return viewport-owned temporal inputs, or null when temporal rendering is inactive */

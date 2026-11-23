@@ -97,6 +97,22 @@ final class DeferredProbeGi {
         return eligible.contains(geometry);
     }
 
+    void bindResolved(Renderer renderer, Shader shader, Texture receivers,
+            com.jme3.renderer.framegraph.RenderTarget resolved,
+            com.jme3.renderer.framegraph.RenderTarget fallback, int unit) {
+        if (fallback == null) {
+            // No fallback pass/targets; the reconstruction mask never selects these.
+            fallback = resolved;
+        }
+        DeferredProbeGiPass.texture(renderer, shader, "DeferredGiReceivers", unit, receivers);
+        DeferredProbeGiPass.texture(renderer, shader, "GiResolvedIrradiance", unit + 1, resolved.getColorTexture(0));
+        DeferredProbeGiPass.texture(renderer, shader, "GiResolvedSky", unit + 2, resolved.getColorTexture(1));
+        DeferredProbeGiPass.texture(renderer, shader, "GiReconstructionMask", unit + 3, resolved.getColorTexture(2));
+        DeferredProbeGiPass.texture(renderer, shader, "GiFallbackIrradiance", unit + 4, fallback.getColorTexture(0));
+        DeferredProbeGiPass.texture(renderer, shader, "GiFallbackSky", unit + 5, fallback.getColorTexture(1));
+        bindSky(shader);
+    }
+
     void bind(Renderer renderer, Shader shader, Texture receivers, int unit) {
         try {
             renderer.setTexture(unit, receivers);
@@ -117,6 +133,10 @@ final class DeferredProbeGi {
         }
         uniform(shader, "GiEnabled", VarType.Boolean, true);
         uniform(shader, "GiBakeBounce", VarType.Boolean, false);
+        bindSky(shader);
+    }
+
+    private void bindSky(Shader shader) {
         uniform(shader, "DeferredGiSky", VarType.Vector3Array,
                 sky != null && sky.isDiffuseEnabled() ? sky.getShCoeffs() : EnvironmentLighting.ZERO_SH);
         uniform(shader, "DeferredGiSkyIntensity", VarType.Float, sky == null ? 0f : sky.getIntensity());

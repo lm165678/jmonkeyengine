@@ -40,12 +40,17 @@ public final class TestGiProbeRegions extends SimpleApplication {
     private GiProbeSet.Binding binding;
     private int frame;
     private boolean lightingPayload;
+    private final boolean halfRegression = Boolean.getBoolean("gi.test.halfResolution");
+    private byte[] reference;
+    private int halfBatches;
+    private int maximumDifference;
+    private int approximateDifference;
 
     public static void main(String[] args) {
         TestGiProbeRegions app = new TestGiProbeRegions();
         AppSettings settings = new AppSettings(true);
         settings.setRenderer(AppSettings.LWJGL_OPENGL43);
-        settings.setResolution(240, 180);
+        settings.setResolution(app.halfRegression ? 241 : 240, app.halfRegression ? 181 : 180);
         settings.setAudioRenderer(null);
         settings.setGpuSceneEnabled(true);
         app.setSettings(settings);
@@ -57,6 +62,7 @@ public final class TestGiProbeRegions extends SimpleApplication {
     public void simpleInitApp() {
         // Low-level GI ownership test; ordinary loaded scenes use automatic services.
         getSceneServices().setEnabled(false);
+        viewPort.setProbeGiObserver((batch, half, resolved) -> halfBatches++);
         viewPort.setGBufferObserver((batch, target) -> lightingPayload |= target.getColorCount() == 7);
         // 第一步：使用大 Volume 覆盖场景，再在内部放置较小的 Volume。
         // 两者均保留默认 FadeDistance=0，边缘采用局部 Volume 的一格过渡宽度。
@@ -121,6 +127,9 @@ public final class TestGiProbeRegions extends SimpleApplication {
         // 在渲染线程切换回退选项，对照同一材质和同一份烘焙。
         renderManager.setDeferredProbeGiInLighting(frame < 64);
         lightingPayload = false;
+        halfBatches = 0;
+        viewPort.setHalfResolutionProbeGi(halfRegression && frame % 8 >= 4 && frame % 8 <= 5);
+        viewPort.setProbeGiFullFallback(frame % 8 != 5);
         viewPort.setRenderPath(PATHS[(frame / 8) % PATHS.length]);
     }
 
@@ -136,6 +145,34 @@ public final class TestGiProbeRegions extends SimpleApplication {
 
     @Override
     public void simpleRender(RenderManager manager) {
+        if (halfRegression && frame % 8 >= 3) {
+            ByteBuffer image = BufferUtils.createByteBuffer(cam.getWidth() * cam.getHeight() * 4);
+            renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), image, Image.Format.RGBA8);
+            if (frame % 8 == 3) {
+                reference = new byte[image.capacity()];
+                image.get(reference);
+            } else {
+                int difference = 0;
+                for (int i = 0; i < reference.length; i++) {
+                    difference = Math.max(difference, Math.abs((image.get(i) & 255) - (reference[i] & 255)));
+                }
+                if (viewPort.isProbeGiFullFallback() || !viewPort.isHalfResolutionProbeGi()) {
+                    maximumDifference = Math.max(maximumDifference, difference);
+                } else {
+                    approximateDifference = Math.max(approximateDifference, difference);
+                }
+                int allowed = viewPort.isHalfResolutionProbeGi() ? 4 : 0;
+                if (difference > allowed) {
+                    throw new AssertionError("GI resolution switch frame=" + frame + " max=" + difference);
+                }
+                boolean expected = viewPort.isHalfResolutionProbeGi() && lightingPayload
+                        && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 24;
+                if ((halfBatches > 0) != expected) {
+                    throw new AssertionError("Half GI pass selection frame=" + frame);
+                }
+            }
+            BufferUtils.destroyDirectBuffer(image);
+        }
         if (frame % 8 == 7) {
             boolean supported = renderer.getLimits().get(Limits.FrameBufferMrtAttachments) >= 7
                     && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 20;
@@ -143,7 +180,7 @@ public final class TestGiProbeRegions extends SimpleApplication {
             if (lightingPayload != expectedPayload) {
                 throw new AssertionError("Unexpected GI stage for " + viewPort.getRenderPath() + " frame " + frame);
             }
-            ByteBuffer pixels = BufferUtils.createByteBuffer(240 * 180 * 4);
+            ByteBuffer pixels = BufferUtils.createByteBuffer(cam.getWidth() * cam.getHeight() * 4);
             renderer.readFrameBufferWithFormat(viewPort.getOutputFrameBuffer(), pixels, Image.Format.RGBA8);
             int[] left = sample(pixels, -2);
             int[] right = sample(pixels, 2);
@@ -183,6 +220,9 @@ public final class TestGiProbeRegions extends SimpleApplication {
                     + " " + Arrays.toString(center));
             BufferUtils.destroyDirectBuffer(pixels);
             if (frame == 127) {
+                if (halfRegression) {
+                    System.out.println("HALF_GI_SWITCH_PASS max=" + maximumDifference + " approximateMax=" + approximateDifference + " restored=0 odd=241x181");
+                }
                 stop();
             }
         }
@@ -195,7 +235,7 @@ public final class TestGiProbeRegions extends SimpleApplication {
 
     private int[] sample(ByteBuffer pixels, float x, float z) {
         Vector3f screen = cam.getScreenCoordinates(new Vector3f(x, 0, z));
-        int pixel = ((int) screen.y * 240 + (int) screen.x) * 4;
+        int pixel = ((int) screen.y * cam.getWidth() + (int) screen.x) * 4;
         return new int[]{pixels.get(pixel) & 255, pixels.get(pixel + 1) & 255};
     }
 

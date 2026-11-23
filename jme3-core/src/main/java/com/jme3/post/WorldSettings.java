@@ -50,6 +50,62 @@ public final class WorldSettings extends AbstractControl {
     private long revision;
     private DisplayOutput displayOutput = DisplayOutput.Hdr;
     private GiStreaming giStreaming = GiStreaming.DEFAULTS;
+    private boolean halfResolutionProbeGi;
+    private boolean probeGiFullFallback = true;
+
+    /**
+     * Stores the opt-in diffuse probe GI resolution policy. Missing fields default
+     * false; no rebake is required. SimpleApplication applies this to its main
+     * viewport while this enabled WorldSettings wins scene selection. Off restores
+     * the full-resolution algorithm. See ViewPort.setHalfResolutionProbeGi for
+     * reconstruction/fallback and supported-path limits. Application-thread only.
+     * <pre>{@code
+     * // 第一步：加载并挂载场景，获取或创建配置控制器。
+     * Spatial scene = assetManager.loadModel("Scenes/World.j3o");
+     * rootNode.attachChild(scene);
+     * WorldSettings world = scene.getControl(WorldSettings.class);
+     * if (world == null) {
+     *     world = new WorldSettings();
+     *     scene.addControl(world);
+     * }
+     * // 第二步：开启半分辨率 GI；保存 J3O 可以保留设置，烘焙数据不变。
+     * world.setHalfResolutionProbeGi(true);
+     * // 第三步：设为 false 恢复原效果。
+     * }</pre>
+     * @param enabled whether to request half-resolution probe GI
+     */
+    public void setHalfResolutionProbeGi(boolean enabled) {
+        halfResolutionProbeGi = enabled;
+    }
+
+    /** @return saved GI policy; default false */
+    public boolean isHalfResolutionProbeGi() {
+        return halfResolutionProbeGi;
+    }
+
+    /**
+     * Persists the half-resolution GI full-query fallback, default true (also for
+     * old scenes). Ignored while half-resolution GI is disabled. Disabling may
+     * introduce light leaks or missing indirect light; see ViewPort for details.
+     * Application-thread only. No rebake is required.
+     * <pre>{@code
+     * // 第一步：在已有场景配置中开启半分辨率 GI。
+     * world.setHalfResolutionProbeGi(true);
+     * // 第二步：关闭完整回退测量性能；保存 J3O 可保留此独立选项。
+     * world.setProbeGiFullFallback(false);
+     * // 第三步：恢复 true 保留重建失败像素的原完整查询。
+     * world.setProbeGiFullFallback(true);
+     * }</pre>
+     * @param enabled whether to retain full-query fallback
+     */
+    public void setProbeGiFullFallback(boolean enabled) {
+        probeGiFullFallback = enabled;
+    }
+
+    /** @return saved full-query fallback policy, default true */
+    public boolean isProbeGiFullFallback() {
+        return probeGiFullFallback;
+    }
 
     /** Immutable streaming policy shared by the scene and its editor preview. */
     public static final class GiStreaming {
@@ -202,6 +258,8 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(giStreaming.preloadDistance, "giPreloadDistance", GiStreaming.DEFAULTS.preloadDistance);
         capsule.write(giStreaming.maxFineProbes, "giMaxFineProbes", GiStreaming.DEFAULTS.maxFineProbes);
         capsule.write(giStreaming.atlasMiB, "giAtlasMiB", GiStreaming.DEFAULTS.atlasMiB);
+        capsule.write(halfResolutionProbeGi, "halfResolutionProbeGi", false);
+        capsule.write(probeGiFullFallback, "probeGiFullFallback", true);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -218,6 +276,8 @@ public final class WorldSettings extends AbstractControl {
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);
+        halfResolutionProbeGi = capsule.readBoolean("halfResolutionProbeGi", false);
+        probeGiFullFallback = capsule.readBoolean("probeGiFullFallback", true);
         try {
             giStreaming = new GiStreaming(
                     capsule.readFloat("giPreloadDistance", GiStreaming.DEFAULTS.preloadDistance),

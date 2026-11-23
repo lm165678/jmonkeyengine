@@ -110,6 +110,7 @@ public final class DeferredPipeline implements OpaquePipeline {
     private final DeferredPass cullingPass = new LightCullingPass();
     private final DeferredPass surfacePass = new GBufferPass();
     private final DeferredPass lightingPass = new DeferredLightingPass();
+    private final DeferredProbeGiPass probeGiPass = new DeferredProbeGiPass();
     private DeferredRenderContext frame;
     private FrameGraph graph;
     private RenderManager rm;
@@ -439,16 +440,67 @@ public final class DeferredPipeline implements OpaquePipeline {
                 vp.notifyGBuffer(index, context.get(surfaces));
             }
         }).write(surfaces);
-        graph.addPass(name + "Lighting", context -> {
+        boolean halfGi = vp.isHalfResolutionProbeGi() && batch.probeGi != null
+                && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 24;
+        ResourceHandle<RenderTarget> resolvedGi;
+        ResourceHandle<RenderTarget> fallbackGi;
+        if (halfGi) {
+            ResourceHandle<RenderTarget> half = graph.createResource(name + "GI/Half",
+                    new RenderTargetDefinition(0.5f, 1, null, Image.Format.RGBA32F,
+                            Image.Format.RGBA32F, Image.Format.RGBA32F));
+            resolvedGi = graph.createResource(name + "GI/Resolved",
+                    new RenderTargetDefinition(1f, 1, null, Image.Format.RGBA32F,
+                            Image.Format.RGBA32F, Image.Format.RGBA8));
+            fallbackGi = vp.isProbeGiFullFallback() ? graph.createResource(name + "GI/Fallback",
+                    new RenderTargetDefinition(1f, 1, null, Image.Format.RGBA32F, Image.Format.RGBA32F)) : null;
+            graph.addPass(name + "GI/HalfEvaluate", context -> {
+                if (ready[0]) {
+                    context.get(surfaces);
+                    probeGiPass.execute(frame, context.get(half), null);
+                }
+            }).read(surfaces).write(half);
+            graph.addPass(name + "GI/Reconstruct", context -> {
+                if (ready[0]) {
+                    context.get(surfaces);
+                    RenderTarget samples = context.get(half);
+                    RenderTarget resolved = context.get(resolvedGi);
+                    probeGiPass.execute(frame, resolved, samples);
+                    if (fallbackGi == null) {
+                        vp.notifyProbeGi(index, samples, resolved);
+                    }
+                }
+            }).read(surfaces).read(half).write(resolvedGi);
+            if (fallbackGi != null) {
+                graph.addPass(name + "GI/FullFallback", context -> {
+                    if (ready[0]) {
+                        context.get(surfaces);
+                        probeGiPass.fallback(frame, context.get(fallbackGi), context.get(resolvedGi));
+                        vp.notifyProbeGi(index, context.get(half), context.get(resolvedGi));
+                    }
+                }).read(surfaces).read(half).read(resolvedGi).write(fallbackGi);
+            }
+        } else {
+            resolvedGi = null;
+            fallbackGi = null;
+        }
+        FrameGraph.PassBuilder lighting = graph.addPass(name + "Lighting", context -> {
             if (ready[0]) {
                 context.get(surfaces);
                 context.get(output);
+                frame.resources.resolvedProbeGi = resolvedGi == null ? null : context.get(resolvedGi);
+                frame.resources.fallbackProbeGi = fallbackGi == null ? null : context.get(fallbackGi);
                 lightingPass.execute(frame);
                 deferredCount += batch.geometries.size();
                 activePath = frame.untiled ? RenderPath.Deferred
                     : frame.gpu ? RenderPath.TiledDeferredGPU : RenderPath.TiledDeferredCPU;
             }
         }).read(surfaces).write(output);
+        if (resolvedGi != null) {
+            lighting.read(resolvedGi);
+            if (fallbackGi != null) {
+                lighting.read(fallbackGi);
+            }
+        }
         graph.addPass(name + "Restore", context -> {
             renderer.setFrameBuffer(vp.getOutputFrameBuffer());
             renderer.setBackgroundColor(vp.getBackgroundColor());
