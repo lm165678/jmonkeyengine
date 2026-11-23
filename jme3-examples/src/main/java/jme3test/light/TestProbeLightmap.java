@@ -20,6 +20,11 @@ import com.jme3.scene.Geometry;
 import com.jme3.scene.Mobility;
 import com.jme3.scene.VertexBuffer.Type;
 import com.jme3.scene.shape.Quad;
+import com.jme3.texture.FrameBuffer;
+import com.jme3.texture.Image;
+import com.jme3.texture.Texture2D;
+import com.jme3.texture.image.ColorSpace;
+import com.jme3.util.BufferUtils;
 import com.jme3.system.AppSettings;
 import com.jme3.system.JmeContext;
 import java.io.IOException;
@@ -42,6 +47,11 @@ public final class TestProbeLightmap extends SimpleApplication {
     private int frame;
     private int phase;
     private WorldSettings world;
+    private ProbeLightmapControl streaming;
+    private FrameBuffer coverageTarget;
+    private Texture2D coverageMap;
+    private float liveRed;
+    private float partialRed;
 
     public static void main(String[] args) {
         var app = new TestProbeLightmap();
@@ -92,6 +102,7 @@ public final class TestProbeLightmap extends SimpleApplication {
         mesh.setBuffer(Type.TexCoord2, 2, new float[]{0, .125f, 1, .125f, 1, .875f, 0, .875f});
         receiver = new Geometry("UV2 receiver", mesh);
         receiver.setMaterial(new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md"));
+        receiver.getMaterial().setFloat("Metallic", 0f);
         receiver.setLocalTranslation(-.5f, -.5f, 0);
         rootNode.attachChild(receiver);
         rootNode.updateGeometricState();
@@ -147,7 +158,11 @@ public final class TestProbeLightmap extends SimpleApplication {
         } catch (IOException failure) {
             throw new IllegalStateException(failure);
         }
-        receiver.addControl(new ProbeLightmapControl("map.j3o", receiver.getWorldTransform(), 20));
+        streaming = new ProbeLightmapControl("map.j3o", receiver.getWorldTransform(), 20);
+        coverageTarget = new FrameBuffer(64, 64, 1);
+        coverageTarget.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(Image.Format.RGBA16F));
+        coverageTarget.setDepthTarget(FrameBuffer.FrameBufferTarget.newTarget(Image.Format.Depth));
+        viewPort.setOutputFrameBuffer(coverageTarget);
         cam.setLocation(new Vector3f(0, 0, 2));
         cam.lookAt(Vector3f.ZERO, Vector3f.UNIT_Y);
     }
@@ -166,6 +181,29 @@ public final class TestProbeLightmap extends SimpleApplication {
     @Override
     public void simpleUpdate(float tpf) {
         frame++;
+        if (frame <= 6) {
+            if (frame == 1 || frame == 3 || frame == 5) {
+                // A distinctive baked color makes a probe fallback easy to spot.
+                float coverage = frame == 1 ? 0f : frame == 3 ? .998f : 1f;
+                var pixel = BufferUtils.createByteBuffer(8);
+                pixel.putLong(0L);
+                pixel.putShort(0, FastMath.convertFloatToHalf(8f * coverage));
+                pixel.putShort(6, FastMath.convertFloatToHalf(coverage));
+                pixel.flip();
+                var previous = coverageMap;
+                coverageMap = new Texture2D(new Image(Image.Format.RGBA16F, 1, 1, pixel, ColorSpace.Linear));
+                receiver.setResidentProbeLightmap(coverageMap);
+                if (previous != null) {
+                    previous.getImage().dispose();
+                }
+            }
+            return;
+        }
+        if (frame == 7) {
+            receiver.setResidentProbeLightmap(null);
+            coverageMap.getImage().dispose();
+            receiver.addControl(streaming);
+        }
         boolean resident = receiver.getResidentProbeLightmap() != null;
         if (phase == 0 && resident) {
             if (receiver.getResidentProbeLightmap().getImage().getHeight() != 64) {
@@ -186,5 +224,33 @@ public final class TestProbeLightmap extends SimpleApplication {
         } else if (frame > 900) {
             throw new AssertionError("Timed out waiting for lightmap residency");
         }
+    }
+
+    @Override
+    public void simpleRender(com.jme3.renderer.RenderManager manager) {
+        if (frame != 2 && frame != 4 && frame != 6) {
+            return;
+        }
+        var readback = BufferUtils.createByteBuffer(64 * 64 * 16);
+        renderer.readFrameBufferWithFormat(coverageTarget, readback, Image.Format.RGBA32F);
+        float red = readback.getFloat((32 * 64 + 24) * 16);
+        BufferUtils.destroyDirectBuffer(readback);
+        if (frame == 2) {
+            liveRed = red;
+        } else if (frame == 4) {
+            partialRed = red;
+        } else {
+            if (red - liveRed < .05f || Math.abs(partialRed - red) > .015f) {
+                throw new AssertionError("Discontinuous lightmap coverage: " + liveRed + ", " + partialRed + ", " + red);
+            }
+            System.out.println("PROBE_LIGHTMAP_CONTINUOUS_COVERAGE_PASS");
+        }
+    }
+
+    @Override
+    public void handleError(String message, Throwable error) {
+        System.err.println(message);
+        error.printStackTrace();
+        System.exit(1);
     }
 }

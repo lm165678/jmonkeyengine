@@ -839,3 +839,8 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - New bakes extend the nearest rasterized texel into two texels of empty UV gutter. The bake tracks raster occupancy separately from probe coverage, preserving covered geometry with no probes. Both atlas bands use the same source texel and keep the existing file layout.
 - SDK `794577e9` uses the updated baker after engine export, with its existing xatlas padding and retained imported UV2. Re-bake existing lightmaps. Imported charts need sufficient space at the bake resolution. TestScene2 was not rebaked for validation.
 - RTX 5080 OpenGL 4.3 `:jme3-examples:probeLightmapSmoke` passed for single/dual-band gutters, J3O storage and streaming. A CPU probe checked adjacent chart colors, sky alignment and preservation of zero-coverage geometry.
+
+## 2026-11-24 Continuous runtime Lightmap coverage
+
+- The material shader uses baked irradiance and live probes together at partial coverage. The irradiance is already weighted by the baked texture's alpha. Live probes contribute the remaining fraction. Full coverage still skips the live query. This uses existing Lightmap J3O data with SDK `da858683`, without rebaking.
+- RTX 5080 native readback reproduced a jump from 0 to 2.545 at 99.8% versus full coverage with the old shader. The same test passed with continuous coverage. The native Lightmap bake/stream, FSR2 backend and full FSR1/FSR2 upscaling examples passed via Java with the SDK native library setup. TestScene2 was not visually verified.
