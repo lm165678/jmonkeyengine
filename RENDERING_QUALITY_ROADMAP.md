@@ -210,6 +210,12 @@ AutoExposureFilter now offers opt-in SceneHistogram brightness/adaptation semant
 
 参考：[Godot LightmapGI](https://docs.godotengine.org/en/stable/classes/class_lightmapgi.html)、[LightmapProbe](https://docs.godotengine.org/en/stable/classes/class_lightmapprobe.html)。下次继续 GI 烘焙、物体静态／动态分类、Lightmap 或 Probe Volume 优化时主动提醒本节。当前只登记计划，不开始实现。
 
+### 待办：半透明物体的 Lightmap 与 Probe GI 正确性
+
+- [ ] 用半透明玻璃、透明度贴图的混合材质和 Alpha Cutout 网格建立对照。分别检查物体作为接收面时的间接光，以及作为烘焙物体时对探针距离矩、后方遮挡和间接反弹的影响。明确哪些行为由当前材质和渲染路径支持。
+- [ ] 在 Forward 与延迟渲染的透明队列中，比较 GI 关闭、仅 Probe GI、Lightmap 驻留和卸载回退。覆盖静态和移动物体、两层半透明表面、Lightmap 部分覆盖及缺失 UV2。检查间接光是否遗漏、重复叠加、串到后方物体，或在切换时跳变。
+- [ ] 记录可复现问题、预期结果及受影响路径，再决定是否修复。若需要修复，先验证透明排序、深度写入与烘焙接收规则，再补图像回归。下次继续 Lightmap、Probe GI 或半透明渲染优化时提醒本项。
+
 ## 待办：按空间分块缓存探针 GI 与无 GI 基线优化（2026-11-23）
 
 用户要求登记并在后续继续时提醒。目标是减少逐像素重复探针查询、距离矩遮挡和 SH 求值；参考 Godot 的实例级 SH 复用思路，但不把大型建筑或跨室内外物体直接压成一组 SH。Godot 4.5 的 LightmapGI 探针捕获在几何实例 AABB 中心，对所在四面体的四个探针进行 SH9 插值；此说明不适用于其全部 GI 技术，也不代表大物体的空间遮挡被解决。
