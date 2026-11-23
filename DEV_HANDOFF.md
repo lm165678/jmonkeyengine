@@ -1,3 +1,8 @@
+## 2026-11-23 paired half-resolution GI implementation checkpoint
+
+- Compatible implementation commits: engine `2e3021957b0054f1e65402fa899e950fb2748f08` (dev_fix_lightprobe_issue), SDK `51cd1dc39190cb3de4ce6806d022f93e9172fb4e` (master). Documentation-only commits may follow. Rebuild/export this engine before packaging the paired SDK; no full SDK/runtime replacement was performed by the push task.
+- Includes opt-in half GI, default-enabled full fallback, cache-only guided smoothing, persistence/editor controls and native regressions recorded below. Future static Lightmap/dynamic Probe, spatial SH cache and dynamic DDGI/octahedral-update work is documented in the roadmap, not implemented. Existing report timing refers to the earlier nearest approximation; do not claim final smoothing FPS was measured.
+
 ## 2026-11-23 static Lightmap / dynamic Probe main route and future DDGI backlog
 
 - User confirmed main direction: per-instance static/dynamic/local-dynamic classification, then cache static surface GI into Lightmap after LightProbeVolume bake; runtime probes serve dynamic/local-rotating receivers. Added roadmap requirements for UV/data/directional response, stale-cache handling, sky/GI toggle consistency, old assets and independent fallback. Rotating/deforming objects are not ordinary static-lightmap receivers; sampling baked GI is distinct from updating their own bounce/occlusion.
