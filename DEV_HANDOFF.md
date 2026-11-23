@@ -1,3 +1,7 @@
+## 2026-11-23 Sky diffuse SH optimization reminder
+
+- Added a pending sky diffuse SH checklist to RENDERING_QUALITY_ROADMAP.md, referencing GetSkySHDiffuse in Engine/Shaders/Private/ReflectionEnvironmentShared.ush. On resuming SkyLight, sky diffuse, SH evaluation or GI optimization, proactively remind the user to inspect coefficient conventions and prepacking, optional low-order evaluation, precision/negative lobes, and image/GPU-cost regressions before implementation.
+- Documentation only; no rendering changes, builds or tests. Existing engine/SDK implementation revisions remain unchanged. This is a continuation reminder, not a scheduled notification.
 ## 2026-11-23 dual probe irradiance, mobility and streamed static Lightmaps
 
 - Compatible implementation commits: engine `985834fb25598e54fff9ac495053ab4afaedbe14` and SDK `d7f57bc9ad6b0eb4d1ca3fa16efe9df4f96ffd2a`. The SDK handoff records the six-target xatlas workflow and the locally verified native binaries. Export the paired engine before building the SDK.
