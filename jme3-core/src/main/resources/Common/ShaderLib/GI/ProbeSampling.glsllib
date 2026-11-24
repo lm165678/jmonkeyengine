@@ -784,24 +784,25 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
     giReceiverCurvature = giCurvature(worldPosition, geometryNormal);
     vec3 plane = giReceiverPlane(worldPosition, normal);
     #ifdef STATIC_PROBE_LIGHTMAP
-        vec4 cached = vec4(0.0);
-        vec4 cachedSky = vec4(0.0);
         if (m_GiEnabled && !m_GiBakeBounce) {
             float inset = m_GiLightmapAtlasInset;
             vec2 lookup = probeLightmapUv;
             if (inset > 0.0) {
                 lookup.y = clamp(lookup.y * 0.5, inset, 0.5 - inset);
             }
-            cached = texture2D(m_GiStaticLightmap, lookup);
-            if (cached.a > 0.0 && inset > 0.0) {
-                cachedSky = texture2D(m_GiStaticLightmap, vec2(lookup.x, lookup.y + 0.5));
-            }
-            if (cached.a >= 1.0) {
+            vec4 cached = texture2D(m_GiStaticLightmap, lookup);
+            if (inset > 0.0) {
+                vec4 cachedSky = texture2D(m_GiStaticLightmap, vec2(lookup.x, lookup.y + 0.5));
                 giSkyBentMoment = cachedSky.rgb;
                 giSkyDiffuseWeight = cachedSky.a;
-                giEnvironmentDiffuseWeight = clamp(m_GiEnvironmentMix, 0.0, 1.0);
-                return cached.rgb;
+            } else {
+                giSkyBentMoment = vec3(0.0);
+                giSkyDiffuseWeight = 1.0 - cached.a;
             }
+            // A resident static lightmap owns its diffuse result, including
+            // partial coverage. Its RGB already includes the coverage weight.
+            giEnvironmentDiffuseWeight = mix(1.0, clamp(m_GiEnvironmentMix, 0.0, 1.0), cached.a);
+            return cached.rgb;
         }
     #endif
     vec4 sampleValue = giSampleIndirectOnPlane(worldPosition, normal, plane);
@@ -813,18 +814,6 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
         giSkyDiffuseWeight = 1.0 - giTotalSkyCoverage;
         giSkyBentMoment = vec3(0.0);
     }
-    #ifdef STATIC_PROBE_LIGHTMAP
-        if (cached.a > 0.0) {
-            // Projection jitter can move a bilinear tap across a coverage edge.
-            // Apply stored premultiplied irradiance and use probes for the uncovered part.
-            float remaining = 1.0 - cached.a;
-            sampleValue.rgb = cached.rgb + sampleValue.rgb * remaining;
-            giSkyBentMoment = cachedSky.rgb + giSkyBentMoment * remaining;
-            giSkyDiffuseWeight = mix(giSkyDiffuseWeight, cachedSky.a, cached.a);
-            giEnvironmentDiffuseWeight = mix(giEnvironmentDiffuseWeight,
-                    clamp(m_GiEnvironmentMix, 0.0, 1.0), cached.a);
-        }
-    #endif
     return sampleValue.rgb;
 }
 // Compatibility for custom shaders without a separate geometry normal. Built-in

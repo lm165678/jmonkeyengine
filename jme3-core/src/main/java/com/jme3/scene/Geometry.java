@@ -101,9 +101,13 @@ public class Geometry extends Spatial {
                 : (com.jme3.texture.Texture2D) residentProbeLightmap.getValue();
     }
 
-    /** @return whether the current draw can use its resident probe lightmap */
+    /**
+     * Dynamic receivers immediately use live probes, even before the residency
+     * service releases their cached texture. Inherited mobility is resolved here.
+     * @return whether the current draw can use its resident probe lightmap
+     */
     public boolean usesResidentProbeLightmap() {
-        return lodLevel == 0 && residentProbeLightmap != null;
+        return lodLevel == 0 && residentProbeLightmap != null && getMobility() == Mobility.Static;
     }
 
     @Override

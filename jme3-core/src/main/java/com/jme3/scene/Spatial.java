@@ -1895,7 +1895,11 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      */
     public void setMobility(Mobility mobility) {
         assert SceneGraphThreadWarden.assertOnCorrectThread(this);
-        localMobility = java.util.Objects.requireNonNull(mobility);
+        java.util.Objects.requireNonNull(mobility);
+        if (localMobility != mobility) {
+            localMobility = mobility;
+            notifySceneChanged(SceneChangeListener.Change.RENDERING);
+        }
     }
 
     /** @return this object's authored policy, which may be Inherit */

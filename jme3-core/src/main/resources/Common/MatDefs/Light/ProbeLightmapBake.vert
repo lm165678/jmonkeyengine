@@ -7,9 +7,19 @@ uniform mat3 g_WorldNormalMatrix;
 uniform int m_LightmapBand;
 varying vec3 worldPosition;
 varying vec3 worldNormal;
+#ifdef NORMALMAP
+    attribute vec2 inTexCoord;
+    attribute vec4 inTangent;
+    varying vec2 materialUv;
+    varying vec4 worldTangent;
+#endif
 void main() {
     worldPosition = (g_WorldMatrix * vec4(inPosition, 1.0)).xyz;
-    worldNormal = g_WorldNormalMatrix * inNormal;
+    worldNormal = normalize(g_WorldNormalMatrix * inNormal);
+    #ifdef NORMALMAP
+        materialUv = inTexCoord;
+        worldTangent = vec4(normalize(g_WorldNormalMatrix * inTangent.xyz), inTangent.w);
+    #endif
     vec2 position = inTexCoord2 * 2.0 - 1.0;
     if (m_LightmapBand != 0) {
         position.y = inTexCoord2.y - (m_LightmapBand == 1 ? 1.0 : 0.0);

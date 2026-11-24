@@ -8,6 +8,7 @@ import com.jme3.renderer.Camera;
 import com.jme3.renderer.Caps;
 import com.jme3.renderer.Limits;
 import com.jme3.renderer.RenderManager;
+import com.jme3.renderer.Renderer;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Mobility;
 import com.jme3.scene.VertexBuffer.Type;
@@ -25,12 +26,28 @@ import java.util.List;
  * Rasterizes the captured diffuse probe field onto a static mesh's existing UV2.
  * Requires a float-renderable OpenGL context. Call on the render thread between
  * render passes. Ownership of the returned texture and its storage passes to
- * the caller. Its alpha encodes valid coverage; missing texels retain live GI.
+ * the caller. RGB contains coverage-weighted irradiance. A bound static map
+ * supplies the diffuse cache even where its probe coverage is incomplete.
+ * Built-in PBR normal maps use UV0, tangents and the material's normal scale
+ * and convention. The bake captures a fixed normal without view-based parallax.
+ * Targets up to 512 pixels per axis use four subtexel samples when the
+ * renderer supports the larger temporary raster. Resolve averages only
+ * covered samples before gutter fill. The saved dimensions are unchanged.
+ * For ordinary float UV2 triangle meshes, gutter samples stay within the
+ * nearest connected UV island. An island without a nearby covered sample
+ * keeps the texel empty.
+ * On maps up to 256 pixels per axis, a finer temporary raster can recover
+ * missed chart-edge texels. It only fills empty texels from their own island.
+ * Finally, paired smooth geometric edges blend irradiance across a narrow
+ * UV2 seam band. Coverage and baked sky remain specific to each island.
  * Leave room between UV charts at the bake resolution. The bake extends the
  * nearest rasterized texel up to two texels into empty space for bilinear
  * filtering. Existing lightmaps need to be baked again to get the border.
  * <pre>{@code
  * // 第一步：完成 LightProbe Volume 烘焙，准备非重叠 UV2，并给 UV 岛留边。
+ * // 保留原材质、UV0 和切线；修改法线贴图后重新生成 Lightmap。
+ * // 若原 UV2 无重叠且留边足够，可复用 UV2 来重烘焙现有贴图。
+ * // 烘焙器会在输出中缝合平滑边；旧 Lightmap 需要重新生成才会生效。
  * Texture2D lightmap = ProbeLightmapBaker.bake(renderManager, assetManager,
  *         geometry, volume.getData(), volume.getWorldTranslation(), 256, 256);
  * // 第二步：将纹理另存为 GI/Lightmaps 下的独立 J3O 文件。
@@ -101,30 +118,40 @@ public final class ProbeLightmapBaker {
         if (width > textureLimit || outputHeight > textureLimit) {
             throw new IllegalArgumentException("Lightmap exceeds maximum texture size");
         }
+        // Subtexel coverage recovers narrow UV triangles missed by the center
+        // sample. Cap the temporary target to bound the readback cost.
+        int samplesPerAxis = width <= 512 && height <= 512
+                && width * 2 <= textureLimit && outputHeight * 2 <= textureLimit ? 2 : 1;
+        int rasterWidth = width * samplesPerAxis;
+        int rasterHeight = outputHeight * samplesPerAxis;
         var oldTarget = renderer.getCurrentFrameBuffer();
         var previousCamera = manager.getCurrentCamera();
-        var target = new FrameBuffer(width, outputHeight, 1);
+        var target = new FrameBuffer(rasterWidth, rasterHeight, 1);
         target.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(Image.Format.RGBA32F));
         var proxy = new Geometry("Probe Lightmap UV2", geometry.getMesh());
         proxy.setLocalTransform(geometry.getWorldTransform().clone());
         proxy.setIgnoreTransform(geometry.isIgnoreTransform());
-        proxy.setMaterial(new Material(assets, "Common/MatDefs/Light/ProbeLightmapBake.j3md"));
+        Material bakeMaterial = new Material(assets, "Common/MatDefs/Light/ProbeLightmapBake.j3md");
+        bindPbrNormalMap(geometry, bakeMaterial);
+        proxy.setMaterial(bakeMaterial);
         proxy.updateGeometricState();
-        ByteBuffer readback = BufferUtils.createByteBuffer(width * outputHeight * 16);
+        ByteBuffer readback = BufferUtils.createByteBuffer(rasterWidth * rasterHeight * FLOAT_PIXEL_BYTES);
+        ByteBuffer resolved = samplesPerAxis == 1 ? readback
+                : BufferUtils.createByteBuffer(width * outputHeight * FLOAT_PIXEL_BYTES);
         try (AutoCloseable binding = binder.apply(proxy.getMaterial())) {
-            renderer.setFrameBuffer(target);
-            manager.setCamera(new Camera(width, outputHeight), false);
-            renderer.setBackgroundColor(ColorRGBA.BlackNoAlpha);
-            renderer.clearBuffers(true, false, false);
-            proxy.getMaterial().setInt("LightmapBand", atlas ? 1 : 0);
-            manager.renderGeometry(proxy);
-            if (atlas) {
-                proxy.getMaterial().setInt("LightmapBand", 2);
-                manager.renderGeometry(proxy);
+            capture(manager, renderer, proxy, target, readback, atlas);
+            if (samplesPerAxis > 1) {
+                resolveSubtexels(readback, resolved, width, height, atlas, samplesPerAxis, null, null, null);
             }
-            renderer.readFrameBufferWithFormat(target, readback, Image.Format.RGBA32F);
+            boolean[] boundary = width <= 256 && height <= 256
+                    && width * 4 <= textureLimit && outputHeight * 4 <= textureLimit ? new boolean[width * height] : null;
+            int[] owners = ProbeLightmapChartOwnership.rasterize(geometry.getMesh(), width, height, GUTTER_RADIUS, boundary);
+            if (owners != null && boundary != null && markMissing(resolved, boundary)) {
+                recoverMissingSamples(manager, renderer, proxy, target, resolved, width, height, atlas, owners, boundary);
+            }
             ByteBuffer half = BufferUtils.createByteBuffer(width * outputHeight * 8);
-            fillLightmapGutters(readback, half, width, height, atlas);
+            fillLightmapGutters(resolved, half, width, height, atlas, owners);
+            ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
             half.flip();
             Texture2D texture = new Texture2D(new Image(Image.Format.RGBA16F, width, outputHeight, half, ColorSpace.Linear));
             texture.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
@@ -141,12 +168,134 @@ public final class ProbeLightmapBaker {
                 manager.setCamera(previousCamera, false);
             }
             renderer.deleteFrameBuffer(target);
+            if (resolved != readback) {
+                BufferUtils.destroyDirectBuffer(resolved);
+            }
             BufferUtils.destroyDirectBuffer(readback);
         }
     }
 
+    private static void capture(RenderManager manager, Renderer renderer,
+            Geometry proxy, FrameBuffer target, ByteBuffer pixels, boolean atlas) {
+        renderer.setFrameBuffer(target);
+        manager.setCamera(new Camera(target.getWidth(), target.getHeight()), false);
+        renderer.setBackgroundColor(ColorRGBA.BlackNoAlpha);
+        renderer.clearBuffers(true, false, false);
+        proxy.getMaterial().setInt("LightmapBand", atlas ? 1 : 0);
+        manager.renderGeometry(proxy);
+        if (atlas) {
+            proxy.getMaterial().setInt("LightmapBand", 2);
+            manager.renderGeometry(proxy);
+        }
+        renderer.readFrameBufferWithFormat(target, pixels, Image.Format.RGBA32F);
+    }
+
+    static boolean markMissing(ByteBuffer resolved, boolean[] boundary) {
+        boolean any = false;
+        for (int i = 0; i < boundary.length; i++) {
+            boundary[i] &= !isRasterized(resolved, i);
+            any |= boundary[i];
+        }
+        return any;
+    }
+
+    private static void recoverMissingSamples(RenderManager manager, Renderer renderer, Geometry proxy,
+            FrameBuffer originalTarget, ByteBuffer resolved, int width, int height, boolean atlas,
+            int[] owners, boolean[] missing) {
+        int fineWidth = width * 4;
+        int fineHeight = height * 4;
+        int[] fineOwners = ProbeLightmapChartOwnership.rasterize(proxy.getMesh(), fineWidth, fineHeight, 0);
+        if (fineOwners == null) {
+            return;
+        }
+        var target = new FrameBuffer(fineWidth, atlas ? fineHeight * 2 : fineHeight, 1);
+        target.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(Image.Format.RGBA32F));
+        ByteBuffer raster = BufferUtils.createByteBuffer(fineWidth * target.getHeight() * FLOAT_PIXEL_BYTES);
+        try {
+            capture(manager, renderer, proxy, target, raster, atlas);
+            resolveSubtexels(raster, resolved, width, height, atlas, 4, missing, owners, fineOwners);
+        } finally {
+            renderer.setFrameBuffer(originalTarget);
+            renderer.deleteFrameBuffer(target);
+            BufferUtils.destroyDirectBuffer(raster);
+        }
+    }
+
+    static void resolveSubtexels(ByteBuffer raster, ByteBuffer resolved,
+            int width, int height, boolean atlas, int samplesPerAxis,
+            boolean[] missing, int[] owners, int[] fineOwners) {
+        int rasterWidth = width * samplesPerAxis;
+        int bandOffset = rasterWidth * height * samplesPerAxis;
+        int outputBand = width * height;
+        float[] sums = new float[atlas ? 8 : 4];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = y * width + x;
+                if (missing != null && !missing[pixel]) {
+                    continue;
+                }
+                java.util.Arrays.fill(sums, 0f);
+                int count = 0;
+                for (int dy = 0; dy < samplesPerAxis; dy++) {
+                    for (int dx = 0; dx < samplesPerAxis; dx++) {
+                        int source = (y * samplesPerAxis + dy) * rasterWidth + x * samplesPerAxis + dx;
+                        if (!isRasterized(raster, source)
+                                || fineOwners != null && fineOwners[source] != owners[pixel]) {
+                            continue;
+                        }
+                        count++;
+                        for (int channel = 0; channel < 4; channel++) {
+                            int offset = source * FLOAT_PIXEL_BYTES + channel * Float.BYTES;
+                            sums[channel] += raster.getFloat(offset);
+                            if (atlas) {
+                                sums[4 + channel] += raster.getFloat(bandOffset * FLOAT_PIXEL_BYTES + offset);
+                            }
+                        }
+                    }
+                }
+                int output = (y * width + x) * FLOAT_PIXEL_BYTES;
+                float weight = count == 0 ? 0f : 1f / count;
+                for (int channel = 0; channel < sums.length; channel++) {
+                    int offset = channel < 4 ? channel * Float.BYTES
+                            : outputBand * FLOAT_PIXEL_BYTES + (channel - 4) * Float.BYTES;
+                    resolved.putFloat(output + offset, sums[channel] * weight);
+                }
+            }
+        }
+    }
+
+    private static void bindPbrNormalMap(Geometry geometry, Material bakeMaterial) {
+        Material source = geometry.getMaterial();
+        if (source == null || !"Common/MatDefs/Light/PBRLighting.j3md".equals(source.getMaterialDef().getAssetName())
+                || geometry.getMesh().getBuffer(Type.Tangent) == null
+                || geometry.getMesh().getBuffer(Type.TexCoord) == null) {
+            return;
+        }
+        Object map = surfaceParameter(geometry, "NormalMap");
+        if (!(map instanceof Texture2D)) {
+            return;
+        }
+        bakeMaterial.setTexture("NormalMap", (Texture2D) map);
+        Object type = surfaceParameter(geometry, "NormalType");
+        Object scale = surfaceParameter(geometry, "NormalScale");
+        bakeMaterial.setFloat("NormalType", type instanceof Number ? ((Number) type).floatValue() : -1f);
+        bakeMaterial.setFloat("NormalScale", scale instanceof Number ? ((Number) scale).floatValue() : 1f);
+    }
+
+    private static Object surfaceParameter(Geometry geometry, String name) {
+        Material material = geometry.getMaterial();
+        Object value = material.getParamValue(name);
+        for (var override : geometry.getWorldMatParamOverrides()) {
+            if (override.isEnabled() && override.getName().equals(name)
+                    && material.getMaterialDef().getMaterialParam(name).getVarType() == override.getVarType()) {
+                value = override.getValue();
+            }
+        }
+        return value;
+    }
+
     private static void fillLightmapGutters(ByteBuffer raster, ByteBuffer half,
-            int width, int height, boolean atlas) {
+            int width, int height, boolean atlas, int[] owners) {
         int bandPixels = width * height;
         int[] sources = atlas ? new int[bandPixels] : null;
         for (int y = 0; y < height; y++) {
@@ -154,7 +303,7 @@ public final class ProbeLightmapBaker {
                 int pixel = y * width + x;
                 int source = pixel;
                 if (!isRasterized(raster, pixel)) {
-                    source = nearestRasterized(raster, width, height, x, y);
+                    source = nearestRasterized(raster, width, height, x, y, owners);
                 }
                 if (atlas) {
                     sources[pixel] = source;
@@ -174,15 +323,17 @@ public final class ProbeLightmapBaker {
         return raster.getFloat(pixel * FLOAT_PIXEL_BYTES + 3 * Float.BYTES) >= 1f;
     }
 
-    private static int nearestRasterized(ByteBuffer raster, int width, int height, int x, int y) {
+    static int nearestRasterized(ByteBuffer raster, int width, int height, int x, int y, int[] owners) {
         int closest = -1;
         int bestDistance = 2 * GUTTER_RADIUS * GUTTER_RADIUS + 1;
+        int chart = owners == null ? -1 : owners[y * width + x];
         for (int dy = Math.max(-GUTTER_RADIUS, -y); dy <= Math.min(GUTTER_RADIUS, height - 1 - y); dy++) {
             int row = (y + dy) * width;
             for (int dx = Math.max(-GUTTER_RADIUS, -x); dx <= Math.min(GUTTER_RADIUS, width - 1 - x); dx++) {
                 int distance = dx * dx + dy * dy;
                 int candidate = row + x + dx;
-                if (distance < bestDistance && isRasterized(raster, candidate)) {
+                if (distance < bestDistance && (owners == null || chart >= 0 && chart == owners[candidate])
+                        && isRasterized(raster, candidate)) {
                     closest = candidate;
                     bestDistance = distance;
                 }

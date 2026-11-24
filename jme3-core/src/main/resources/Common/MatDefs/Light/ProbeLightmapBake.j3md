@@ -1,6 +1,9 @@
 MaterialDef Probe Lightmap Bake {
     MaterialParameters {
         Int LightmapBand
+        Texture2D NormalMap -LINEAR
+        Float NormalType
+        Float NormalScale
         Boolean GiEnabled
         Boolean GiBakeBounce
         Texture2D GiIrradiance -LINEAR
@@ -25,6 +28,9 @@ MaterialDef Probe Lightmap Bake {
         WorldParameters {
             WorldMatrix
             WorldNormalMatrix
+        }
+        Defines {
+            NORMALMAP : NormalMap
         }
         RenderState {
             DepthTest Off

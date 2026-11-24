@@ -53,7 +53,7 @@ public final class TestProbeLightmap extends SimpleApplication {
     private ProbeLightmapControl streaming;
     private FrameBuffer coverageTarget;
     private Texture2D coverageMap;
-    private float liveRed;
+    private float zeroCoverageRed;
     private float partialRed;
 
     public static void main(String[] args) {
@@ -187,7 +187,7 @@ public final class TestProbeLightmap extends SimpleApplication {
         if (frame <= 6) {
             if (frame == 1 || frame == 3 || frame == 5) {
                 // A distinctive baked color makes a probe fallback easy to spot.
-                float coverage = frame == 1 ? 0f : frame == 3 ? .998f : 1f;
+                float coverage = frame == 1 ? 0f : frame == 3 ? .5f : 1f;
                 var pixel = BufferUtils.createByteBuffer(8);
                 pixel.putLong(0L);
                 pixel.putShort(0, FastMath.convertFloatToHalf(8f * coverage));
@@ -239,12 +239,14 @@ public final class TestProbeLightmap extends SimpleApplication {
         float red = readback.getFloat((32 * 64 + 24) * 16);
         BufferUtils.destroyDirectBuffer(readback);
         if (frame == 2) {
-            liveRed = red;
+            zeroCoverageRed = red;
         } else if (frame == 4) {
             partialRed = red;
         } else {
-            if (red - liveRed < .05f || Math.abs(partialRed - red) > .015f) {
-                throw new AssertionError("Discontinuous lightmap coverage: " + liveRed + ", " + partialRed + ", " + red);
+            float midpoint = (zeroCoverageRed + red) * .5f;
+            if (red - zeroCoverageRed < .05f || Math.abs(partialRed - midpoint) > .015f) {
+                throw new AssertionError("Static lightmap is not continuous across coverage: "
+                        + zeroCoverageRed + ", " + partialRed + ", " + red);
             }
             System.out.println("PROBE_LIGHTMAP_CONTINUOUS_COVERAGE_PASS");
         }
