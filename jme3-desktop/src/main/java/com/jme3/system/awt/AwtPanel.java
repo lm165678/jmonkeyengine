@@ -49,6 +49,8 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -147,6 +149,62 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     private int newHeight = 1;
     private final AtomicBoolean reshapeNeeded = new AtomicBoolean(false);
     private final Object lock = new Object();
+    private final List<CompletableFuture<Void>> presentationRequests = new ArrayList<>();
+    private final List<CompletableFuture<Void>> imagePresentationRequests = new ArrayList<>();
+
+    /**
+     * Waits for presentation of the next frame captured by this panel. Call on
+     * the render thread AFTER successfully rendering the desired scene. This
+     * does not render, wait for asset streaming, or inspect pixel brightness.
+     * Hidden panels wait until visible; callers must cancel abandoned requests.
+     * Completion runs on the presenting thread (EDT for repaint mode), so UI
+     * consumers should dispatch to EDT. Cleanup cancels outstanding requests.
+     * No GPU fence or polling is added when nobody requests notification.
+     * <pre>{@code
+     * // 第一步：在渲染线程完成新场景的一帧渲染。
+     * renderManager.render(tpf, true);
+     * // 第二步：等待面板呈现该帧后，在 EDT 关闭加载提示。
+     * CompletableFuture<Void> shown = panel.awaitFramePresentation();
+     * shown.thenRun(() -> EventQueue.invokeLater(loadingDialog::dispose));
+     * // 第三步：切换场景或关闭编辑器时取消旧请求，不影响正常绘制。
+     * // shown.cancel(false);
+     * }</pre>
+     *
+     * @return a cancellable notification, not a guarantee of monitor scanout
+     */
+    public CompletableFuture<Void> awaitFramePresentation() {
+        CompletableFuture<Void> request = new CompletableFuture<>();
+        synchronized (lock) {
+            presentationRequests.add(request);
+        }
+        request.whenComplete((ignored, failure) -> {
+            synchronized (lock) {
+                presentationRequests.remove(request);
+                imagePresentationRequests.remove(request);
+            }
+        });
+        repaintRequest.set(true);
+        return request;
+    }
+
+    private List<CompletableFuture<Void>> takePresentationRequests(boolean capturedImage) {
+        synchronized (lock) {
+            List<CompletableFuture<Void>> source = capturedImage
+                    ? imagePresentationRequests : presentationRequests;
+            if (source.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            List<CompletableFuture<Void>> requests = new ArrayList<>(source);
+            source.clear();
+            return requests;
+        }
+    }
+
+    private void completePresentation(List<CompletableFuture<Void>> requests) {
+        for (CompletableFuture<Void> request : requests) {
+            request.complete(null);
+        }
+    }
 
     public AwtPanel(PaintMode paintMode) {
         this(paintMode, false);
@@ -252,12 +310,17 @@ public class AwtPanel extends Canvas implements SceneProcessor {
     @Override
     public void paint(Graphics g) {
         Graphics2D g2d = (Graphics2D) g;
+        List<CompletableFuture<Void>> presented = java.util.Collections.emptyList();
         synchronized (lock) {
             if (img != null) {
                 g2d.drawImage(img, 0, getHeight(), getWidth(), 0,
                         0, 0, img.getWidth(), img.getHeight(), null);
+                if (isShowing() && getWidth() > 0 && getHeight() > 0) {
+                    presented = takePresentationRequests(true);
+                }
             }
         }
+        completePresentation(presented);
     }
 
     public boolean checkVisibilityState() {
@@ -286,6 +349,9 @@ public class AwtPanel extends Canvas implements SceneProcessor {
             // All operations on img must be synchronized
             // as it is accessed from EDT.
             Screenshots.convertScreenShot2(intBuf, img);
+            // An older EDT paint must not acknowledge a newly requested frame.
+            imagePresentationRequests.addAll(presentationRequests);
+            presentationRequests.clear();
             repaint();
         }
     }
@@ -336,6 +402,8 @@ public class AwtPanel extends Canvas implements SceneProcessor {
                 } while (strategy.contentsRestored());
             } while (strategy.contentsLost());
         }
+        completePresentation(takePresentationRequests(false));
+        completePresentation(takePresentationRequests(true));
     }
 
     public boolean isActiveDrawing() {
@@ -486,6 +554,8 @@ public class AwtPanel extends Canvas implements SceneProcessor {
                 return;
             }
             if (presentation != null && presentNative(rm, presentation)) {
+                completePresentation(takePresentationRequests(false));
+                completePresentation(takePresentationRequests(true));
                 return;
             }
 
@@ -545,6 +615,14 @@ public class AwtPanel extends Canvas implements SceneProcessor {
 
     @Override
     public void cleanup() {
+        List<CompletableFuture<Void>> requests = takePresentationRequests(false);
+        List<CompletableFuture<Void>> captured = takePresentationRequests(true);
+        for (CompletableFuture<Void> request : requests) {
+            request.cancel(false);
+        }
+        for (CompletableFuture<Void> request : captured) {
+            request.cancel(false);
+        }
         releaseNativePresentation();
     }
 

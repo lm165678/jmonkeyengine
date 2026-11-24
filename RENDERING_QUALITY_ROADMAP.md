@@ -460,3 +460,45 @@ GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge 
 - [ ] 使用常量天空、强方向天空、旋转环境和实际室内场景，验证漫反射、天空遮挡、分离天光 GI、材质和 Forward/Deferred 一致性；记录 GPU 时间、更新成本和误差后再决定采用方案。
 
 提醒约定：下次继续天光、SkyLight、SH 求值或 GI 优化时，主动提醒本节并说明上述优化步骤。此为接续工作提醒，不是定时通知；待办本身不授权自动实现。
+
+## 待办：预积分皮肤、可分离 SSSS 与多 Pass 动物毛发（2026-11-24）
+
+- [ ] 预积分皮肤（Pre-integrated Skin）：规划皮肤材质与预积分查找表、散射参数和法线细节响应；明确与现有 PBR 光照、阴影及 GI 的组合方式，并提供可运行的人物皮肤示例。
+- [ ] 可分离屏幕空间次表面散射（Separable SSSS）：规划材质散射标记、散射轮廓与横纵两阶段滤波；检查深度/法线边缘、非皮肤隔离、分辨率和时间稳定性，并明确与预积分皮肤的切换及组合规则，避免重复计算散射。
+- [ ] 动物毛发（Multi-pass Fur）：评估多 Pass 壳层及轮廓补片方案、毛长/密度/方向参数、风与骨骼动画、透明度和阴影；设计随距离减少层数的 LOD，验证轮廓、过度绘制和 GPU 成本。
+- [ ] 三项分别明确 Forward/Deferred、FrameGraph 和 .j3md 材质集成、能力回退、默认关闭与恢复方式；补齐中文步骤示例、SDK 编辑入口、保存重载和自动化验证。实施前先盘点已有能力，具体算法与质量档位待开发时确认。
+
+提醒约定：下次继续渲染质量路线、角色/皮肤材质、次表面散射或动物毛发开发时，主动提醒用户这三项待办。当前仅登记计划，不表示已实现，也不授权自动开始开发；这是接续工作提醒，不是定时通知。
+
+### 动物毛发与鸟类羽毛：方案和参考资料
+
+用户补充：范围不止短毛，也包括中长毛和老鹰等鸟类羽毛。下面是待评估的混合方案，不是已实现功能或性能承诺。
+
+| 部位 | 优先评估的表示 | 重点 |
+| --- | --- | --- |
+| 动物短毛、鸟类底层绒毛 | Shells + Fins（多层壳与轮廓补片） | 密度、轮廓、按距离减少壳层 |
+| 狼、狐狸等中长毛 | Hair Cards 毛束卡片，局部结合壳层 | 毛束方向、蓬松轮廓、摆动 |
+| 鸟类身体覆羽 | 弯曲低面数羽毛片，批量提交 | 羽片叠压、方向、花纹 |
+| 老鹰翅膀飞羽与尾羽 | 独立羽片网格，骨骼或参数化弯曲 | 展翼、分叉轮廓、羽片展开 |
+| 特写细毛 | 局部 Strands 真实发丝 | 高画质选项，限制数量与覆盖范围 |
+
+建议先评估“壳层短毛 + 毛束卡片 + 羽片网格”，再决定是否加入局部真实发丝；不要将大羽片强行归入多 Pass 壳层。方案与优先级在正式开发时确认。
+
+参考资料（后续开发时主动提示用户可参考这些链接）：
+
+1. [NVIDIA Shells and Fins](https://developer.download.nvidia.com/SDK/10/direct3d/Source/Fur/doc/FurShellsAndFins.pdf)：参考壳层、轮廓补片和纹理数组组织，作为 Multi-pass Fur 的基础资料。
+2. [UE Groom Scalability and Performance](https://dev.epicgames.com/documentation/unreal-engine/groom-scalability-and-performance-with-unreal-engine)：参考 Strands / Cards / Meshes 的表示切换和平台、距离分级，而非只减少同一种几何的数量。
+3. [AMD TressFX](https://gpuopen.com/tressfx/) 与 [TressFX 5](https://gpuopen.com/learn/tressfx5/)：参考 GPU 毛发模拟、引导发丝和渲染组织；评估长毛用途及全身覆盖成本。移植前核对版本、许可证和后端依赖。
+4. [DreamWorks Hummingbird](https://research.dreamworks.com/wp-content/uploads/2019/10/talk_hummingbird_abstract.pdf)：参考身体羽毛的方向、尺寸、抬起程度等铺设参数，以及翅膀/尾羽建模与动画组织。属于电影制作资料，不能直接推断实时性能。
+5. [A Procedural, Multiscale and Real-time Feather Appearance Model](https://chenxiang0810.github.io/procedural_feather/paper/Sig26_Feather_Compressed.pdf)：研究羽毛多尺度外观、远处整体光泽与近处细部的表现；作为进阶参考，先核查实现可用性及论文测试条件，不把论文帧率当成本引擎性能。
+
+开发评估与验收：
+
+- [ ] 按屏幕占比联合调整壳层数、毛束数量、羽片细分和阴影 LOD，并检查切换连续性。
+- [ ] 采用批量绘制或实例化减少提交开销；单独测量透明过度绘制，实例化不会消除填充成本。
+- [ ] 身体跟随骨骼，少量引导数据控制毛束，飞羽单独控制展开与弯曲；验证风和动作叠加。
+- [ ] 检查透明边缘、TAA/运动矢量、闪烁和拖影；结合现有 Forward/Deferred 与抗锯齿路径验证。
+- [ ] 使用简化阴影表示和阴影 LOD，评估多光源时的放大成本。
+- [ ] 以老鹰作为候选验收资产，覆盖绒毛、覆羽、展翼飞羽、远近 LOD 与运动稳定性；另用中长毛动物检查毛束表现。记录 GPU/CPU 帧时间、显存、提交量与屏幕覆盖率，不只报告 FPS。
+
+提醒触发扩展：下次继续动物毛发、鸟类/老鹰羽毛、Groom、毛发动画、相关材质或渲染质量计划时，主动回顾本节混合方案和五组资料。当前仅补充参考计划，不自动实施，不设置定时通知。

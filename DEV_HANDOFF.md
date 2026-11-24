@@ -1,3 +1,19 @@
+## 2026-11-24 fur and feather implementation references
+
+- Expanded the animal-fur backlog to medium/long fur and eagle feathers. RENDERING_QUALITY_ROADMAP.md now records a candidate shells/fins + hair cards + feather meshes approach, optional local strands, LOD/batching/animation/temporal/shadow validation and an eagle acceptance asset.
+- Saved NVIDIA Shells and Fins, UE Groom scalability, AMD TressFX (including the TressFX 5 link), DreamWorks Hummingbird and the multiscale real-time feather appearance paper. On resuming fur/feather/Groom or related rendering planning, proactively remind the user of these references and distinguish offline production references from real-time performance evidence.
+- Documentation only, no implementation/build/tests or scheduled notification. Compatible implementation revisions remain unchanged; unrelated working-tree edits preserved.
+## 2026-11-24 skin, SSSS and multi-pass fur backlog
+
+- User requested three rendering development reminders: pre-integrated skin, separable screen-space subsurface scattering (SSSS), and multi-pass animal fur. Added independent unchecked items and integration/validation scope to RENDERING_QUALITY_ROADMAP.md.
+- On resuming rendering-quality planning, character/skin materials, subsurface scattering or animal fur, proactively remind the user of these items. This is a contextual continuation reminder, not a scheduled notification or authorization to implement.
+- Documentation only; no implementation, builds or tests. Existing implementation revision pairing is unchanged. Preserve concurrent engine and handoff changes.
+## 2026-11-24 scene opening waits for first presentation
+
+- Opening progress previously finished after scene attachment, before cold shader compilation, uploads and rendering. SceneApplication now arms the owning request after scene-listener setup and waits for a successful frame plus AwtPanel presentation. Superseded/closed scenes, attachment or render failures and application shutdown release/cancel the old operation. An old image repaint cannot acknowledge a newly requested frame. Valid black/empty scenes complete normally; this does not wait for all GI/Lightmap streaming or guarantee monitor scanout. Legacy direct Canvas falls back to successful render completion.
+- Paired source changes: SDK SceneApplication/SceneOpenPresentation/AssetOpenProgress and engine jme3-desktop AwtPanel.awaitFramePresentation. Rebuild/export the paired engine when the user builds SDK; do not mix the new SDK classes with an older desktop JAR. No SDK build/export/install/launch or user-asset writes were performed. Existing unrelated working-tree changes remain.
+- Verified isolated JDK25 SDK compilation and Java11 desktop compilation. Native RTX5060Ti/OpenGL3.2 standalone test passed Accelerated/Repaint/OnRequest presentation, valid black frames, attachment-only waiting, cancellation/cleanup and replacement progress ownership. Existing AssetOpenProgressSmoke passed duplicate click, real modeless Swing dialog, retry and cleanup. Run SDK tools/verify-scene-presentation.ps1 -JdkHome <JDK25>. Actual cold large-scene switching in full SDK and native HDR presentation remain unverified; the native HDR success hook uses the existing presenter contract. This fixes progress lifetime, not cold rendering cost.
+
 ## 2026-11-24 Sponza Lightmap diagnostic and padded fine-brick repair
 
 - User owns SDK builds. Do not export/build/package/install/launch SDK unless explicitly asked; isolated engine compilation and diagnostics are allowed. No SDK build, deployment, original asset writes or remote push in this investigation.
@@ -872,6 +888,7 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 ## 2026-11-24 Translucent Lightmap and Probe GI follow-up
 
 - On resuming Lightmap, Probe GI or translucent rendering optimization, remind the user of the roadmap checklist for translucent receivers and bake contributors. Check forward/deferred transparency, layered alpha, Lightmap coverage and streaming fallback before deciding if a fix is needed. Pending validation only.
+
 ## 2026-11-24 ongoing Lightmap mobility / TAA investigation
 - This thread changed Spatial.setMobility to notify RENDERING only when authored policy changes, and Geometry.usesResidentProbeLightmap to reject nonstatic resolved mobility immediately. SceneChangeListenerTest covers parent inheritance, explicit Static child, restoration and no redundant notification. Gradle test passed. No SDK build/deployment or commit.
 - Concurrent thread owns GiLinearMoments repacking/ProbeSampling changes. Reverted this thread's temporary GiPagePool width expansion to avoid conflict. Combined GiLinearMomentsTest/GiPagePoolTest/SceneChangeListenerTest passed (build/probe-diagnostics/combined.log). Actual TestScene2 first fine brick moments1024x96 passes mock-renderer offer/upload/publication after repack (fine.log); this does not establish full SDK residency.
