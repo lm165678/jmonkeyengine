@@ -2,6 +2,10 @@
 
 ## Cross-machine handoff
 
+- SDK build ownership: the user builds the SDK. Do not export, build, package,
+  install or launch the SDK unless explicitly requested. Engine compilation and
+  isolated correctness/visual diagnostics are allowed; they are not SDK builds.
+
 - Startup reading order, including after switching machines: this file ->
   `DEV_HANDOFF.md` -> `RENDERING_QUALITY_ROADMAP.md`. The roadmap contains
   pending rendering and large-world surface-card streaming/performance work.

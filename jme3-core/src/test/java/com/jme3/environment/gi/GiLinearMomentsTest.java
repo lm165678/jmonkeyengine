@@ -8,6 +8,41 @@ import static org.junit.Assert.*;
 
 public class GiLinearMomentsTest {
     @Test
+    public void pageWidthSourceBricksStillFitAfterAddingGutters() {
+        float[][] sh = new float[512][27];
+        float[][] distances = new float[512][16 * 16 * 2];
+        for (int p = 0; p < 512; p++) {
+            for (int i = 0; i < 16 * 16; i++) {
+                distances[p][i * 2] = p + 1;
+                distances[p][i * 2 + 1] = (p + 1f) * (p + 1f);
+            }
+        }
+        GiProbeData source = new GiProbeData(new GiProbeGrid(Vector3f.ZERO, Vector3f.UNIT_XYZ, 8, 8, 8),
+                16, sh, distances);
+        GiProbeData brick = source.resample(0, 0, 0, 7, 7, 7, 7, 7, 7, 16);
+        int width = GiLinearMoments.width(brick);
+        int height = GiLinearMoments.height(brick);
+        ByteBuffer padded = BufferUtils.createByteBuffer(width * height * 16);
+        try {
+            assertEquals(1024, brick.moments().getImage().getWidth());
+            assertEquals(1008, width);
+            assertEquals(126, height);
+            for (int y = 0; y < height; y++) {
+                GiLinearMoments.copyRow(brick, y, padded, width, y);
+            }
+            int probe = 342;
+            int x = probe % 56 * 18 + 1;
+            int y = probe / 56 * 18 + 1;
+            assertEquals(439f, padded.getFloat((y * width + x) * 16), 0f);
+            assertEquals(0L, padded.getLong((height * width - 1) * 16));
+        } finally {
+            brick.dispose();
+            source.dispose();
+            BufferUtils.destroyDirectBuffer(padded);
+        }
+    }
+
+    @Test
     public void guttersMirrorEdgesWithoutBorrowingAnotherProbe() {
         float[][] sh = new float[8][27];
         float[][] distances = new float[8][8];

@@ -136,7 +136,9 @@ float giVisibilityTap(float probe, vec2 pixel, vec3 direction, vec3 normal,
 float giSingleVisibility(float probe, vec3 direction, float distanceToProbe,
         vec4 atlasInfo, vec4 dimensions) {
     float size = floor(atlasInfo.w);
-    vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x)) * (size + 2.0);
+    // Moment gutters can require fewer columns than the unchanged SH records.
+    float columns = min(atlasInfo.x, floor(min(dimensions.z, 1024.0) / (size + 2.0)));
+    vec2 tile = vec2(mod(probe, columns), floor(probe / columns)) * (size + 2.0);
     vec2 uv = tile + 1.0 + (giOctEncode(direction) * 0.5 + 0.5) * size;
     uv.y += atlasInfo.z;
     vec3 moments = texture2D(m_GiMoments, uv / dimensions.zw).rgb;
