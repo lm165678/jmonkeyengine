@@ -130,27 +130,18 @@ float giVisibilityTap(float probe, vec2 pixel, vec3 direction, vec3 normal,
     return giVisibilityFromVariance(moments, max(0.0, tapDistance - tolerance));
 }
 
-// Filter E[d] and E[d^2] in the central direction before evaluating the
-// one-sided Chebyshev bound. Reconstruct each tap's second moment from the
-// stable mean/variance pair to support both historical distance encodings.
+// Single hardware bilinear lookup of E[d], E[d^2] and independent variance.
+// Runtime atlases add a mirrored one-texel gutter around each octahedral tile.
+// The baked source remains unchanged; the four-probability path keeps its layout.
 float giSingleVisibility(float probe, vec3 direction, float distanceToProbe,
         vec4 atlasInfo, vec4 dimensions) {
     float size = floor(atlasInfo.w);
-    vec2 p = (giOctEncode(direction) * 0.5 + 0.5) * size - 0.5;
-    vec2 base = floor(p);
-    vec2 f = fract(p);
-    vec2 lower = giMomentTexel(probe, base, atlasInfo, dimensions);
-    vec2 right = giMomentTexel(probe, base + vec2(1.0, 0.0), atlasInfo, dimensions);
-    vec2 top = giMomentTexel(probe, base + vec2(0.0, 1.0), atlasInfo, dimensions);
-    vec2 upper = giMomentTexel(probe, base + 1.0, atlasInfo, dimensions);
-    // The variance of a mixture includes the variance of its component means.
-    // Centering before the sum avoids subtracting two large second moments.
-    float mean = mix(mix(lower.x, right.x, f.x), mix(top.x, upper.x, f.x), f.y);
-    vec4 delta = vec4(lower.x, right.x, top.x, upper.x) - mean;
-    vec4 variances = vec4(lower.y, right.y, top.y, upper.y) + delta * delta;
-    float variance = mix(mix(variances.x, variances.y, f.x),
-            mix(variances.z, variances.w, f.x), f.y);
-    return giVisibilityFromVariance(vec2(mean, variance), distanceToProbe);
+    vec2 tile = vec2(mod(probe, atlasInfo.x), floor(probe / atlasInfo.x)) * (size + 2.0);
+    vec2 uv = tile + 1.0 + (giOctEncode(direction) * 0.5 + 0.5) * size;
+    uv.y += atlasInfo.z;
+    vec3 moments = texture2D(m_GiMoments, uv / dimensions.zw).rgb;
+    float variance = max(moments.z, max(0.0, moments.y - moments.x * moments.x));
+    return giVisibilityFromVariance(vec2(moments.x, variance), distanceToProbe);
 }
 // Blending depth moments would let a blocked foreground tap borrow
 // background depth and introduce variance at silhouettes.

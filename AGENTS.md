@@ -23,6 +23,9 @@
   per-platform binaries ahead of time, bundle the supported OS and architecture
   variants and licenses, and select the bundled library at runtime. Verify
   completeness at release packaging and record target-specific test coverage.
+- User policy (2026-11-24): commit the bridge sources, supported precompiled
+  DLL/SO/dylib variants, licenses and pinned checksums to the fork together.
+  CI artifacts and ignored build directories alone are insufficient delivery.
 
 ## Source documentation
 

@@ -36,6 +36,9 @@ import java.util.List;
  * sky visibility rasterization, UV chart gutters, runtime format switching and
  * regional unloading. No input controls.
  * Run {@code gradlew :jme3-examples:probeLightmapSmoke}. Requires OpenGL 4.3.
+ * WorldSettings prefers octahedral irradiance and one hardware bilinear moment
+ * lookup for new scenes. Disable setSingleProbeVisibility to restore the old
+ * probability-filtered path; source bakes and saved false choices remain valid.
  * <pre>
  * 第一步：用 GiSceneBaker 烘焙总漫反射，启用八面体和单次切比雪夫选项。
  * 第二步：用重叠 Volume 和带留边的 UV2 烘焙双层图集，检查两个纹理层的扩边。

@@ -11,6 +11,24 @@ import static org.junit.Assert.*;
 /** Scene persistence must not replace the independent probe residency policy. */
 public class HalfResolutionProbeGiTest {
     @Test
+    public void newSamplingDefaultsAndHistoricalFalseRoundTrip() throws Exception {
+        Node scene = new Node("world");
+        WorldSettings world = new WorldSettings();
+        assertTrue(world.isSingleProbeVisibility());
+        assertTrue(world.isOctahedralProbeIrradiance());
+        scene.addControl(world);
+        WorldSettings loaded = roundTrip(scene).getControl(WorldSettings.class);
+        assertTrue(loaded.isSingleProbeVisibility());
+        assertTrue(loaded.isOctahedralProbeIrradiance());
+        // False fields are omitted using the historical serialization default.
+        world.setSingleProbeVisibility(false);
+        world.setOctahedralProbeIrradiance(false);
+        loaded = roundTrip(scene).getControl(WorldSettings.class);
+        assertFalse(loaded.isSingleProbeVisibility());
+        assertFalse(loaded.isOctahedralProbeIrradiance());
+    }
+
+    @Test
     public void roundTripAndRestorationPreserveStreamingPolicy() throws Exception {
         Node scene = new Node("world");
         WorldSettings world = new WorldSettings();

@@ -94,7 +94,8 @@ public final class GiProbeStreamer implements AutoCloseable {
     }
 
     /**
-     * Selects filtered moments with one Chebyshev evaluation per probe.
+     * Selects one hardware bilinear moment lookup and one Chebyshev evaluation
+     * per probe. Switching rebuilds padded GPU pages, retaining source bakes.
      * Call on the render thread before updating or binding the streamer.
      * @see com.jme3.post.WorldSettings#setSingleProbeVisibility(boolean)
      * @param enabled whether to use a single evaluation
@@ -159,6 +160,7 @@ public final class GiProbeStreamer implements AutoCloseable {
         int brick;
         int probes;
         Vector3f dataOffset;
+        ResidentBrick preview;
 
         public Chunk(String id, double x, double y, double z, Vector3f coverage,
                 long maximumTextureBytes, Callable<GiProbeData> loader) {
@@ -220,6 +222,71 @@ public final class GiProbeStreamer implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    /** A borrowed fine payload and its selection bounds, excluding sampling halos. */
+    public static final class ResidentBrick {
+        private final GiProbeData data;
+        private final Vector3f origin;
+        private final Vector3f extent;
+
+        private ResidentBrick(Chunk chunk, GiProbeData data) {
+            this.data = data;
+            origin = new Vector3f((float) (chunk.x - chunk.parent.x),
+                    (float) (chunk.y - chunk.parent.y), (float) (chunk.z - chunk.parent.z));
+            origin.addLocal(chunk.parent.bricks.getCoarseData().getGrid().getOrigin());
+            extent = chunk.size.clone();
+        }
+
+        /** Borrowed CPU data; valid only until the next streamer mutation. */
+        public GiProbeData getData() {
+            return data;
+        }
+
+        /** Returns a copy in bake-local world units, without the volume translation. */
+        public Vector3f getOrigin() {
+            return origin.clone();
+        }
+
+        /** Returns a copy of the brick selection extent, without sampling halos. */
+        public Vector3f getExtent() {
+            return extent.clone();
+        }
+    }
+
+    /**
+     * Returns fine bricks currently published to the GPU for a registered volume.
+     * Loading, upload-pending and evicted bricks are omitted. This diagnostic query
+     * performs no I/O and does not change residency or lighting. Call only on the
+     * render thread; do not retain or dispose the payloads across update/close.
+     * <pre>{@code
+     * // 第一步：完成 streamer.update 后，在同一渲染线程查询。
+     * for (GiProbeStreamer.ResidentBrick brick : streamer.getResidentFineBricks(id)) {
+     *     // 第二步：按不含 halo 的范围绘制辅助点，避免重复显示相邻块。
+     *     GiProbeGrid grid = brick.getData().getGrid();
+     *     Vector3f origin = brick.getOrigin();
+     * }
+     * // 第三步：下帧重新查询；未驻留区域可显示粗层或未加载网格。
+     * }</pre>
+     * @param id ID passed to registerVolume
+     * @return read-only snapshot; empty for unknown IDs or non-streamed volumes
+     */
+    public List<ResidentBrick> getResidentFineBricks(String id) {
+        List<Chunk> children = brickGroups.get(id);
+        if (children == null || pages == null) {
+            return Collections.emptyList();
+        }
+        List<ResidentBrick> result = new ArrayList<>();
+        for (Chunk child : children) {
+            GiProbeData data = resident.get(child);
+            if (data != null && pages.isPublished(child.id)) {
+                if (child.preview == null || child.preview.data != data) {
+                    child.preview = new ResidentBrick(child, data);
+                }
+                result.add(child.preview);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
     private final Map<String, Throwable> failures = new LinkedHashMap<>();
     private final Map<Material, GiProbeSet.Binding> materials = new IdentityHashMap<>();

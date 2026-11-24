@@ -223,8 +223,8 @@ public final class SceneServicesState extends AbstractAppState {
             gi.setUnloadMultiplier(1.3);
         }
         gi.setFineStreaming(settings.getPreloadDistance(), settings.getMaxFineProbes());
-        gi.setSingleProbeVisibility(world != null && world.isSingleProbeVisibility());
-        gi.setOctahedralProbeIrradiance(world != null && world.isOctahedralProbeIrradiance());
+        gi.setSingleProbeVisibility(world == null ? WorldSettings.DEFAULT_SINGLE_PROBE_VISIBILITY : world.isSingleProbeVisibility());
+        gi.setOctahedralProbeIrradiance(world == null ? WorldSettings.DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE : world.isOctahedralProbeIrradiance());
         Iterator<Map.Entry<GiProbeVolume, Source>> iterator = sources.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<GiProbeVolume, Source> entry = iterator.next();

@@ -143,6 +143,22 @@ public final class GiProbeStreamingData implements Savable {
         return coarse;
     }
 
+    /**
+     * Returns the original fine grid in bake-local world units, without I/O.
+     * Counts are those of the completed bake, even if the editor settings changed.
+     * <pre>{@code
+     * // 第一步：取得已发布的流式烘焙目录。
+     * GiProbeStreamingData baked = volume.getStreamingData();
+     * // 第二步：仅查看细层布局，不加载或更改探针数据。
+     * GiProbeGrid grid = baked.getFineGrid();
+     * }</pre>
+     * @return immutable fine-grid descriptor
+     */
+    public GiProbeGrid getFineGrid() {
+        return new GiProbeGrid(coarse.getGrid().getOrigin(), fineSpacing,
+                (int) fineCounts.x, (int) fineCounts.y, (int) fineCounts.z);
+    }
+
     int size() {
         return brickBytes.length;
     }

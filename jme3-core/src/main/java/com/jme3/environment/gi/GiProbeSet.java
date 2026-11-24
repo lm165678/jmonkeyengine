@@ -138,19 +138,21 @@ public final class GiProbeSet implements AutoCloseable {
             Image a = entry.data.selectedIrradiance(octahedral);
             Image b = entry.data.moments().getImage();
             shWidth = Math.max(shWidth, a.getWidth());
-            visWidth = Math.max(visWidth, b.getWidth());
+            visWidth = Math.max(visWidth, singleVisibility ? GiLinearMoments.width(entry.data) : b.getWidth());
             shHeight = Math.addExact(shHeight, a.getHeight());
-            visHeight = Math.addExact(visHeight, b.getHeight());
+            visHeight = Math.addExact(visHeight, singleVisibility ? GiLinearMoments.height(entry.data) : b.getHeight());
             compact &= a.getFormat() == Image.Format.RGBA16F && b.getFormat() == Image.Format.RGBA16F;
         }
-        long bytes = (2L * shWidth * shHeight + (long) visWidth * visHeight) * (compact ? 8 : 16) + count * 64L;
+        boolean compactMoments = compact && !singleVisibility;
+        long bytes = 2L * shWidth * shHeight * (compact ? 8 : 16)
+                + (long) visWidth * visHeight * (compactMoments ? 8 : 16) + count * 64L;
         if (maxTextureSize < 4 || shWidth > maxTextureSize || shHeight > maxTextureSize
                 || visWidth > maxTextureSize || visHeight > maxTextureSize || bytes > maxBytes || bytes > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Resident GI atlas exceeds texture size or byte budget");
         }
         ByteBuffer shBytes = BufferUtils.createByteBuffer(shWidth * shHeight * (compact ? 8 : 16));
         ByteBuffer skyBytes = BufferUtils.createByteBuffer(shBytes.capacity());
-        ByteBuffer visBytes = BufferUtils.createByteBuffer(visWidth * visHeight * (compact ? 8 : 16));
+        ByteBuffer visBytes = BufferUtils.createByteBuffer(visWidth * visHeight * (compactMoments ? 8 : 16));
         ByteBuffer descriptors = BufferUtils.createByteBuffer(count * 64);
         int shRow = 0;
         int visRow = 0;
@@ -177,13 +179,23 @@ public final class GiProbeSet implements AutoCloseable {
                 copy(data.skyVisibility().getImage(), skyBytes, shWidth, shRow, compact,
                         oct ? GiProbeData.OCT_RECORD_ROWS : 1);
             }
-            copy(data.moments().getImage(), visBytes, visWidth, visRow, compact);
+            if (singleVisibility) {
+                for (int row = 0; row < GiLinearMoments.height(data); row++) {
+                    GiLinearMoments.copyRow(data, row, visBytes, visWidth, visRow + row);
+                }
+            } else {
+                copy(data.moments().getImage(), visBytes, visWidth, visRow, compactMoments);
+            }
             shRow += irradiance.getHeight();
-            visRow += data.moments().getImage().getHeight();
+            visRow += singleVisibility ? GiLinearMoments.height(data) : data.moments().getImage().getHeight();
         }
         sh = GiProbeData.texture(shWidth, shHeight, shBytes, compact);
         skyVisibility = GiProbeData.texture(shWidth, shHeight, skyBytes, compact);
-        moments = GiProbeData.texture(visWidth, visHeight, visBytes, compact);
+        moments = GiProbeData.texture(visWidth, visHeight, visBytes, compactMoments);
+        if (singleVisibility) {
+            moments.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+            moments.setMagFilter(Texture.MagFilter.Bilinear);
+        }
         metadata = GiProbeData.texture(4, count, descriptors, false);
     }
 

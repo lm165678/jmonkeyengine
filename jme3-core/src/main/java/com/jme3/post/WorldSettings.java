@@ -51,12 +51,17 @@ public final class WorldSettings extends AbstractControl {
     private DisplayOutput displayOutput = DisplayOutput.Hdr;
     private float[] gpuLodThresholds = new float[0];
     private GiStreaming giStreaming = GiStreaming.DEFAULTS;
-    private boolean singleProbeVisibility;
-    private boolean octahedralProbeIrradiance;
+    /** New scenes prefer one hardware-filtered moment lookup per probe. */
+    public static final boolean DEFAULT_SINGLE_PROBE_VISIBILITY = true;
+    /** New scenes prefer baked octahedral irradiance, with SH-only fallback. */
+    public static final boolean DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE = true;
+    private boolean singleProbeVisibility = DEFAULT_SINGLE_PROBE_VISIBILITY;
+    private boolean octahedralProbeIrradiance = DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE;
 
     /**
      * Selects the baked octahedral irradiance atlas instead of SH9. The
      * automatic scene service uses one representation per resident chunk.
+     * Enabled for new settings. Historical serialized choices are preserved.
      * Old SH-only data and chunks that cannot fit fall back to SH. Call on
      * the render thread; changing the format repopulates resident GPU pages.
      * <pre>{@code
@@ -78,18 +83,22 @@ public final class WorldSettings extends AbstractControl {
     }
 
     /**
-     * Selects one Chebyshev evaluation per probe after bilinear moment filtering.
-     * The default preserves probability filtering. Set on the render thread;
-     * the scene service applies it before rendering, including half-resolution GI.
+     * Selects one hardware bilinear moment lookup and one Chebyshev evaluation
+     * per probe. Enabled for new settings; historical serialized choices remain.
+     * Runtime-only float32 tiles add mirrored gutters and preserve independent
+     * variance; no rebake or asset rewrite is needed. Switching rebuilds resident
+     * atlas pages and can temporarily use coarser data during upload. Set on the
+     * render thread; this also applies to half-resolution GI. Filtering moments
+     * differs from filtering probabilities and can change silhouette occlusion.
      * <pre>{@code
      * // 第一步：给场景挂上 WorldSettings 并启用自动场景服务。
      * WorldSettings world = scene.getControl(WorldSettings.class);
      * // 第二步：启用单次评估，复用已有烘焙数据，无需重新烘焙。
      * world.setSingleProbeVisibility(true);
-     * // 第三步：恢复原有逐采样点遮挡评估。
+     * // 第三步：关闭时恢复原有四点概率过滤；宽邻域仍使用原有宽核。
      * world.setSingleProbeVisibility(false);
      * }</pre>
-     * @param enabled whether to filter moments before evaluating visibility
+     * @param enabled whether to use a single hardware-filtered moment lookup
      */
     public void setSingleProbeVisibility(boolean enabled) {
         singleProbeVisibility = enabled;

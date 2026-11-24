@@ -43,12 +43,14 @@ final class GiPagePool implements AutoCloseable {
 
     void setSingleProbeVisibility(boolean enabled) {
         if (singleProbeVisibility != enabled) {
+            // Padding changes the slot shape. Rebuild before publishing any new
+            // descriptors; never reinterpret an old layout with the new filter.
+            retain(Collections.emptySet());
             singleProbeVisibility = enabled;
-            for (Slot slot : slots.values()) {
-                if (slot.published) {
-                    descriptor(slot, true);
-                }
-            }
+            textures[2].setMinFilter(enabled ? com.jme3.texture.Texture.MinFilter.BilinearNoMipMaps
+                    : com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);
+            textures[2].setMagFilter(enabled ? com.jme3.texture.Texture.MagFilter.Bilinear
+                    : com.jme3.texture.Texture.MagFilter.Nearest);
         }
     }
 
@@ -187,6 +189,11 @@ final class GiPagePool implements AutoCloseable {
         return slots.containsKey(id);
     }
 
+    boolean isPublished(String id) {
+        Slot slot = slots.get(id);
+        return slot != null && slot.published;
+    }
+
     boolean offer(String id, GiProbeData data, Vector3f offset, float fade) {
         return offer(id, data, offset, fade, null, null, 0);
     }
@@ -197,7 +204,7 @@ final class GiPagePool implements AutoCloseable {
             return true;
         }
         if (data.irradiance().getImage().getWidth() > width
-                || data.moments().getImage().getWidth() > width) {
+                || (singleProbeVisibility ? GiLinearMoments.width(data) : data.moments().getImage().getWidth()) > width) {
             return false;
         }
         Slot slot = new Slot();
@@ -218,7 +225,8 @@ final class GiPagePool implements AutoCloseable {
             return false;
         }
         slot.shPages = pages(data.irradiance());
-        slot.visPages = pages(data.moments());
+        slot.visPages = singleProbeVisibility ? (GiLinearMoments.height(data) + PAGE_ROWS - 1) / PAGE_ROWS
+                : pages(data.moments());
         slot.shRow = -1;
         if (octahedralIrradiance && data.hasOctahedralIrradiance()) {
             int octPages = (data.selectedIrradiance(true).getHeight() + PAGE_ROWS - 1) / PAGE_ROWS;
@@ -315,7 +323,10 @@ final class GiPagePool implements AutoCloseable {
                         : slot.data.moments().getImage();
                 Image shape = slot.stage == 0 ? slot.data.selectedIrradiance(slot.octahedral)
                         : slot.stage == 1 ? slot.data.irradiance().getImage() : slot.data.moments().getImage();
-                int rowBytes = shape.getWidth() * 16;
+                boolean linearMoments = slot.stage == 2 && singleProbeVisibility;
+                int sourceWidth = linearMoments ? GiLinearMoments.width(slot.data) : shape.getWidth();
+                int sourceHeight = linearMoments ? GiLinearMoments.height(slot.data) : shape.getHeight();
+                int rowBytes = sourceWidth * 16;
                 if (bytes + rowBytes > byteBudget || System.nanoTime() - start >= nanos) {
                     return;
                 }
@@ -323,20 +334,24 @@ final class GiPagePool implements AutoCloseable {
                 int rowStep = slot.stage == 1 && slot.octahedral ? GiProbeData.OCT_RECORD_ROWS : 1;
                 int targetRow = (slot.stage < 2 ? slot.shRow : slot.visRow) + slot.row * rowStep;
                 ByteBuffer cpu = target.getImage().getData(0);
-                for (int x = 0; x < shape.getWidth(); x++) {
-                    for (int c = 0; c < 4; c++) {
-                        float value = source == null ? 0 : GiProbeData.component(source,
-                                (slot.row * shape.getWidth() + x) * 4 + c);
-                        cpu.putFloat(((targetRow * width + x) * 4 + c) * 4, value);
+                if (linearMoments) {
+                    GiLinearMoments.copyRow(slot.data, slot.row, cpu, width, targetRow);
+                } else {
+                    for (int x = 0; x < sourceWidth; x++) {
+                        for (int c = 0; c < 4; c++) {
+                            float value = source == null ? 0 : GiProbeData.component(source,
+                                    (slot.row * sourceWidth + x) * 4 + c);
+                            cpu.putFloat(((targetRow * width + x) * 4 + c) * 4, value);
+                        }
                     }
                 }
                 // CPU mirror is authoritative but is not marked wholly dirty.
                 renderer.modifyTexture(target, target.getImage(), 0, targetRow,
-                        0, targetRow, shape.getWidth(), 1);
+                        0, targetRow, sourceWidth, 1);
                 bytes += rowBytes;
                 uploaded += rowBytes;
                 slot.row++;
-                if (slot.row == shape.getHeight()) {
+                if (slot.row == sourceHeight) {
                     slot.stage++;
                     slot.row = 0;
                 }
