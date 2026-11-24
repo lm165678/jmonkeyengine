@@ -463,7 +463,9 @@ GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge 
 
 ## 待办：预积分皮肤、可分离 SSSS 与多 Pass 动物毛发（2026-11-24）
 
-- [ ] 预积分皮肤（Pre-integrated Skin）：规划皮肤材质与预积分查找表、散射参数和法线细节响应；明确与现有 PBR 光照、阴影及 GI 的组合方式，并提供可运行的人物皮肤示例。
+- [x] 预积分皮肤基础实现（2026-11-25）：新增独立 PreintegratedSkin.j3md/frag、SkinLighting 库、默认线性 LUT 和纯 Java SkinLutGenerator。保持原有 PBR/GI/Lightmap 文件不变；皮肤在 Deferred 视口走 Forward 回退。支持自动/贴图曲率、遮罩、单图最小 LOD、双法线近似和 RGB 三张漫反射法线；高光仍用细节法线。
+- [x] SDK Tools → Textures → Pre-integrated Skin Tools：LUT 与法线预滤波两个 Tab，共用可编辑剖面。提供文献参考与明确标注的浅色/暖色/深色美术预设，不宣称三个人种的测量标准。支持精确截断高斯/快速近似、源像素密度、双/四法线导出、预览缩放/平移/Fit、参数保存重载、配套材质与资产保护。
+- [ ] 皮肤后续验收/扩展：完整 SDK 构建后交互、移动端/GLES、动画与时间抗锯齿专项验收；原生 Deferred 皮肤模型、阴影半影散射、厚度透射和实测吸收/散射数据。当前法线滤波假设局部均匀 UV 密度，不做几何感知的 UV 接缝修复或曲率图烘焙。
 - [ ] 可分离屏幕空间次表面散射（Separable SSSS）：规划材质散射标记、散射轮廓与横纵两阶段滤波；检查深度/法线边缘、非皮肤隔离、分辨率和时间稳定性，并明确与预积分皮肤的切换及组合规则，避免重复计算散射。
 - [ ] 动物毛发（Multi-pass Fur）：评估多 Pass 壳层及轮廓补片方案、毛长/密度/方向参数、风与骨骼动画、透明度和阴影；设计随距离减少层数的 LOD，验证轮廓、过度绘制和 GPU 成本。
 - [ ] 三项分别明确 Forward/Deferred、FrameGraph 和 .j3md 材质集成、能力回退、默认关闭与恢复方式；补齐中文步骤示例、SDK 编辑入口、保存重载和自动化验证。实施前先盘点已有能力，具体算法与质量档位待开发时确认。

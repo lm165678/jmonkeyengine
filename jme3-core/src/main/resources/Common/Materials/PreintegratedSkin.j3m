@@ -1,0 +1,8 @@
+Material Preintegrated Skin : Common/MatDefs/Light/PreintegratedSkin.j3md {
+    MaterialParameters {
+        SkinLut : MinBilinearNoMipMaps MagBilinear WrapEdgeClamp Common/Textures/Skin/ReferenceLut.j3o
+        SkinLutSize : 256 128
+        SkinMaxCurvature : 1.0
+        BaseColor : 0.55 0.25 0.16 1.0
+    }
+}

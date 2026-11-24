@@ -12,6 +12,24 @@ plugins {
 
 ext.mainClassName = 'jme3test.TestChooser'
 
+['preintegratedSkinDemo', 'preintegratedSkinSmoke'].each { taskName ->
+    tasks.register(taskName, JavaExec) {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        dependsOn classes
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'jme3test.light.TestPreintegratedSkin'
+        workingDir rootProject.projectDir
+        if (taskName.endsWith('Smoke')) {
+            args '--verify'
+        }
+        ['Assets', 'Model', 'Albedo', 'Normal', 'NormalType', 'Material', 'MaterialAssets'].each { parameter ->
+            if (project.hasProperty('skin' + parameter)) {
+                systemProperty 'skin.' + parameter[0].toLowerCase() + parameter.substring(1), project.property('skin' + parameter)
+            }
+        }
+    }
+}
+
 tasks.register('automaticLodSmoke', JavaExec) {
     group = 'verification'
     dependsOn classes

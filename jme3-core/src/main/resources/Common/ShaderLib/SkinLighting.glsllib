@@ -1,0 +1,139 @@
+struct SkinInputs {
+    vec3 redNormal;
+    vec3 greenNormal;
+    vec3 blueNormal;
+    float curvature;
+    float strength;
+};
+
+#ifdef SKIN_LUT
+uniform sampler2D m_SkinLut;
+uniform vec2 m_SkinLutSize;
+uniform float m_SkinMaxCurvature;
+uniform float m_SkinWorldToMillimeters;
+uniform float m_SkinScatteringScale;
+uniform float m_SkinStrength;
+uniform float m_SkinNormalMinLod;
+uniform vec3 m_SkinNormalWeights;
+#ifdef SKIN_CURVATURE
+uniform sampler2D m_SkinCurvatureMap;
+#endif
+#ifdef SKIN_MASK
+uniform sampler2D m_SkinMask;
+#endif
+#ifdef SKIN_DIFFUSE_NORMAL
+uniform sampler2D m_SkinDiffuseNormalMap;
+#endif
+#ifdef SKIN_RED_NORMAL
+uniform sampler2D m_SkinRedNormalMap;
+#endif
+#ifdef SKIN_GREEN_NORMAL
+uniform sampler2D m_SkinGreenNormalMap;
+#endif
+#ifdef SKIN_BLUE_NORMAL
+uniform sampler2D m_SkinBlueNormalMap;
+#endif
+
+vec3 skinDecodeNormal(vec3 sampleValue) {
+    vec3 normal = sampleValue * 2.0 - 1.0;
+    normal.y *= NORMAL_TYPE;
+    #ifdef NORMALSCALE
+        normal.xy *= m_NormalScale;
+    #endif
+    return normal * inversesqrt(max(dot(normal, normal), 1e-8));
+}
+
+vec3 skinNormalMix(vec3 smoothNormal, vec3 detailNormal, float weight) {
+    vec3 normal = mix(smoothNormal, detailNormal, clamp(weight, 0.0, 1.0));
+    return normal * inversesqrt(max(dot(normal, normal), 1e-8));
+}
+
+vec2 skinLookupCoordinate(float cosine, float curvature) {
+    float range = m_SkinMaxCurvature > 0.0 ? m_SkinMaxCurvature : 1.0;
+    vec2 uv = vec2(cosine * .5 + .5, sqrt(clamp(curvature / range, 0.0, 1.0)));
+    return (clamp(uv, 0.0, 1.0) * (m_SkinLutSize - 1.0) + .5) / m_SkinLutSize;
+}
+#endif
+
+SkinInputs skinReadInputs(PBRSurface surface) {
+    SkinInputs skin;
+    skin.redNormal = surface.normal;
+    skin.greenNormal = surface.normal;
+    skin.blueNormal = surface.normal;
+    skin.curvature = 0.0;
+    skin.strength = 0.0;
+    #ifdef SKIN_LUT
+        #ifdef SKIN_CURVATURE
+            skin.curvature = texture2D(m_SkinCurvatureMap, newTexCoord).r * m_SkinMaxCurvature;
+        #else
+            skin.curvature = length(fwidth(surface.geometryNormal))
+                    / max(length(fwidth(surface.position)) * m_SkinWorldToMillimeters, 1e-8);
+        #endif
+        skin.curvature *= max(m_SkinScatteringScale, 0.0);
+        skin.strength = clamp(m_SkinStrength, 0.0, 1.0);
+        #ifdef SKIN_MASK
+            skin.strength *= clamp(texture2D(m_SkinMask, newTexCoord).r, 0.0, 1.0);
+        #endif
+        vec3 smoothNormal = surface.geometryNormal;
+        #if !defined(SKIN_RED_NORMAL) || !defined(SKIN_GREEN_NORMAL) || !defined(SKIN_BLUE_NORMAL)
+        if (surface.hasTangents) {
+            #ifdef SKIN_DIFFUSE_NORMAL
+                smoothNormal = normalize(surface.tbnMat * skinDecodeNormal(texture2D(m_SkinDiffuseNormalMap, newTexCoord).rgb));
+            #elif defined(NORMALMAP)
+                // Clamp the minimum LOD rather than add a bias to distant samples.
+                // Derivatives are evaluated once, before the per-light loop.
+                vec2 dx = dFdx(newTexCoord);
+                vec2 dy = dFdy(newTexCoord);
+                vec2 size = vec2(textureSize(m_NormalMap, 0));
+                float footprint = max(dot(dx * size, dx * size), dot(dy * size, dy * size));
+                float lod = .5 * log2(max(footprint, 1e-12));
+                float expansion = exp2(clamp(m_SkinNormalMinLod - lod, 0.0, 20.0));
+                vec3 encoded = textureGrad(m_NormalMap, newTexCoord, dx * expansion, dy * expansion).rgb;
+                smoothNormal = normalize(surface.tbnMat * skinDecodeNormal(encoded));
+            #endif
+        }
+        #endif
+        skin.redNormal = skinNormalMix(smoothNormal, surface.normal, m_SkinNormalWeights.r);
+        skin.greenNormal = skinNormalMix(smoothNormal, surface.normal, m_SkinNormalWeights.g);
+        skin.blueNormal = skinNormalMix(smoothNormal, surface.normal, m_SkinNormalWeights.b);
+        if (surface.hasTangents) {
+            #ifdef SKIN_RED_NORMAL
+                skin.redNormal = normalize(surface.tbnMat * skinDecodeNormal(texture2D(m_SkinRedNormalMap, newTexCoord).rgb));
+            #endif
+            #ifdef SKIN_GREEN_NORMAL
+                skin.greenNormal = normalize(surface.tbnMat * skinDecodeNormal(texture2D(m_SkinGreenNormalMap, newTexCoord).rgb));
+            #endif
+            #ifdef SKIN_BLUE_NORMAL
+                skin.blueNormal = normalize(surface.tbnMat * skinDecodeNormal(texture2D(m_SkinBlueNormalMap, newTexCoord).rgb));
+            #endif
+        }
+    #endif
+    return skin;
+}
+
+void skinAccumulateLight(vec4 data0, vec4 data1, vec4 data2, SkinInputs skin, inout PBRSurface surface) {
+    Light light = PBRLightingUtils_newLight(vec4(data0.rgb, 1.0), data1.xyz,
+            data0.w, data1.w, data2.w, data2.xyz);
+    PBRLightingUtils_computeLightInWorldSpace(surface.position, surface.normal, surface.viewDir, light);
+    vec3 diffuse;
+    vec3 specular;
+    float hdotv;
+    PBRLightingUtils_computeDirectLight(light, surface, diffuse, specular, hdotv);
+    #ifdef SKIN_LUT
+        vec3 response;
+        response.r = texture2D(m_SkinLut, skinLookupCoordinate(dot(skin.redNormal, light.dir.xyz), skin.curvature)).r;
+        response.g = texture2D(m_SkinLut, skinLookupCoordinate(dot(skin.greenNormal, light.dir.xyz), skin.curvature)).g;
+        response.b = texture2D(m_SkinLut, skinLookupCoordinate(dot(skin.blueNormal, light.dir.xyz), skin.curvature)).b;
+        vec3 scattered = response * light.color.rgb * (vec3(1.0) - F_Shlick(hdotv, surface.fZero)) / PI;
+        diffuse = mix(diffuse, scattered, skin.strength);
+    #endif
+    vec3 direct = surface.diffuseColor * diffuse + specular;
+    #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
+        if (light.fallOff == 1.0) {
+            direct *= surface.exposure;
+        } else {
+            surface.brightestNonGlobalLightStrength = max(surface.brightestNonGlobalLightStrength, clamp(light.fallOff, 0.0, 1.0));
+        }
+    #endif
+    surface.directLightContribution += direct * light.fallOff;
+}
