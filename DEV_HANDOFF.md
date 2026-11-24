@@ -927,3 +927,6 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - User accepted the local brightness difference after Godot-inspired seam blending in the reported TestScene2 Forward crop. Adopt the visual improvement at the tested camera; the change does not establish equivalence to live probes or eliminate all artifacts. TAA flicker remains a separate issue.
 - Publication scope: inherited Dynamic disables resident Static Lightmaps; Static draws with a resident map do not mix live probes. PBR material-normal capture, covered subtexel resolve, chart-aware gutters, missing-sample recovery and offline seam blending are included. Existing valid UV2 and probe data can be reused to rebake affected maps.
 - Verified targeted SceneChangeListenerTest, ProbeLightmapChartOwnershipTest and native probeLightmapSmoke, plus actual TestScene2 before/after capture. The SDK remains user-built. No generated diagnostics or unrelated editor work included in this publication.
+
+## 2026-11-24 compatible publication revisions
+- Engine implementation c4b822805d0034b587fd1fcbde30ef1014f65c7d on dev_fix_lightprobe_issue and SDK implementation 1922914c11184d59393bb475c05d8590b69a4f34 on master. Use this pair for the Lightmap, GI display, AWT presentation and related SDK changes. Documentation-only commits may follow these revisions.
