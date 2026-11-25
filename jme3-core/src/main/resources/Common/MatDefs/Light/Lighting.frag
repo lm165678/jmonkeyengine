@@ -228,7 +228,7 @@ void main(){
               gl_FragColor.rgb = AmbientSum * diffuseColor.rgb;
               gl_FragColor.a   = alpha;
 
-    #ifdef GI_PROBES
+    #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
         if (g_IsFirstLightPass) {
             gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
                     * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;
@@ -275,7 +275,7 @@ void main(){
     #endif
 
 
-    #ifdef GI_PROBES
+    #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
         if (g_IsFirstLightPass) {
             gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
                     * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;

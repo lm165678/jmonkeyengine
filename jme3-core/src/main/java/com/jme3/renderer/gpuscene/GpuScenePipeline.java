@@ -1472,6 +1472,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
             if (!supportsGeometry(geometry)) {
                 return;
             }
+            boolean staticGiReceiver = geometry.getMobility() == com.jme3.scene.Mobility.Static;
             boolean writesOcclusion = occluderFilter.test(geometry);
             boolean queriesOcclusion = occlusionQueryFilter.test(geometry);
             Batch found = null;
@@ -1487,6 +1488,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
                         && (representative.getMesh() == geometry.getMesh()
                             || (multiDrawIndirect && meshMerging && MeshDrawPlan.compatible(representative.getMesh(), geometry.getMesh())))
                         && batch.occluder == writesOcclusion
+                        && batch.staticGiReceiver == staticGiReceiver
                         && batch.queryOcclusion == queriesOcclusion
                         && representative.getShadowMode() == geometry.getShadowMode()
                         && sameLights(representative, geometry)) {
@@ -1568,6 +1570,8 @@ public final class GpuScenePipeline implements OpaquePipeline {
 
         final boolean occluder;
         final boolean queryOcclusion;
+        // Mobility selects one diffuse GI policy for the entire indirect draw.
+        final boolean staticGiReceiver;
         final List<Geometry> instances = new ArrayList<>();
         final Map<Geometry, Integer> indices = new IdentityHashMap<>();
         final BitSet dirty = new BitSet();
@@ -1639,6 +1643,7 @@ public final class GpuScenePipeline implements OpaquePipeline {
             this.source = source;
             this.occluder = occluder;
             this.queryOcclusion = queryOcclusion;
+            this.staticGiReceiver = source.getMobility() == com.jme3.scene.Mobility.Static;
         }
 
         void release() {

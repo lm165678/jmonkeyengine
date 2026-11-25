@@ -14,6 +14,7 @@ import com.jme3.math.Vector3f;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.RenderPath;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.Node;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
@@ -212,6 +213,7 @@ public final class TestGiAdaptiveProbes extends SimpleApplication {
                 throw new RuntimeException(error);
             }
             receiver = new Geometry("receiver", new Box(0.8f, 0.1f, 0.8f));
+            receiver.setMobility(Mobility.Dynamic);
             receiver.setLocalTranslation(2, 1.5f, 2);
             rootNode.attachChild(receiver);
         }

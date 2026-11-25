@@ -210,6 +210,24 @@ AutoExposureFilter now offers opt-in SceneHistogram brightness/adaptation semant
 
 参考：[Godot LightmapGI](https://docs.godotengine.org/en/stable/classes/class_lightmapgi.html)、[LightmapProbe](https://docs.godotengine.org/en/stable/classes/class_lightmapprobe.html)。下次继续 GI 烘焙、物体静态／动态分类、Lightmap 或 Probe Volume 优化时主动提醒本节。当前只登记计划，不开始实现。
 
+### 待办：Probe Volume 烘焙直射光和阴影（2026-11-25）
+
+用户原话：
+
+> 先帮我把这个功能加入待办清单里：烘焙light probe volume时，增加一个选项，lightmap是否烘焙阴影和直接光照，如果开启则把阴影也烘焙进去，这样运行时就完全不需要光照和阴影，然后需要考虑一下动态物体进入阴影区域，这个时候动态物体要用什么数据判断是否被遮挡？（因为动态物体已经使用了lightmap，意味着不应该再进行投影了），另外，帮我确认下，如果开启”烘焙阴影和直接光照“，是否应该在lightmap数据加一些判断，因为不要去修改物体的cast and receiver选项（不然烘焙前要设置cast and receiver，烘焙后改为不投影不接受，就很麻烦），应该在某个地方加一些判断，以便运行时可以将物体的cast and receiver动态设置为关闭，但是不会写j3o，你觉得这个标志要写在lightmap数据上好还是？
+>
+> 别改代码，现在只是把这个功能加入待办清单，完整记录我问你的话
+
+待评估方案：
+
+- [ ] 在 Light Probe Volume 的 Lightmap 烘焙设置中增加“烘焙阴影和直接光照”，建议默认关闭，保持旧资产的间接光行为。与现有探针 Capture shadows 分开：新选项将选定静态灯的直射漫反射及静态遮挡写入表面 Lightmap。明确数据存的是辐照度还是最终漫反射，避免重复乘材质颜色或叠加同一盏灯。运行时跳过的范围仅限有效覆盖下已烘焙的贡献。未烘焙灯、动态阴影和视角相关高光分别决定是否保留。
+- [ ] 建议把“资产实际包含哪些光照分量、覆盖哪些灯、版本与烘焙有效性依据”放在独立的 `ProbeLightmapAsset` 元数据中。场景 J3O 保留用户原有 Cast/Receive 设置和 Lightmap 引用。渲染器依据当前接收物、灯光、有效覆盖及驻留状态计算临时策略，将其用于绘制与阴影提交。不要调用 `setShadowMode(Off)` 改写场景对象。区分烘焙时使用的原始设置与运行时跳过规则。
+- [ ] 分开判断投影和接收。某静态物体的表面已经烘焙，仅说明它可以跳过该灯的重复实时接收。只有确认同一灯的动态接收者也有静态遮挡数据，并且剩余实时阴影路径无需该静态投影者时，才跳过对应的静态投影提交。如希望动态物体不再投影，将它作为可选择的运行时策略，并接受失去动态物体对地面、周围物体及自身的实时投影。保留按场景需求开启动态投影的选择。
+- [ ] 明确用户原话中动态物体“使用 Lightmap”的含义。现有 UV2 表面 Lightmap 绑定静态表面，移动物体目前回退到 Probe GI。建议在 Probe Volume 中为选定的静态灯烘焙世界空间可见性，例如逐探针逐灯的 Shadowmask。移动物体按当前位置插值，用得到的可见性调制该灯的直接光。现有间接光 SH 或天空可见性无法直接回答某一盏灯是否被挡住。如果目标是动态物体也跳过实时直接光求值，另评估烘焙带方向的体积直射光。近距离硬阴影或大型跨阴影物体可评估按需采样预烘焙的静态阴影图作为补充。参考 [Unity Shadowmask 和探针遮挡](https://docs.unity3d.com/en-us/engine/6000.5/manual/lighting-overview/lighting-light-sources/components/configuring/lighting-mode/lighting-mode)。
+- [ ] 验收人物进出静态阴影、跨越阴影边界的大物体、多灯叠加及移动灯。验证贴图部分覆盖、卸载、缺失、灯光或场景变更时的回退，避免漏光和重复照明。覆盖 Forward/Deferred、GPU Scene 与阴影提交，并比较场景 J3O 保存重载前后的原始 Cast/Receive 设置。单独量化减少的光照计算和阴影绘制。
+
+下次继续 Light Probe Volume 烘焙、直射 Lightmap 或静态与动态阴影分流时，主动提醒本节。当前为开发待办。
+
 ### 待办：半透明物体的 Lightmap 与 Probe GI 正确性
 
 - [ ] 用半透明玻璃、透明度贴图的混合材质和 Alpha Cutout 网格建立对照。分别检查物体作为接收面时的间接光，以及作为烘焙物体时对探针距离矩、后方遮挡和间接反弹的影响。明确哪些行为由当前材质和渲染路径支持。
@@ -507,3 +525,49 @@ GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge 
 - [ ] 以老鹰作为候选验收资产，覆盖绒毛、覆羽、展翼飞羽、远近 LOD 与运动稳定性；另用中长毛动物检查毛束表现。记录 GPU/CPU 帧时间、显存、提交量与屏幕覆盖率，不只报告 FPS。
 
 提醒触发扩展：下次继续动物毛发、鸟类/老鹰羽毛、Groom、毛发动画、相关材质或渲染质量计划时，主动回顾本节混合方案和五组资料。当前仅补充参考计划，不自动实施，不设置定时通知。
+## 待办：Android ASTC 纹理变体与路径映射（2026-11-25）
+
+- [ ] Android 打包单独生成一套 ASTC 纹理文件，并将纹理和路径映射清单一起放入 Android 资产包。源 J3M/J3O 保留现有纹理 key，桌面沿用已有 DDS。Android 纹理映射器在选择加载器前解析 key，例如将 `Textures/wood.png.dds` 映射到 `Textures/mobile/wood.astc.ktx`。
+- [ ] 打包时收集 J3M 和 J3O 内嵌材质的纹理依赖，兼容原图逻辑 key 和直接 DDS key。同源且导入设置一致的引用可共用一个产物；映射保留纹理用途、色彩空间、翻转和 mip 设置所需的信息。
+- [ ] 按源内容、编码版本与参数校验已有产物。缺失或过期时生成或更新 ASTC，命中时复用。优先从保留的原图编码。只有 DDS 的旧资产需明确记录解码再压缩策略。检查每条映射均能解析到有效产物后再发布 Android 构建输出。
+- [ ] 接入 Android 运行时的 ASTC 容器加载、GPU 能力检测和上传，评估非 ASTC 设备的 ETC2 回退。验收冷打包、重复打包、源图或参数变更、缺失产物修复，以及 J3M 和 J3O 在设备上实际加载 ASTC。
+
+下次继续 Android 打包、跨平台纹理变体或运行时纹理映射时，主动提醒本节。当前状态为开发待办。
+
+## 待办：游戏更新与独立渲染线程（2026-11-25）
+
+用户要求规划游戏更新与渲染分离。本节仅登记计划，不启用多线程模式、不承诺帧率收益。Unity 的脚本主线程并不等于整个引擎单线程：其多线程渲染模式由主线程产生中间图形命令，渲染线程转换并提交底层 API 命令，Graphics Jobs 可进一步使用工作线程；实际模式取决于平台、图形 API 和配置。参考 https://docs.unity3d.com/ja/6000.0/ScriptReference/Rendering.RenderingThreadingMode.html 。
+
+- [ ] 先测 CPU 更新、场景几何更新、剔除/排序、FrameGraph 构建、驱动提交、GPU 和等待时间，再确定分离边界。当前 SimpleApplication.update 在同一个应用循环内执行 AppState/simpleUpdate、场景更新、render 回调、RenderManager.render 和 postRender；已有后台 IO/物理等线程不等于更新与渲染已解耦。GPU Lighting/GI 像素瓶颈不会因拆 CPU 线程直接下降。
+- [ ] 先在下列方案中选择本次边界，保留现有单线程模式和可关闭开关；不默认把完整分离当作第一阶段。若采用方案 B，游戏线程拥有可变场景，渲染线程拥有渲染侧代理/只读快照；游戏更新完成后，在明确帧边界抽取稳定数据，通过有界双/三缓冲或命令队列交接。禁止两个线程并发遍历/修改同一套 Spatial、Mesh、Material、Light 和 Control。避免全场景每帧 deepClone 或用全局大锁把更新、渲染重新串行化。
+- [ ] 明确变换、可见性、材质参数、网格变更、骨骼/蒙皮和 morph、灯光与阴影、相机、GPU Scene/LOD、GI/Lightmap 流送的快照与增量更新协议。共享 Mesh/Material 的后续修改不能污染已提交帧；GPU 资源创建、上传、替换、销毁和渲染侧引用必须有独立生命周期与延迟回收，不能只复制对象引用。
+- [ ] 明确 AppState.update/render/postRender、simpleUpdate/simpleRender、Control.update/render、SceneProcessor、enqueue/Future 和异常回调所属线程；评估 render 回调修改场景、SDK 选中/撤销/场景切换及物理调试等旧用法。为不兼容扩展提供显式限制或单线程回退。SDK Swing 继续归 EDT，不在 EDT 等待持有其所需锁的渲染任务。
+- [ ] 当前 OpenGL 先保持一个拥有上下文的渲染提交线程；这与多个线程并发调用同一 GL 上下文不同。不要求先完成 Vulkan/RHI，但快照/命令边界与后续 RHI、Vulkan 多线程命令录制对齐；不要把当前 OpenGL 拆线程等同于 Vulkan 并行提交能力。
+- [ ] 队列设上限与背压，明确仿真步长、渲染采样/可选插值、最多领先帧数、输入到显示延迟和最小化暂停策略；渲染上一份稳定状态不应无限积压更新。TAA/FSR2 的当前/前一帧矩阵、运动矢量、曝光和历史必须按实际渲染帧编号配套，处理跳帧、相机切换、窗口 resize 和算法重置。
+- [ ] 验收新旧模式下静态/动态物体、骨骼动画、物理、Forward/Deferred/GPU Scene、阴影、GI/Lightmap、后处理、GUI、SDK 多视口及加载/切换/关闭。检测竞态、死锁、资源泄漏和画面一致性，并记录 CPU/GPU 帧时间、吞吐 FPS、P95/P99、等待/队列深度、内存和输入延迟。提供单线程恢复步骤，再决定默认值；不预设多线程一定更快。
+
+### 方案与职责边界：命令执行分离、完整渲染分离及工作任务并行
+
+用户特别要求以后提醒这些方案及其差异。这里按工作职责比较，不按线程名字直接等同：Unity 官方称 Render Thread 的线程，在传统 MultiThreaded 模式中消费主线程通过 GfxDeviceClient 生成的中间图形命令，由 GfxDevice[Platform] 转换为底层 API 命令。这部分职责更接近 UE 的 RHI Thread；这是类比，不表示 Unity 没有渲染线程，也不表示它所有剔除、排序、渲染准备都必然留在主线程。Graphics Jobs 等模式的任务分配另行区分。
+
+| 方案 | 原应用／游戏线程 | 独立线程／任务 | jME 改造范围与收益边界 |
+| --- | --- | --- | --- |
+| A：图形命令执行线程分离，类比 Unity 传统 MultiThreaded 的命令执行边界 | 继续运行游戏更新，以及现有场景更新、剔除、排序、FrameGraph/Pass 组织等高层渲染准备 | 专用线程拥有 OpenGL 上下文，消费稳定的中间命令，转换并执行平台 API、处理资源操作与呈现 | 比完整场景分离范围集中，但需要覆盖 Renderer/后端命令、资源生命周期和同步查询，绝非简单代理所有 GL 调用；可重叠更新/准备与驱动调用，不会自动并行高层渲染准备 |
+| B：游戏更新与完整渲染组织分离，类比 UE Game Thread / Render Thread 职责划分 | 游戏逻辑、可变场景与模拟状态；在明确边界发布渲染数据 | 渲染线程基于独立代理/稳定快照，组织剔除、排序、Pass、FrameGraph 和渲染资源；可暂时直接调用图形 API，后续再拆命令执行线程 | 需要更全面地梳理场景、材质、网格、动画、Control/AppState/SceneProcessor 等所有权和旧 API 兼容，架构改造较大；可重叠更多 CPU 工作，但快照、队列、同步和延迟有成本 |
+| C：渲染准备或命令录制的工作任务并行，类比 Graphics Jobs / 并行渲染任务 | 保留主调度和依赖关系管理，分发可独立任务 | 工作线程对稳定输入并行计算剔除、排序、构建绘制数据或受后端支持的命令录制 | 与 A/B 可以组合，但不是它们的同义词。OpenGL 不允许据此让多个工作线程随意并发调用同一上下文；Vulkan 命令录制需按其对象/同步规则单独设计 |
+
+UE 的 Game Thread、Render Thread、RHI Thread 分别可概括为游戏状态更新、高层渲染组织、底层命令翻译与执行；实际有任务系统和不同配置，不要求任何模式都固定三个独占线程。方案 B 不强制第一版就额外创建 RHI 执行线程，方案 A 也不代表已经完成游戏场景与渲染场景分离。RHI 抽象、RHI 执行线程、渲染组织线程是三个不同概念。
+
+后续评估步骤：
+
+1. 先量出更新、场景更新、剔除/排序、FrameGraph/Pass 构建、状态绑定/驱动提交各项 CPU 时间与 GPU 时间，确认等待位置。若主要是 GPU GI/Lighting，不以拆线程承诺降低 GPU 毫秒数。
+2. 若驱动/提交占比高，先评估 A 的可控原型：命令记录须复制当帧参数与上传数据，不能捕获稍后会改变的对象；明确资源句柄与代次、创建/上传/销毁顺序、读回和能力查询、返回值/Future、错误、关机与 SDK 多上下文。同步查询应采用缓存或明确屏障；不能逐条记录后立即等待，否则难以重叠。
+3. 若游戏更新与高层渲染准备均重，优先评估 B：先明确哪些回调仍能修改游戏场景，哪些只读渲染代理；定义增量快照及其生命周期，再考虑双/三缓冲。禁止用全场景每帧深克隆或全局锁掩盖竞态。
+4. A/B 可分别原型或分阶段组合，也可以根据现有 API 与后端成本选择先后；不能仅因 A 看似范围小就承诺它一定更容易或更快。两者都需要有界队列、背压、输入延迟控制、资源延迟回收、旧单线程回退与前后画质/性能对比。
+5. C 在任务输入、输出和依赖稳定后另行推进。后续 RHI/Vulkan 工作可复用数据/命令边界，但不必等待 Vulkan 才能评估 A/B，也不能把 GL 的单上下文提交方案直接当成 Vulkan 的最终结构。
+
+参考：[Unity MultiThreaded 职责](https://docs.unity3d.com/es/2020.2/ScriptReference/Rendering.RenderingThreadingMode.MultiThreaded.html)、[Unity 各线程模式](https://docs.unity3d.com/ja/6000.0/ScriptReference/Rendering.RenderingThreadingMode.html)、[UE Parallel Rendering Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/parallel-rendering-overview-for-unreal-engine)。后续开发应核对目标版本/平台文档，不把上述职责类比当成固定的跨引擎等价实现。
+
+改造规模评估：只搬走独立业务计算是局部工作；完整兼容场景图与材质 API 的更新/渲染重叠属于较大的架构改造，不能通过把 renderManager.render 放入另一个线程完成。后续可再考虑并行剔除、排序和渲染任务构建，不与第一阶段线程解耦混为一次改动。
+
+提醒约定：下次继续多线程渲染、游戏循环、更新/渲染解耦、enqueue/场景线程安全、RHI 或 Vulkan 时，主动提醒本节并确认实际范围。当前无实现、无性能实测、不设置定时通知。

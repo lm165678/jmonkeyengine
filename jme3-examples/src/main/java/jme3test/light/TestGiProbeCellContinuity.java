@@ -11,6 +11,7 @@ import com.jme3.math.Vector3f;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.RenderPath;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
 import com.jme3.system.JmeContext;
@@ -76,6 +77,7 @@ public final class TestGiProbeCellContinuity extends SimpleApplication {
         data = GiSceneBaker.bake(renderManager, rootNode, volume, settings,
                 view -> { }, () -> false, count -> { });
         receiver = new Geometry("Slanted planar receiver", new Box(3, 0.1f, 3));
+        receiver.setMobility(Mobility.Dynamic);
         receiver.rotate(0, 0, -FastMath.QUARTER_PI);
         receiver.setLocalTranslation(normal.mult(-0.1f));
         rootNode.attachChild(receiver);

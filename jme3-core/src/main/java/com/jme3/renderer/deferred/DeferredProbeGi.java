@@ -8,6 +8,7 @@ import com.jme3.renderer.Renderer;
 import com.jme3.renderer.RendererException;
 import com.jme3.renderer.TextureUnitException;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.shader.Shader;
 import com.jme3.shader.VarType;
 import com.jme3.texture.Texture;
@@ -37,7 +38,7 @@ final class DeferredProbeGi {
                 // Every draw must initialize the payload for the winning surface.
                 return null;
             }
-            if (geometry.usesResidentProbeLightmap()
+            if (geometry.getMobility() == Mobility.Static
                     || !Boolean.TRUE.equals(GBufferPass.parameter(geometry, "GiEnabled"))
                     || !(GBufferPass.parameter(geometry, "GiIrradiance") instanceof Texture)
                     || !(GBufferPass.parameter(geometry, "GiMoments") instanceof Texture)

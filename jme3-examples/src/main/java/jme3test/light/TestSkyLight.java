@@ -6,6 +6,7 @@ import com.jme3.material.Material;
 import com.jme3.math.*;
 import com.jme3.renderer.RenderPath;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.Spatial;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.*;
@@ -93,6 +94,7 @@ public final class TestSkyLight extends SimpleApplication {
         rootNode.attachChild(sky);
         skySpatial = sky;
         target = new Geometry("receiver", new Box(1, 1, 0.1f));
+        target.setMobility(Mobility.Dynamic);
         rootNode.attachChild(target);
         cam.setLocation(new Vector3f(0, 0, 4));
         cam.lookAt(Vector3f.ZERO, Vector3f.UNIT_Y);

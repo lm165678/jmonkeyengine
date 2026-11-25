@@ -80,7 +80,7 @@ void main(){
     prepareDeferredPbrIndirect(surface);
 
     vec3 volumeIrradiance = vec3(0.0);
-    #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
+    #if (defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)) && !defined(DEFERRED_GI_LIGHT)
         volumeIrradiance = giSampleIrradiance(wpos, surface.normal, surface.geometryNormal);
     #endif
     // Calculate env probes
@@ -106,7 +106,7 @@ void main(){
     // Additional passes accumulate only their batch of direct lights.
     if (g_IsFirstLightPass) {
         gl_FragColor.rgb += surface.bakedLightContribution;
-        #ifdef GI_PROBES
+        #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
             gl_FragColor.rgb += shLambertResponse(volumeIrradiance, surface.diffuseColor, surface.ao.r);
         #endif
         gl_FragColor.rgb += surface.envLightContribution;

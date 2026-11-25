@@ -66,7 +66,8 @@ import javax.imageio.ImageIO;
  * SkinWorldToMillimeters, SkinNormalMinLod and SkinDiffuseNormalMap.
  * Defaults are meter units, strength1 and normal minimum LOD3. The LUT remains
  * linear; only inspection PNGs are display-encoded. No colored shadow-penumbra
- * scattering, thickness transmission or SSSS is implemented.
+ * scattering or SSSS is implemented here. Optional thickness transmission has
+ * its own runnable TestSkinTransmission example and is disabled by default.
  */
 public final class TestPreintegratedSkin extends SimpleApplication {
     private static final int WIDTH = 640;

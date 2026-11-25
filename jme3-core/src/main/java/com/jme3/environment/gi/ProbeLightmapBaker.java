@@ -16,10 +16,10 @@ import com.jme3.texture.FrameBuffer;
 import com.jme3.texture.Image;
 import com.jme3.texture.Texture;
 import com.jme3.texture.Texture2D;
-import com.jme3.texture.image.ColorSpace;
 import com.jme3.util.BufferUtils;
 import com.jme3.math.FastMath;
 import java.nio.ByteBuffer;
+import java.util.BitSet;
 import java.util.List;
 
 /**
@@ -38,8 +38,13 @@ import java.util.List;
  * keeps the texel empty.
  * On maps up to 256 pixels per axis, a finer temporary raster can recover
  * missed chart-edge texels. It only fills empty texels from their own island.
- * Finally, paired smooth geometric edges blend irradiance across a narrow
+ * By default, paired smooth geometric edges blend irradiance across a narrow
  * UV2 seam band. Coverage and baked sky remain specific to each island.
+ * The baker stores explicit mip levels while the mesh's UV2 and LOD index
+ * buffers leave enough room for chart-isolated bilinear filtering. Tight
+ * layouts may produce only the base level. The returned texture initially
+ * uses base-level filtering. Always check for a stored mip chain before
+ * changing its filter; ordinary generated mipmaps mix neighboring charts.
  * Leave room between UV charts at the bake resolution. The bake extends the
  * nearest rasterized texel up to two texels into empty space for bilinear
  * filtering. Existing lightmaps need to be baked again to get the border.
@@ -50,6 +55,8 @@ import java.util.List;
  * // 烘焙器会在输出中缝合平滑边；旧 Lightmap 需要重新生成才会生效。
  * Texture2D lightmap = ProbeLightmapBaker.bake(renderManager, assetManager,
  *         geometry, volume.getData(), volume.getWorldTranslation(), 256, 256);
+ * // 可直接检查已烘焙的 mip；旧资产没有 mip，保持原始采样。
+ * boolean hasMipmaps = lightmap.getImage().hasMipmaps();
  * // 第二步：将纹理另存为 GI/Lightmaps 下的独立 J3O 文件。
  * BinaryExporter.getInstance().save(lightmap, lightmapFile);
  * // 第三步：在场景上保存 ProbeLightmapControl 资产引用；移除控制器可恢复探针。
@@ -66,7 +73,7 @@ public final class ProbeLightmapBaker {
         if (data.hasSeparatedSky()) {
             throw new IllegalArgumentException("Separated sky requires a probe field lightmap");
         }
-        return rasterize(manager, assets, geometry, width, height, false,
+        return rasterize(manager, assets, geometry, width, height, false, true,
                 material -> data.bind(material, offset, .05f));
     }
 
@@ -97,14 +104,43 @@ public final class ProbeLightmapBaker {
         return new GiProbeSet(entries, limit, maxBytes, singleVisibility, false);
     }
 
-    /** Bakes diffuse irradiance and independent sky visibility into one two-band texture. */
+    /** Bakes a two-band texture with UV2 seam blending enabled. */
     public static Texture2D bakeField(RenderManager manager, AssetManager assets, Geometry geometry,
             GiProbeSet field, int width, int height) {
-        return rasterize(manager, assets, geometry, width, height, true, material -> field.bind(material, .05f));
+        return bakeField(manager, assets, geometry, field, width, height, true);
+    }
+
+    /**
+     * Bakes diffuse irradiance and independent sky visibility into one two-band texture.
+     * The seam option controls only the final blend between paired UV2 edges. Coverage
+     * resolve and chart-aware gutters still run. Call on the render thread with an open
+     * probe field. To change an existing map, bake again and replace its asset reference.
+     * <pre>{@code
+     * // 第一步：打开探针场，准备 UV2 并确定 Lightmap 尺寸。
+     * // 第二步：传入烘焙选项；默认传 true，关闭时可对照接缝差异。
+     * Texture2D lightmap = ProbeLightmapBaker.bakeField(renderManager, assetManager,
+     *         geometry, field, 512, 512, blendSeams);
+     * // 第三步：保存控制器引用的新贴图；恢复平滑时用 true 再烘焙。
+     * }</pre>
+     *
+     * @param manager the render manager for UV2 capture
+     * @param assets the asset manager that loads the bake material
+     * @param geometry the static lightmap receiver
+     * @param field the open probe field supplying irradiance and sky visibility
+     * @param width lightmap width in texels
+     * @param height height of each band in texels
+     * @param blendSeams whether to blend irradiance along matched smooth UV2 edges
+     * @return the two-band texture, owned by the caller
+     */
+    public static Texture2D bakeField(RenderManager manager, AssetManager assets, Geometry geometry,
+            GiProbeSet field, int width, int height, boolean blendSeams) {
+        return rasterize(manager, assets, geometry, width, height, true, blendSeams,
+                material -> field.bind(material, .05f));
     }
 
     private static Texture2D rasterize(RenderManager manager, AssetManager assets, Geometry geometry,
-            int width, int height, boolean atlas, java.util.function.Function<Material, AutoCloseable> binder) {
+            int width, int height, boolean atlas, boolean blendSeams,
+            java.util.function.Function<Material, AutoCloseable> binder) {
         if (geometry.getMobility() != Mobility.Static || geometry.getMesh().isAnimated()
                 || geometry.getMesh().getMorphTargets().length != 0 || geometry.getMesh().getBuffer(Type.Normal) == null
                 || geometry.getMesh().getBuffer(Type.TexCoord2) == null
@@ -145,18 +181,31 @@ public final class ProbeLightmapBaker {
             }
             boolean[] boundary = width <= 256 && height <= 256
                     && width * 4 <= textureLimit && outputHeight * 4 <= textureLimit ? new boolean[width * height] : null;
-            int[] owners = ProbeLightmapChartOwnership.rasterize(geometry.getMesh(), width, height, GUTTER_RADIUS, boundary);
+            var charts = ProbeLightmapChartOwnership.charts(geometry.getMesh());
+            int[] owners = ProbeLightmapChartOwnership.rasterize(charts, width, height, GUTTER_RADIUS, boundary);
             if (owners != null && boundary != null && markMissing(resolved, boundary)) {
                 recoverMissingSamples(manager, renderer, proxy, target, resolved, width, height, atlas, owners, boundary);
             }
             ByteBuffer half = BufferUtils.createByteBuffer(width * outputHeight * 8);
-            fillLightmapGutters(resolved, half, width, height, atlas, owners);
-            ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
+            BitSet filled = new BitSet();
+            fillLightmapGutters(resolved, half, width, height, atlas, owners, filled);
+            if (blendSeams) {
+                ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
+            }
             half.flip();
-            Texture2D texture = new Texture2D(new Image(Image.Format.RGBA16F, width, outputHeight, half, ColorSpace.Linear));
+            Image lightmap = ProbeLightmapMipChain.build(geometry.getMesh(), charts, half, owners, filled,
+                    width, height, atlas);
+            if (lightmap.hasMipmaps()) {
+                BufferUtils.destroyDirectBuffer(half);
+            }
+            Texture2D texture = new Texture2D(lightmap);
             texture.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
             texture.setMagFilter(Texture.MagFilter.Bilinear);
             texture.setWrap(Texture.WrapMode.EdgeClamp);
+            if (lightmap.hasMipmaps()) {
+                // Chart separation was validated for a bilinear footprint.
+                texture.setAnisotropicFilter(1);
+            }
             return texture;
         } catch (RuntimeException failure) {
             throw failure;
@@ -295,7 +344,7 @@ public final class ProbeLightmapBaker {
     }
 
     private static void fillLightmapGutters(ByteBuffer raster, ByteBuffer half,
-            int width, int height, boolean atlas, int[] owners) {
+            int width, int height, boolean atlas, int[] owners, BitSet filled) {
         int bandPixels = width * height;
         int[] sources = atlas ? new int[bandPixels] : null;
         for (int y = 0; y < height; y++) {
@@ -307,6 +356,9 @@ public final class ProbeLightmapBaker {
                 }
                 if (atlas) {
                     sources[pixel] = source;
+                }
+                if (owners != null && source >= 0) {
+                    filled.set(pixel);
                 }
                 writeTexel(raster, half, source, true);
             }

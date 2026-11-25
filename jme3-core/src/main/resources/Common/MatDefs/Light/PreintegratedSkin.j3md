@@ -24,6 +24,16 @@ MaterialDef Preintegrated Skin {
         Float SkinNormalMinLod : 3.0
         // Fractions of detailed normal in R/G/B diffuse normals; specular stays detailed.
         Vector3 SkinNormalWeights : 0.15 0.5 0.85
+        // Optional thin-surface transmission; disabled variants omit all related work.
+        Boolean SkinTransmission : false
+        // R stores normal thickness / SkinThickness, linear; white means maximum thickness.
+        Texture2D SkinThicknessMap -LINEAR
+        // Millimeters; also the constant thickness when no map is bound.
+        Float SkinThickness : 30.0
+        // Per-channel e-folding distance in millimeters; larger red travels farther.
+        Vector3 SkinAttenuationDistance : 3.0 1.0 0.5
+        Color SkinTransmissionColor : 1.0 1.0 1.0 1.0
+        Float SkinTransmissionStrength : 1.0
         // Internal per-view motion inputs; populated by TemporalAAFilter.
         Boolean TemporalGpuInstances
         Boolean TemporalVelocity
@@ -250,6 +260,8 @@ MaterialDef Preintegrated Skin {
             SKIN_RED_NORMAL : SkinRedNormalMap
             SKIN_GREEN_NORMAL : SkinGreenNormalMap
             SKIN_BLUE_NORMAL : SkinBlueNormalMap
+            SKIN_TRANSMISSION : SkinTransmission
+            SKIN_THICKNESS_MAP : SkinThicknessMap
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance

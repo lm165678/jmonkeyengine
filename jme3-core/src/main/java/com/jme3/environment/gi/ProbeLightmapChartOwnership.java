@@ -3,6 +3,7 @@ package com.jme3.environment.gi;
 import com.jme3.scene.Mesh;
 import com.jme3.scene.VertexBuffer;
 import com.jme3.scene.VertexBuffer.Type;
+import com.jme3.scene.mesh.IndexBuffer;
 import java.nio.FloatBuffer;
 import java.util.Arrays;
 
@@ -11,11 +12,27 @@ final class ProbeLightmapChartOwnership {
     private ProbeLightmapChartOwnership() {
     }
 
+    static final class Charts {
+        final FloatBuffer uv;
+        final IndexBuffer indices;
+        final int[] owners;
+
+        Charts(FloatBuffer uv, IndexBuffer indices, int[] owners) {
+            this.uv = uv;
+            this.indices = indices;
+            this.owners = owners;
+        }
+    }
+
     static int[] rasterize(Mesh mesh, int width, int height, int gutterRadius) {
         return rasterize(mesh, width, height, gutterRadius, null);
     }
 
     static int[] rasterize(Mesh mesh, int width, int height, int gutterRadius, boolean[] boundary) {
+        return rasterize(charts(mesh), width, height, gutterRadius, boundary);
+    }
+
+    static Charts charts(Mesh mesh) {
         VertexBuffer buffer = mesh.getBuffer(Type.TexCoord2);
         if (mesh.getMode() != Mesh.Mode.Triangles || buffer == null
                 || !(buffer.getData() instanceof FloatBuffer) || buffer.getNumComponents() != 2
@@ -24,6 +41,9 @@ final class ProbeLightmapChartOwnership {
         }
         FloatBuffer uv = (FloatBuffer) buffer.getData();
         int vertices = mesh.getVertexCount();
+        if (uv.limit() < vertices * 2) {
+            return null;
+        }
         for (int i = 0; i < vertices * 2; i++) {
             float coordinate = uv.get(i);
             if (!Float.isFinite(coordinate) || coordinate < 0f || coordinate > 1f) {
@@ -36,14 +56,34 @@ final class ProbeLightmapChartOwnership {
             parents[vertex] = vertex;
         }
         var indices = mesh.getIndicesAsList();
+        if (indices.size() % 3 != 0) {
+            return null;
+        }
         for (int i = 0; i + 2 < indices.size(); i += 3) {
-            int a = root(parents, indices.get(i));
-            int b = root(parents, indices.get(i + 1));
-            int c = root(parents, indices.get(i + 2));
+            int a = indices.get(i);
+            int b = indices.get(i + 1);
+            int c = indices.get(i + 2);
+            if (a < 0 || a >= vertices || b < 0 || b >= vertices || c < 0 || c >= vertices) {
+                return null;
+            }
+            a = root(parents, a);
+            b = root(parents, b);
+            c = root(parents, c);
             parents[b] = a;
             parents[c] = a;
         }
+        for (int vertex = 0; vertex < vertices; vertex++) {
+            parents[vertex] = root(parents, vertex);
+        }
+        return new Charts(uv, indices, parents);
+    }
 
+    static int[] rasterize(Charts charts, int width, int height, int gutterRadius, boolean[] boundary) {
+        if (charts == null) {
+            return null;
+        }
+        var indices = charts.indices;
+        var uv = charts.uv;
         int[] owners = new int[width * height];
         Arrays.fill(owners, -1);
         float[] distance = new float[owners.length];
@@ -67,7 +107,7 @@ final class ProbeLightmapChartOwnership {
             int lastX = Math.min(width - 1, (int) Math.ceil(Math.max(ax, Math.max(bx, cx))) + gutterRadius);
             int firstY = Math.max(0, (int) Math.floor(Math.min(ay, Math.min(by, cy))) - gutterRadius);
             int lastY = Math.min(height - 1, (int) Math.ceil(Math.max(ay, Math.max(by, cy))) + gutterRadius);
-            int chart = root(parents, a);
+            int chart = charts.owners[a];
             for (int y = firstY; y <= lastY; y++) {
                 float py = y + .5f;
                 for (int x = firstX; x <= lastX; x++) {

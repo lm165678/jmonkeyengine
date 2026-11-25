@@ -85,6 +85,7 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
         sky = background.getControl(SkyLightControl.class);
         sky.setResolution(16);
         receiver = new Geometry("receiver", new Box(0.3f, 0.3f, 0.02f));
+        receiver.setMobility(Mobility.Dynamic);
         Material initial = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         initial.setColor("Color", ColorRGBA.Black);
         receiver.setMaterial(initial);

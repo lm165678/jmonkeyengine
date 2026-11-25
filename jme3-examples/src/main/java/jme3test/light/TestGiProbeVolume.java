@@ -10,6 +10,7 @@ import com.jme3.material.Material;
 import com.jme3.math.*;
 import com.jme3.renderer.*;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.shape.Box;
 import com.jme3.scene.plugins.sdf.*;
 import com.jme3.system.*;
@@ -130,6 +131,7 @@ public final class TestGiProbeVolume extends SimpleApplication {
                 material.setTexture("NormalMap", normalMap);
             }
             Geometry geometry = new Geometry("GI receiver " + i, mesh);
+            geometry.setMobility(Mobility.Dynamic);
             geometry.setMaterial(material);
             geometry.setLocalTranslation((i - 1) * 2, 0.65f, 0);
             rootNode.attachChild(geometry);

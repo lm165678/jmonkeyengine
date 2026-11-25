@@ -6,6 +6,7 @@ import com.jme3.material.Material;
 import com.jme3.math.*;
 import com.jme3.renderer.*;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.*;
 import com.jme3.texture.Image;
@@ -77,6 +78,7 @@ public final class TestAutomaticSceneServices extends SimpleApplication {
         material.setColor("Ambient", ColorRGBA.Black);
         material.setColor("Specular", ColorRGBA.Black);
         Geometry floor = new Geometry("One receiver crossing both regions", new Box(4, 0.1f, 3));
+        floor.setMobility(Mobility.Dynamic);
         floor.setMaterial(material);
         floor.setLocalTranslation(0, -0.1f, 0);
         rootNode.attachChild(floor);

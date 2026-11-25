@@ -4,13 +4,29 @@ struct SkinInputs {
     vec3 blueNormal;
     float curvature;
     float strength;
+    #ifdef SKIN_TRANSMISSION
+        float thickness;
+    #endif
 };
+
+#ifdef SKIN_TRANSMISSION
+uniform float m_SkinThickness;
+uniform vec3 m_SkinAttenuationDistance;
+uniform vec4 m_SkinTransmissionColor;
+uniform float m_SkinTransmissionStrength;
+#ifdef SKIN_THICKNESS_MAP
+uniform sampler2D m_SkinThicknessMap;
+#endif
+#endif
+
+#if defined(SKIN_LUT) || defined(SKIN_TRANSMISSION)
+uniform float m_SkinWorldToMillimeters;
+#endif
 
 #ifdef SKIN_LUT
 uniform sampler2D m_SkinLut;
 uniform vec2 m_SkinLutSize;
 uniform float m_SkinMaxCurvature;
-uniform float m_SkinWorldToMillimeters;
 uniform float m_SkinScatteringScale;
 uniform float m_SkinStrength;
 uniform float m_SkinNormalMinLod;
@@ -66,8 +82,19 @@ SkinInputs skinReadInputs(PBRSurface surface) {
         #ifdef SKIN_CURVATURE
             skin.curvature = texture2D(m_SkinCurvatureMap, newTexCoord).r * m_SkinMaxCurvature;
         #else
-            skin.curvature = length(fwidth(surface.geometryNormal))
-                    / max(length(fwidth(surface.position)) * m_SkinWorldToMillimeters, 1e-8);
+            // Trace of the normal gradient on the tangent plane. Unlike the
+            // ratio of fwidth lengths, this does not change with triangle or
+            // screen-axis orientation. A baked smooth curvature map remains
+            // preferable for low-poly or noisy vertex-normal meshes.
+            vec3 px = dFdx(surface.position);
+            vec3 py = dFdy(surface.position);
+            vec3 nx = dFdx(surface.geometryNormal);
+            vec3 ny = dFdy(surface.geometryNormal);
+            vec3 tx = cross(py, surface.geometryNormal);
+            vec3 ty = cross(surface.geometryNormal, px);
+            float area = dot(px, tx);
+            skin.curvature = abs(dot(nx, tx) + dot(ny, ty))
+                    / max(2.0 * abs(area) * m_SkinWorldToMillimeters, 1e-8);
         #endif
         skin.curvature *= max(m_SkinScatteringScale, 0.0);
         skin.strength = clamp(m_SkinStrength, 0.0, 1.0);
@@ -108,6 +135,12 @@ SkinInputs skinReadInputs(PBRSurface surface) {
             #endif
         }
     #endif
+    #ifdef SKIN_TRANSMISSION
+        skin.thickness = max(m_SkinThickness, 0.0);
+        #ifdef SKIN_THICKNESS_MAP
+            skin.thickness *= clamp(texture2D(m_SkinThicknessMap, newTexCoord).r, 0.0, 1.0);
+        #endif
+    #endif
     return skin;
 }
 
@@ -137,3 +170,31 @@ void skinAccumulateLight(vec4 data0, vec4 data1, vec4 data2, SkinInputs skin, in
     #endif
     surface.directLightContribution += direct * light.fallOff;
 }
+
+#ifdef SKIN_TRANSMISSION
+// Thin-surface Beer-Lambert approximation. The normal-thickness map is not a
+// direction-dependent volume. Reproject the estimated light entry point into
+// the existing shadow atlas so an external blocker still shadows transmission.
+void skinAccumulateTransmission(vec4 data0, vec4 data1, vec4 data2, float shadowIndex,
+        SkinInputs skin, inout PBRSurface surface) {
+    Light light = PBRLightingUtils_newLight(vec4(data0.rgb, 1.0), data1.xyz,
+            data0.w, data1.w, data2.w, data2.xyz);
+    PBRLightingUtils_computeLightInWorldSpace(surface.position, surface.geometryNormal, surface.viewDir, light);
+    float back = max(-dot(surface.geometryNormal, light.dir.xyz), 0.0);
+    if (back <= 0.0 || m_SkinTransmissionStrength <= 0.0) {
+        return;
+    }
+    float distance = skin.thickness / max(back, 0.2);
+    vec3 attenuation = exp(-distance / max(m_SkinAttenuationDistance, vec3(0.0001)));
+    vec3 entry = surface.position + light.dir.xyz * distance / max(m_SkinWorldToMillimeters, 0.0001);
+    float visibility = managedShadow(shadowIndex, entry, -surface.geometryNormal, g_ShadowReceive);
+    vec3 contribution = surface.diffuseColor * data0.rgb * m_SkinTransmissionColor.rgb
+            * attenuation * (back / PI) * max(m_SkinTransmissionStrength, 0.0);
+    #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
+        if (light.fallOff == 1.0) {
+            contribution *= surface.exposure;
+        }
+    #endif
+    surface.directLightContribution += contribution * light.fallOff * visibility;
+}
+#endif

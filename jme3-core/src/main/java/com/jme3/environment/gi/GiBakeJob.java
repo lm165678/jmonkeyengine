@@ -247,6 +247,7 @@ public final class GiBakeJob implements AutoCloseable {
             FrameBuffer previousBuffer = manager.getRenderer().getCurrentFrameBuffer();
             MatParamOverride enabled = new MatParamOverride(VarType.Boolean, "GiEnabled", previousBounce != null);
             MatParamOverride captureBounce = new MatParamOverride(VarType.Boolean, "GiBakeBounce", previousBounce != null);
+            MatParamOverride suppressLightmap = new MatParamOverride(VarType.Texture2D, "GiStaticLightmap", null);
             // Runtime edge fading must not attenuate transport between bake passes.
             MatParamOverride fade = new MatParamOverride(VarType.Float, "GiFadeDistance", 0f);
             List<GiProbeData.Binding> bindings = new ArrayList<>();
@@ -258,12 +259,14 @@ public final class GiBakeJob implements AutoCloseable {
                 }
                 manager.addForcedMatParam(enabled);
                 manager.addForcedMatParam(captureBounce);
+                manager.addForcedMatParam(suppressLightmap);
                 if (previousBounce != null) {
                     manager.addForcedMatParam(fade);
                 }
                 capture.renderFace(manager, position, stage);
             } finally {
                 manager.removeForcedMatParam(fade);
+                manager.removeForcedMatParam(suppressLightmap);
                 manager.removeForcedMatParam(captureBounce);
                 manager.removeForcedMatParam(enabled);
                 for (int i = bindings.size() - 1; i >= 0; i--) {

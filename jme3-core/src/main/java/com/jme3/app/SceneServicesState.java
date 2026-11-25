@@ -18,7 +18,8 @@ import java.util.concurrent.*;
  * on the next application frame. Detached scenes release their registrations.
  * Attached WorldSettings automatically restore the main viewport post-processing
  * chain; manual FPPs take precedence. Removing the scene releases the owned chain.
- * Serialized GI volumes create a lazy page streamer; PhysicsControl instances
+ * Serialized GI volumes create a lazy page streamer. Static lightmap controls
+ * stream their textures independently of the live probe atlas. PhysicsControl instances
  * create/reuse a BulletAppState when an optional Bullet implementation is present.
  * A selected {@link Start} supplies the initial main camera transform.
  * Existing physics-space assignments are never stolen. Custom controls, sounds
@@ -193,18 +194,20 @@ public final class SceneServicesState extends AbstractAppState {
             }
             return false;
         });
+        WorldSettings world = selectWorld();
+        boolean lightmapMipEnabled = world != null && world.isLightmapMipEnabled()
+                && ProbeLightmapControl.supportsMipSampling(app.getRenderer());
         for (var control : catalog.controls) {
             if (control instanceof com.jme3.environment.gi.ProbeLightmapControl) {
                 var lightmap = (com.jme3.environment.gi.ProbeLightmapControl) control;
                 lightmaps.add(lightmap);
-                lightmap.updateResidency(app.getAssetManager(), app.getCamera().getLocation(), !seen.isEmpty());
+                lightmap.updateResidency(app.getAssetManager(), app.getCamera().getLocation(), true, lightmapMipEnabled);
             }
         }
         if (seen.isEmpty()) {
             closeGi();
             return;
         }
-        WorldSettings world = selectWorld();
         WorldSettings.GiStreaming settings = world == null ? WorldSettings.GiStreaming.DEFAULTS : world.getGiStreaming();
         int atlasMiB = settings.getAtlasMiB();
         if (gi == null || giAtlasMiB != atlasMiB || (bricks && !giBricks)) {

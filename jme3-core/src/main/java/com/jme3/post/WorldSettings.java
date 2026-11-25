@@ -57,6 +57,38 @@ public final class WorldSettings extends AbstractControl {
     public static final boolean DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE = true;
     private boolean singleProbeVisibility = DEFAULT_SINGLE_PROBE_VISIBILITY;
     private boolean octahedralProbeIrradiance = DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE;
+    private boolean lightmapMipEnabled;
+
+    /**
+     * Selects trilinear filtering for streamed lightmaps with baked mip levels.
+     * Disabled by default, including in old scenes. Lightmaps with only a base
+     * level keep their existing filtering. Automatic desktop OpenGL and OpenGL
+     * ES 3 scene services apply the change during the next render update.
+     * Set from the application thread. Existing resident textures are reused
+     * and mip levels are never generated at runtime for this setting.
+     * <pre>{@code
+     * // 第一步：烘焙并保存含有安全 mip 层的 Lightmap。
+     * WorldSettings world = scene.getControl(WorldSettings.class);
+     * if (world == null) {
+     *     world = new WorldSettings();
+     *     scene.addControl(world);
+     * }
+     * // 第二步：开启场景的 mip 采样；保存场景即可保留设置。
+     * world.setLightmapMipEnabled(true);
+     * // 第三步：关闭后回到基级采样，无需重新加载或烘焙。
+     * world.setLightmapMipEnabled(false);
+     * }</pre>
+     *
+     * @param enabled whether to sample stored lightmap mip levels
+     */
+    public void setLightmapMipEnabled(boolean enabled) {
+        lightmapMipEnabled = enabled;
+    }
+
+    /** @return whether stored lightmap mip levels are enabled for this world */
+    public boolean isLightmapMipEnabled() {
+        return lightmapMipEnabled;
+    }
 
     /**
      * Selects the baked octahedral irradiance atlas instead of SH9. The
@@ -357,6 +389,7 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(probeGiFullFallback, "probeGiFullFallback", true);
         capsule.write(singleProbeVisibility, "singleProbeVisibility", false);
         capsule.write(octahedralProbeIrradiance, "octahedralProbeIrradiance", false);
+        capsule.write(lightmapMipEnabled, "lightmapMipEnabled", false);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -372,6 +405,7 @@ public final class WorldSettings extends AbstractControl {
         InputCapsule capsule = importer.getCapsule(this);
         singleProbeVisibility = capsule.readBoolean("singleProbeVisibility", false);
         octahedralProbeIrradiance = capsule.readBoolean("octahedralProbeIrradiance", false);
+        lightmapMipEnabled = capsule.readBoolean("lightmapMipEnabled", false);
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);

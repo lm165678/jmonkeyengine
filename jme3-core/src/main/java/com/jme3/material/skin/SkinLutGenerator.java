@@ -42,14 +42,18 @@ import java.util.concurrent.CancellationException;
  * The default is nonmetallic, roughness .45, strength 1, and meter world units.
  * Scattering affects direct diffuse lighting; specular and indirect light use
  * the existing PBR utilities. Deferred viewports use forward fallback for skin.
- * There is no thickness transmission or shadow-penumbra scattering LUT.
+ * Optional SkinTransmission adds a separate normal-thickness approximation; it is
+ * disabled by default. See TestSkinTransmission and SkinSurfaceBaker. A
+ * shadow-penumbra scattering LUT and full volumetric SSS are not provided.
  * GLSL330/ES300 and filterable half-float textures are required.
  *
  * <p>Generation is CPU-only and interruptible. Results and profiles are immutable;
  * create/bind textures on the render thread when materials are already in use.
  * Binary J3O may embed the image. Text J3M must reference an exported image asset.
  * The SDK Tools / Textures / Pre-integrated Skin Tools action exports both assets
- * and provides a second tab for profile-based normal prefiltering.
+ * and provides normal prefiltering plus offline thickness/curvature baking.
+ * Its exporters can update an existing selected skin material without replacing
+ * the LUT or unrelated artist parameters.
  * See TestPreintegratedSkin for the runnable example and verification command.
  */
 public final class SkinLutGenerator {

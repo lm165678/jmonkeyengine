@@ -7,12 +7,15 @@ import com.jme3.export.JmeImporter;
 import com.jme3.export.binary.BinaryImporter;
 import com.jme3.math.Transform;
 import com.jme3.math.Vector3f;
+import com.jme3.renderer.Caps;
 import com.jme3.renderer.RenderManager;
+import com.jme3.renderer.Renderer;
 import com.jme3.renderer.ViewPort;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Mobility;
 import com.jme3.scene.Spatial;
 import com.jme3.scene.control.AbstractControl;
+import com.jme3.texture.Texture.MinFilter;
 import com.jme3.texture.Texture2D;
 import com.jme3.util.clone.Cloner;
 import java.io.IOException;
@@ -24,15 +27,22 @@ import java.util.logging.Logger;
 /**
  * Persistent reference to an external static diffuse irradiance texture.
  * Automatic scene services request it near the main camera, with hysteresis
- * for unloading. Missing data, changed world transform, and nonstatic
- * mobility keep the ordinary probe path available.
+ * for unloading. All LODs reuse a resident lightmap while the receiver remains
+ * static at its baked transform. A probe atlas is not needed for playback.
+ * The automatic service may be disabled, or this control disabled/removed, to
+ * release the map. Without a resident map, a static receiver
+ * receives no diffuse probe-volume contribution. Dynamic and locally dynamic
+ * receivers use the live volume when available.
  * <pre>{@code
  * // 第一步：使用 ProbeLightmapBaker 烘焙，将 ProbeLightmapAsset 另存为独立 J3O。
- * // 第二步：在场景线程记录资产路径和烘焙时的世界变换，再保存场景。
+ * // 第二步：在场景线程标记静态，记录资产路径和烘焙时的世界变换，再保存场景。
+ * geometry.setMobility(Mobility.Static);
  * geometry.addControl(new ProbeLightmapControl("GI/Lightmaps/floor.j3o",
  *         geometry.getWorldTransform(), 100f));
- * // 第三步：运行时自动预取；移除控制器恢复探针逐像素采样。
- * geometry.removeControl(ProbeLightmapControl.class);
+ * // 第三步：有 LOD 数据时切到 LOD 1，仍使用这张 UV2 光照贴图。
+ * geometry.setLodLevel(1);
+ * // 第四步：需要移动时改为 Dynamic，由实时漫反射探针体积接管。
+ * geometry.setMobility(Mobility.Dynamic);
  * }</pre>
  */
 public final class ProbeLightmapControl extends AbstractControl {
@@ -56,8 +66,52 @@ public final class ProbeLightmapControl extends AbstractControl {
         this.preloadDistance = preloadDistance;
     }
 
-    /** Updates this asset's regional residency on the scene's rendering thread. */
+    /**
+     * Checks whether the renderer can clamp a texture to its stored mip range.
+     * See {@link #updateResidency(AssetManager, Vector3f, boolean, boolean)}
+     * for using this capability with a precomputed lightmap.
+     *
+     * @param renderer the active renderer
+     * @return true if the partial mip chain can be sampled
+     */
+    public static boolean supportsMipSampling(Renderer renderer) {
+        var caps = renderer.getCaps();
+        return caps.contains(Caps.OpenGL20) || caps.contains(Caps.OpenGLES30);
+    }
+
+    /**
+     * Updates regional residency on the scene's rendering thread with base-level filtering.
+     * @param assets the asset manager for the external map
+     * @param camera the world-space camera location
+     * @param giAvailable whether baked GI playback is enabled, independently of live probe residency
+     */
     public void updateResidency(AssetManager assets, Vector3f camera, boolean giAvailable) {
+        updateResidency(assets, camera, giAvailable, false);
+    }
+
+    /**
+     * Updates residency and the sampler on the scene's rendering thread.
+     * When enabled, existing baked mip levels use trilinear filtering. An old
+     * asset without stored mip levels retains its base-level filtering.
+     * Manual callers enable mip playback only with renderers that can clamp
+     * sampling to the stored levels (desktop OpenGL 2+ or OpenGL ES 3+).
+     * Automatic scene services use
+     * {@link com.jme3.post.WorldSettings#setLightmapMipEnabled(boolean)}.
+     * <pre>{@code
+     * // 第一步：自定义流送在渲染线程根据设置和 GPU 能力选择采样，每帧调用。
+     * boolean useMip = settings.isLightmapMipEnabled()
+     *         && ProbeLightmapControl.supportsMipSampling(renderer);
+     * control.updateResidency(assetManager, camera.getLocation(), true, useMip);
+     * // 第二步：下一帧传 false 即可恢复基级采样，不必卸载已有贴图。
+     * control.updateResidency(assetManager, camera.getLocation(), true, false);
+     * }</pre>
+     *
+     * @param assets the asset manager for the external map
+     * @param camera the world-space camera location
+     * @param giAvailable whether baked GI playback is enabled, independently of live probe residency
+     * @param mipEnabled whether to sample mip levels already baked into the texture
+     */
+    public void updateResidency(AssetManager assets, Vector3f camera, boolean giAvailable, boolean mipEnabled) {
         if (!(spatial instanceof Geometry)) {
             return;
         }
@@ -77,11 +131,21 @@ public final class ProbeLightmapControl extends AbstractControl {
             missing = decoded == null;
             if (decoded != null) {
                 texture = decoded.getTexture();
+                if (texture.getImage().hasMipmaps()) {
+                    // The chart padding only guarantees the four bilinear taps at each level.
+                    texture.setAnisotropicFilter(1);
+                }
                 geometry.setResidentProbeLightmap(texture, decoded.hasSkyBand());
             }
         } else if (texture == null && load == null && !missing && asset != null) {
             String key = asset;
             load = CompletableFuture.supplyAsync(() -> readTexture(assets, key));
+        }
+        if (texture != null && texture.getImage().hasMipmaps()) {
+            MinFilter filter = mipEnabled ? MinFilter.Trilinear : MinFilter.BilinearNoMipMaps;
+            if (texture.getMinFilter() != filter) {
+                texture.setMinFilter(filter);
+            }
         }
     }
 

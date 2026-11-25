@@ -21,7 +21,7 @@ vec3 giSkyDirection(vec3 normal) {
             * max(dot(bent, normal), 0.0);
     return normalize(mix(normal, bent, amount));
 }
-#ifdef GI_PROBES
+#if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
 #ifdef STATIC_PROBE_LIGHTMAP
 uniform sampler2D m_GiStaticLightmap;
 uniform float m_GiLightmapAtlasInset;
@@ -39,6 +39,7 @@ uniform vec4 m_GiAtlas;
 uniform float m_GiBias;
 uniform bool m_GiEnabled;
 uniform bool m_GiBakeBounce;
+uniform bool g_GiStaticReceiver;
 uniform vec2 m_GiEncoding;
 uniform sampler2D m_GiVolumeData;
 uniform int m_GiVolumeCount;
@@ -781,10 +782,12 @@ float giCurvature(vec3 worldPosition, vec3 geometryNormal) {
 }
 
 vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
-    giReceiverCurvature = giCurvature(worldPosition, geometryNormal);
-    vec3 plane = giReceiverPlane(worldPosition, normal);
     #ifdef STATIC_PROBE_LIGHTMAP
-        if (m_GiEnabled && !m_GiBakeBounce) {
+        bool lightmapEnabled = g_GiStaticReceiver && !m_GiBakeBounce;
+        #ifdef GI_PROBES
+            lightmapEnabled = lightmapEnabled && m_GiEnabled;
+        #endif
+        if (lightmapEnabled) {
             float inset = m_GiLightmapAtlasInset;
             vec2 lookup = probeLightmapUv;
             if (inset > 0.0) {
@@ -805,6 +808,14 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
             return cached.rgb;
         }
     #endif
+    // A missing static lightmap does not opt this receiver into the live volume.
+    // Offline multi-bounce capture still reads the previous probe bake.
+    if (g_GiStaticReceiver && !m_GiBakeBounce) {
+        return vec3(0.0);
+    }
+    #ifdef GI_PROBES
+    giReceiverCurvature = giCurvature(worldPosition, geometryNormal);
+    vec3 plane = giReceiverPlane(worldPosition, normal);
     vec4 sampleValue = giSampleIndirectOnPlane(worldPosition, normal, plane);
     giEnvironmentDiffuseWeight = 1.0 - sampleValue.a * (1.0 - clamp(m_GiEnvironmentMix, 0.0, 1.0));
     // Separated captures add direct sky to bounced radiance. Total captures
@@ -815,6 +826,9 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
         giSkyBentMoment = vec3(0.0);
     }
     return sampleValue.rgb;
+    #else
+    return vec3(0.0);
+    #endif
 }
 // Compatibility for custom shaders without a separate geometry normal. Built-in
 // normal-mapped materials use the three-argument entry above.

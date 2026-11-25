@@ -71,6 +71,9 @@ void main(){
         }
         #endif
         vec4 lightData0 = g_LightData[i];
+        #ifdef SKIN_TRANSMISSION
+            vec4 incident = lightData0;
+        #endif
         lightData0.rgb *= managedShadow(g_ShadowIndices[i / 3].x, wpos, surface.normal, g_ShadowReceive);
         vec4 lightData1 = g_LightData[i+1];
         vec4 lightData2 = g_LightData[i+2];
@@ -78,6 +81,9 @@ void main(){
           lightData0, lightData1, lightData2,
           skin, surface
         );
+        #ifdef SKIN_TRANSMISSION
+            skinAccumulateTransmission(incident, lightData1, lightData2, g_ShadowIndices[i / 3].x, skin, surface);
+        #endif
     }
 
 
@@ -86,7 +92,7 @@ void main(){
     prepareDeferredPbrIndirect(surface);
 
     vec3 volumeIrradiance = vec3(0.0);
-    #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
+    #if (defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)) && !defined(DEFERRED_GI_LIGHT)
         volumeIrradiance = giSampleIrradiance(wpos, surface.normal, surface.geometryNormal);
     #endif
     // Calculate env probes
@@ -112,7 +118,7 @@ void main(){
     // Additional passes accumulate only their batch of direct lights.
     if (g_IsFirstLightPass) {
         gl_FragColor.rgb += surface.bakedLightContribution;
-        #ifdef GI_PROBES
+        #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
             gl_FragColor.rgb += shLambertResponse(volumeIrradiance, surface.diffuseColor, surface.ao.r);
         #endif
         gl_FragColor.rgb += surface.envLightContribution;

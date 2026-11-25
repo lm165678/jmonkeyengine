@@ -6,6 +6,7 @@ import com.jme3.material.Material;
 import com.jme3.math.*;
 import com.jme3.renderer.*;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.*;
 import com.jme3.texture.*;
@@ -141,6 +142,7 @@ public final class TestGiVisibilityFiltering extends SimpleApplication {
         data = GiSceneBaker.bake(renderManager, rootNode, volume, quality,
                 view -> { }, () -> false, count -> { });
         receiver = new Geometry("GI receiver", new Box(3, 0.1f, 3));
+        receiver.setMobility(Mobility.Dynamic);
         rootNode.attachChild(receiver);
         cam.setLocation(new Vector3f(0, 3, 0));
         cam.lookAt(Vector3f.ZERO, Vector3f.UNIT_Z);

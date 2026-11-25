@@ -1883,6 +1883,10 @@ public abstract class Spatial implements Savable, Cloneable, Collidable,
      * Authors a movement policy on the scene's owning thread. Unanimated roots
      * default to Static; skeletal deformation defaults to Dynamic. This
      * metadata leaves transform operations available for authoring.
+     * For diffuse probe volume GI, static receivers use their resident baked
+     * lightmap at every LOD; Dynamic and LocalDynamic receivers may use the
+     * live probe field. Static receivers without a resident map receive no
+     * light from the probe volume.
      * <pre>{@code
      * // 第一步：声明父节点静态，普通子节点默认继承。
      * building.setMobility(Mobility.Static);

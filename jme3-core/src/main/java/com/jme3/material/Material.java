@@ -54,6 +54,7 @@ import com.jme3.renderer.Renderer;
 import com.jme3.renderer.TextureUnitException;
 import com.jme3.renderer.queue.RenderQueue.Bucket;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.shader.*;
 import com.jme3.shader.bufferobject.BufferObject;
 import com.jme3.texture.Image;
@@ -1266,6 +1267,12 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         shader.getUniform("g_ShadowReceive").setValue(VarType.Boolean,
                 shadowMode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Receive
                 || shadowMode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive);
+        if (def.getMaterialParam("GiEnabled") != null) {
+            Uniform staticReceiver = shader.getUniform("g_GiStaticReceiver");
+            if (staticReceiver.getLocation() != ShaderVariable.LOC_NOT_DEFINED) {
+                staticReceiver.setValue(VarType.Boolean, geometry.getMobility() == Mobility.Static);
+            }
+        }
         com.jme3.environment.EnvironmentLighting.bind(shader, this, lights, renderer, units);
         technique.render(renderManager, shader, geometry, lights, units);
     }

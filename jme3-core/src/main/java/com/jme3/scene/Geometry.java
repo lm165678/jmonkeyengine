@@ -70,8 +70,9 @@ public class Geometry extends Spatial {
      * Sets the transient texture used by the probe lightmap streamer.
      * The texture remains owned by the streamer, and scene saves retain
      * only its control's asset reference.
-     * Simplified LODs sample live probes because their triangles may cross UV charts.
-     * @param value resident irradiance texture or null to restore live probes
+     * All LODs of a static mesh use the same lightmap coordinates. Preserve
+     * the UV2 chart boundaries when simplifying the mesh for best results.
+     * @param value resident irradiance texture or null to clear the lightmap
      */
     public void setResidentProbeLightmap(com.jme3.texture.Texture2D value) {
         setResidentProbeLightmap(value, false);
@@ -80,7 +81,7 @@ public class Geometry extends Spatial {
     /**
      * Installs a streamed probe lightmap on the render thread. The atlas layout comes from
      * {@link com.jme3.environment.gi.ProbeLightmapBaker#bakeField}; older textures use false.
-     * @param value resident texture or null to restore live sampling
+     * @param value resident texture or null to clear the lightmap
      * @param atlas whether the texture contains separate diffuse and sky bands
      */
     public void setResidentProbeLightmap(com.jme3.texture.Texture2D value, boolean atlas) {
@@ -102,12 +103,13 @@ public class Geometry extends Spatial {
     }
 
     /**
-     * Dynamic receivers immediately use live probes, even before the residency
-     * service releases their cached texture. Inherited mobility is resolved here.
+     * Every LOD of a static receiver can use its resident lightmap. Dynamic
+     * receivers stop using it immediately, before the service releases the
+     * texture. Inherited mobility is resolved here.
      * @return whether the current draw can use its resident probe lightmap
      */
     public boolean usesResidentProbeLightmap() {
-        return lodLevel == 0 && residentProbeLightmap != null && getMobility() == Mobility.Static;
+        return residentProbeLightmap != null && getMobility() == Mobility.Static;
     }
 
     @Override
@@ -258,11 +260,7 @@ public class Geometry extends Spatial {
             throw new IllegalArgumentException("LOD level is out of range: " + lod);
         }
 
-        boolean usedProbeLightmap = usesResidentProbeLightmap();
         lodLevel = lod;
-        if (usedProbeLightmap != usesResidentProbeLightmap()) {
-            notifySceneChanged(SceneChangeListener.Change.RENDERING);
-        }
 
         if (isGrouped()) {
             groupNode.onMeshChange(this);

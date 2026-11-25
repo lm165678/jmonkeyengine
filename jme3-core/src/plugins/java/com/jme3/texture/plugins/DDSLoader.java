@@ -52,8 +52,18 @@ import java.util.logging.Logger;
 /**
  * 
  * <code>DDSLoader</code> is an image loader that reads in a DirectX DDS file.
- * Supports DXT1, DXT3, DXT5, RGB, RGBA, Grayscale, Alpha pixel formats.
+ * Supports DXT1, DXT3, DXT5, RGB, RGBA, Grayscale, Alpha and FourCC113 RGBA16F pixel formats.
  * 2D images, mipmapped 2D images, and cubemaps.
+ * Half-float DDS values are read without gamma conversion or quantization.
+ * <pre>{@code
+ * // 第一步：使用 TextureKey 读取数值 LUT，按需要指定是否翻转 Y。
+ * TextureKey key = new TextureKey("Textures/Skin/Lut.dds", false);
+ * key.setGenerateMips(false);
+ * // 第二步：材质中以 -LINEAR 声明 LUT，使用无 mip 的双线性采样。
+ * Texture texture = assetManager.loadTexture(key);
+ * texture.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+ * // 第三步：通过普通 AssetManager 缓存管理，不将纹理作为模型加载。
+ * }</pre>
  * 
  * @author Gareth Jenkins-Jones
  * @author Kirill Vainer
@@ -131,7 +141,7 @@ public class DDSLoader implements AssetLoader {
                 textureKey.setTextureTypeHint(Texture.Type.CubeMap);
             }
             ArrayList<ByteBuffer> data = readData(textureKey.isFlipY());
-            return new Image(pixelFormat, width, height, depth, data, sizes, ColorSpace.sRGB);
+            return new Image(pixelFormat, width, height, depth, data, sizes, pixelFormat == Format.RGBA16F ? ColorSpace.Linear : ColorSpace.sRGB);
         }
     }
 
@@ -139,7 +149,7 @@ public class DDSLoader implements AssetLoader {
         in = new LittleEndien(stream);
         loadHeader();
         ArrayList<ByteBuffer> data = readData(false);
-        return new Image(pixelFormat, width, height, depth, data, sizes, ColorSpace.sRGB);
+        return new Image(pixelFormat, width, height, depth, data, sizes, pixelFormat == Format.RGBA16F ? ColorSpace.Linear : ColorSpace.sRGB);
     }
 
     private void loadDX10Header() throws IOException {
@@ -538,6 +548,28 @@ public class DDSLoader implements AssetLoader {
      * @throws java.io.IOException If an error occurred while reading from InputStream
      */
     public ByteBuffer readRGB2D(boolean flip, int totalSize) throws IOException {
+        if (pixelFormat == Format.RGBA16F) {
+            // FourCC113 stores raw little-endian half floats, not masked 8-bit
+            // channels. Preserve values and row orientation for numeric LUTs.
+            ByteBuffer data = BufferUtils.createByteBuffer(totalSize);
+            int mipWidth = width;
+            int mipHeight = height;
+            int offset = 0;
+            for (int mip = 0; mip < mipMapCount; mip++) {
+                byte[] row = new byte[mipWidth * 8];
+                for (int y = 0; y < mipHeight; y++) {
+                    in.readFully(row);
+                    int targetY = flip ? mipHeight - y - 1 : y;
+                    data.position(offset + targetY * row.length);
+                    data.put(row);
+                }
+                offset += mipWidth * mipHeight * 8;
+                mipWidth = Math.max(1, mipWidth / 2);
+                mipHeight = Math.max(1, mipHeight / 2);
+            }
+            data.rewind();
+            return data;
+        }
         int redCount = count(redMask),
                 blueCount = count(blueMask),
                 greenCount = count(greenMask),

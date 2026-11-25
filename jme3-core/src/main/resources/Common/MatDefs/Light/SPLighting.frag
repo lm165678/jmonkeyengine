@@ -248,7 +248,7 @@ void main(){
                 deferredFlags+=1.0;
             #endif
         #endif
-        #if defined(GI_PROBES) && !defined(DEFERRED_GI_LIGHT)
+        #if (defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)) && !defined(DEFERRED_GI_LIGHT)
             deferredBase += giDiffuseReflectance * diffuseColor.rgb
                     * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;
         #endif
@@ -362,7 +362,7 @@ void main(){
      #endif
 
 
-    #ifdef GI_PROBES
+    #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
         if (g_IsFirstLightPass) {
             gl_FragColor.rgb += giDiffuseReflectance * diffuseColor.rgb
                     * giSampleIrradiance(giWorldPosition, giSurfaceNormal, normalize(giWorldNormal)) / 3.14159265359;

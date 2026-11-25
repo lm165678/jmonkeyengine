@@ -18,6 +18,7 @@ import com.jme3.post.WorldSettings;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.RenderPath;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Mobility;
 import com.jme3.scene.Node;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
@@ -124,6 +125,7 @@ public final class TestGiBrickStreaming extends SimpleApplication {
             settings.setGiStreaming(new WorldSettings.GiStreaming(0.5f, 28, 8));
             source.addControl(settings);
             Geometry receiver = new Geometry("Receiver", new Box(3.5f, 0.05f, 2));
+            receiver.setMobility(Mobility.Dynamic);
             receiver.setLocalTranslation(3.5f, 0.1f, 2);
             Material material = new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md");
             material.setColor("BaseColor", ColorRGBA.White);

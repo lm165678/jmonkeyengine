@@ -47,6 +47,7 @@ public final class GpuSceneGeometry extends Geometry {
         this.commandIndex = commandIndex;
         setIgnoreTransform(true);
         setShadowMode(source.getShadowMode());
+        setMobility(source.getMobility());
         setMaterial(source.getMaterial().clone());
         getMaterial().setBoolean("UseInstancing", true);
         attribute.setupData(VertexBuffer.Usage.Stream, 16, VertexBuffer.Format.Float, BufferUtils.createFloatBuffer(16));

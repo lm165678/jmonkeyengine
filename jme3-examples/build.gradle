@@ -12,6 +12,19 @@ plugins {
 
 ext.mainClassName = 'jme3test.TestChooser'
 
+['skinTransmissionDemo', 'skinTransmissionSmoke'].each { taskName ->
+    tasks.register(taskName, JavaExec) {
+        group = taskName.endsWith('Smoke') ? 'verification' : 'application'
+        dependsOn classes
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'jme3test.light.TestSkinTransmission'
+        workingDir rootProject.projectDir
+        if (taskName.endsWith('Smoke')) {
+            args '--verify'
+        }
+    }
+}
+
 ['preintegratedSkinDemo', 'preintegratedSkinSmoke'].each { taskName ->
     tasks.register(taskName, JavaExec) {
         group = taskName.endsWith('Smoke') ? 'verification' : 'application'
