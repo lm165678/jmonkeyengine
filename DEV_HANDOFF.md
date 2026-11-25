@@ -1,3 +1,9 @@
+## 2026-11-25 source publication pairing
+
+- Compatible implementation pair: engine `3c0f5779a47c8fcbbd8b77b12bd50c240874200c` on dev_fix_lightprobe_issue; SDK `9c95440ad8c98e9cbb864fa117ad760b952ea117` on master. Documentation-only commits may follow these implementation revisions. Both include the previously committed isolated skin work plus dependency/UV/bake reconstruction work recorded below. Earlier statements that these changes are uncommitted describe the prior checkpoint.
+- User requested publication to the lm165678 forks. Only source, supported tracked resources, tests and handoff documents are included; local generated SDK archives/revision metadata/extracted directories remain local. New JNI binaries were not introduced by this change; the existing tracked multi-platform native package is unchanged.
+- Validation follows the recorded targeted Java11/SDK, JNI/Swing/OpenGL checks below; this publication performs diff/index checks, not a new SDK build or deployment. Export the matching engine before rebuilding SDK. Verify remote branch tips after push before claiming success.
+
 ## 2026-11-25 isolated skin material and SDK authoring tools
 
 - Reimplemented from the present engine8f2aa1d37 / SDK1922914c1 sources, without restoring the earlier skin commit or replacing shared PBR shaders. Added PreintegratedSkin.j3md/frag and SkinLighting.glsllib; the material owns its direct diffuse loop and reads the existing PBR utilities for specular/indirect light. All39 pre-existing engine PBR/GI/Lightmap-related files captured at startup retained identical SHA-256 values. Concurrent SDK Lightmap/UV and engine upscaling/GPUScene edits belong to other work and were preserved.
