@@ -1476,14 +1476,20 @@ public final class GpuScenePipeline implements OpaquePipeline {
             boolean queriesOcclusion = occlusionQueryFilter.test(geometry);
             Batch found = null;
             for (Batch batch : batches) {
-                if (canonical(batch.source.getMaterial()) == canonical(geometry.getMaterial())
+                if (batch.instances.isEmpty()) {
+                    continue;
+                }
+                // The original source can have changed its mesh and left this
+                // batch. Compare against a surviving instance, not that source.
+                Geometry representative = batch.instances.get(0);
+                if (canonical(representative.getMaterial()) == canonical(geometry.getMaterial())
                         && batch.instances.size() < 65536
-                        && (batch.source.getMesh() == geometry.getMesh()
-                            || (multiDrawIndirect && meshMerging && MeshDrawPlan.compatible(batch.source.getMesh(), geometry.getMesh())))
+                        && (representative.getMesh() == geometry.getMesh()
+                            || (multiDrawIndirect && meshMerging && MeshDrawPlan.compatible(representative.getMesh(), geometry.getMesh())))
                         && batch.occluder == writesOcclusion
                         && batch.queryOcclusion == queriesOcclusion
-                        && batch.source.getShadowMode() == geometry.getShadowMode()
-                        && sameLights(batch.source, geometry)) {
+                        && representative.getShadowMode() == geometry.getShadowMode()
+                        && sameLights(representative, geometry)) {
                     found = batch;
                     break;
                 }

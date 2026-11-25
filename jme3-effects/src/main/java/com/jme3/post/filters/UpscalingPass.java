@@ -101,6 +101,17 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
         super("UpscalingPass");
     }
 
+    @Override
+    protected void onCaptureSuspended(boolean suspended) {
+        resetHistory();
+        if (temporal != null) {
+            temporal.restoreCamera();
+            if (view.getTemporalScene() == temporal) {
+                view.setTemporalScene(null);
+            }
+        }
+    }
+
     public Algorithm getAlgorithm() {
         return algorithm;
     }

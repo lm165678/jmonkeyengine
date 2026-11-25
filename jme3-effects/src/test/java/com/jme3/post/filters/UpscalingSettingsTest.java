@@ -39,6 +39,32 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class UpscalingSettingsTest {
     @Test
+    public void captureScopesNestAndSerializeUserChoices() throws Exception {
+        DesktopAssetManager assets = new DesktopAssetManager();
+        UpscalingPass pass = new UpscalingPass();
+        pass.setAlgorithm(UpscalingPass.Algorithm.FSR2);
+        var first = pass.suspendForCapture();
+        var second = pass.suspendForCapture();
+        assertFalse(pass.isEnabled());
+        assertTrue(BinaryExporter.saveAndLoad(assets, pass).isEnabled());
+        first.close();
+        first.close();
+        assertFalse(pass.isEnabled());
+        second.close();
+        assertTrue(pass.isEnabled());
+        try (var scope = pass.suspendForCapture()) {
+            pass.setEnabled(false);
+        }
+        assertFalse(pass.isEnabled());
+        TemporalAAFilter taa = new TemporalAAFilter();
+        try (var scope = taa.suspendForCapture()) {
+            assertFalse(taa.isEnabled());
+            assertTrue(BinaryExporter.saveAndLoad(assets, taa).isEnabled());
+        }
+        assertTrue(taa.isEnabled());
+    }
+
+    @Test
     public void serializedPipelinePreservesAlgorithmScaleAndAaPreferences() throws Exception {
         DesktopAssetManager assets = new DesktopAssetManager();
         FilterPostProcessor chain = new FilterPostProcessor(assets);

@@ -69,6 +69,7 @@ public abstract class Filter implements Savable {
     protected List<Pass> postRenderPasses;
     protected Material material;
     protected boolean enabled = true;
+    private transient int captureSuspensions;
     protected FilterPostProcessor processor;
 
     public Filter(String name) {
@@ -489,6 +490,73 @@ public abstract class Filter implements Savable {
     }
 
     /**
+     * Bypasses this filter during a frame-budgeted offline capture without
+     * changing its serialized enabled preference. Scopes may overlap and must
+     * be acquired/closed on the owning render thread. The last close restores
+     * the current user choice, including edits made while suspended.
+     * Wait one normal preview frame after acquiring scopes before capturing so
+     * FPP can restore native-size targets. This does not copy display effects
+     * into the independent linear bake viewport.
+     * <pre>{@code
+     * // 第一步：渲染线程为超分和 TAA 各取得句柄，保留保存到 J3O 的开关。
+     * Filter.CaptureSuspension upscaleScope = upscale.suspendForCapture();
+     * Filter.CaptureSuspension taaScope = taa.suspendForCapture();
+     * // 第二步：等待主视口渲染一帧，再分帧推进 Probe 和 Lightmap 烘焙。
+     * // 第三步：成功、取消、异常和场景关闭时在渲染线程清理两份句柄。
+     * taaScope.close();
+     * upscaleScope.close();
+     * }</pre>
+     * @return an idempotent runtime-only scope
+     */
+    public final CaptureSuspension suspendForCapture() {
+        captureSuspensions++;
+        try {
+            if (captureSuspensions == 1) {
+                onCaptureSuspended(true);
+                refreshCaptureState();
+            }
+        } catch (RuntimeException | Error failure) {
+            captureSuspensions--;
+            throw failure;
+        }
+        return new CaptureSuspension();
+    }
+
+    /** Render-thread restoration handle; repeated close has no effect. */
+    public final class CaptureSuspension implements AutoCloseable {
+        private boolean closed;
+
+        private CaptureSuspension() {
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            captureSuspensions--;
+            if (captureSuspensions == 0) {
+                try {
+                    onCaptureSuspended(false);
+                } finally {
+                    refreshCaptureState();
+                }
+            }
+        }
+    }
+
+    /** Allows temporal filters to release jitter and reset history on transitions. */
+    protected void onCaptureSuspended(boolean suspended) {
+    }
+
+    private void refreshCaptureState() {
+        if (processor != null) {
+            processor.setFilterState(this, enabled);
+        }
+    }
+
+    /**
      * Determines filter order while an upscaler is active. Custom filters default
      * to scene-linear work (0). Built-in keys: temporal AA -10, temporal upscale
      * 20, exposure 30, bloom 40, tone mapping 50, spatial AA 60, spatial upscale
@@ -512,11 +580,12 @@ public abstract class Filter implements Savable {
     }
 
     /**
-     * returns true if the filter is enabled
-     * @return enabled
+     * Returns effective runtime activation, including temporary capture scopes.
+     * Serialization retains the authored enabled preference.
+     * @return true when enabled and not suspended
      */
     public boolean isEnabled() {
-        return enabled;
+        return enabled && captureSuspensions == 0;
     }
 
     /**

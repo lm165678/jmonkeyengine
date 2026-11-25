@@ -51,6 +51,11 @@ import java.util.Map;
  */
 public final class TemporalAAFilter extends HdrGraphFilter {
     @Override
+    protected void onCaptureSuspended(boolean suspended) {
+        onPipelineBypass(suspended);
+    }
+
+    @Override
     public int getPipelineOrder() {
         return -10;
     }

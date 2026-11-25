@@ -35,6 +35,7 @@ import com.jme3.app.SimpleApplication;
 import com.jme3.material.Material;
 import com.jme3.math.*;
 import com.jme3.post.FilterPostProcessor;
+import com.jme3.post.Filter;
 import com.jme3.post.filters.*;
 import com.jme3.renderer.*;
 import com.jme3.scene.Geometry;
@@ -52,6 +53,7 @@ import java.nio.ByteBuffer;
  * preservation, plus a static edge ROI warmed for 64 frames and sampled for 32
  * frames (per-channel range <= .25). These are synthetic regressions, not a
  * production moving-scene quality guarantee or performance benchmark.
+ * Includes native-size, jitter-free offline capture suspension and restoration.
  * <pre>{@code
  * // 第一步：单采样浮点 FPP，保留原来的后处理配置。
  * fpp.setFrameBufferFormat(Image.Format.RGBA16F);
@@ -62,6 +64,10 @@ import java.nio.ByteBuffer;
  * fpp.addFilter(upscale);
  * // 第三步：GUI 继续挂到独立 guiViewPort，不放入低分辨率场景。
  * // 第四步：upscale.setEnabled(false) 恢复原生尺寸及原抗锯齿；相机切换需 resetHistory。
+ * // 第五步：烘焙前对超分、TAA 取得临时句柄，等待一个正常帧再采样。
+ * Filter.CaptureSuspension scope = upscale.suspendForCapture();
+ * // 完成、取消或异常后在渲染线程 close；用户启用偏好仍能正常保存到 J3O。
+ * scope.close();
  * }</pre>
  */
 public class TestUpscaling extends SimpleApplication {
@@ -76,6 +82,8 @@ public class TestUpscaling extends SimpleApplication {
     private final float[] minimum = new float[80 * 90 * 3];
     private final float[] maximum = new float[80 * 90 * 3];
     private int path, stage, frame;
+    private Filter.CaptureSuspension upscaleCapture;
+    private Filter.CaptureSuspension taaCapture;
 
     public static void main(String[] args) {
         TestUpscaling app = new TestUpscaling();
@@ -136,10 +144,21 @@ public class TestUpscaling extends SimpleApplication {
     }
 
     private void configure() {
+        if (taaCapture != null) {
+            taaCapture.close();
+            upscaleCapture.close();
+            taaCapture = null;
+            upscaleCapture = null;
+        }
         viewPort.setRenderPath(paths[path]);
-        upscale.setAlgorithm(stage == 1 || stage == 2 ? UpscalingPass.Algorithm.FSR2 : UpscalingPass.Algorithm.FSR1);
+        upscale.setAlgorithm(stage == 1 || stage == 2 || stage >= 5
+                ? UpscalingPass.Algorithm.FSR2 : UpscalingPass.Algorithm.FSR1);
         upscale.setRenderScale(stage == 2 ? 2f / 3f : .5f);
         upscale.setEnabled(stage != 3);
+        if (stage == 5) {
+            taaCapture = taa.suspendForCapture();
+            upscaleCapture = upscale.suspendForCapture();
+        }
         frame = 0;
         java.util.Arrays.fill(minimum, Float.POSITIVE_INFINITY);
         java.util.Arrays.fill(maximum, Float.NEGATIVE_INFINITY);
@@ -190,8 +209,11 @@ public class TestUpscaling extends SimpleApplication {
             throw new AssertionError("Scene scale was not applied: " + viewPort.getOutputFrameBuffer().getWidth());
         }
         boolean temporal = upscale.isEnabled() && upscale.replacesAntiAliasing();
+        if (stage == 5 && viewPort.getTemporalScene() != null) {
+            throw new AssertionError("Capture preview still has temporal jitter/history");
+        }
         if (fpp.isFilterBypassed(taa) != temporal || fpp.isFilterBypassed(fxaa) != temporal
-                || !taa.isEnabled() || !fxaa.isEnabled()) {
+                || taa.isEnabled() != (stage != 5) || !fxaa.isEnabled()) {
             throw new AssertionError("AA bypass/restoration changed user preferences");
         }
         ByteBuffer pixels = BufferUtils.createByteBuffer(256 * 192 * 4);
@@ -240,7 +262,7 @@ public class TestUpscaling extends SimpleApplication {
             }
         }
         System.out.println("UPSCALING_STAGE_PASS " + paths[path] + "/" + stage);
-        if (++stage == 5) {
+        if (++stage == 7) {
             stage = 0;
             if (++path == paths.length) {
                 System.out.println("UPSCALING_GPU_PASS");
