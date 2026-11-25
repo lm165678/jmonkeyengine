@@ -1,3 +1,7 @@
+## 2026-11-25 paired source checkpoint
+
+- Engine dev_fix_lightprobe_issue: 4fe932851eded2e4341794e1e08034f6398755d3. SDK master: 6c0ca7c6c4d1e67a2b12b3daaece95ec8e1040d8. This pair includes lightmap mip playback, skin transmission and the SDK authoring tools. The engine skin baker uses Java 11-compatible syntax. Complete SDK build and end-to-end validation remain pending.
+
 ## 2026-11-25 direct lighting and shadow Lightmap backlog
 
 - Recorded the user's full request in RENDERING_QUALITY_ROADMAP.md under the static Lightmap and dynamic Probe GI plan. It covers the optional bake of direct lighting and shadows, how moving objects receive baked static occlusion, and retaining authored Cast/Receive settings in the scene J3O.
