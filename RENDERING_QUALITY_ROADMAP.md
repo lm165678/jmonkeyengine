@@ -437,6 +437,9 @@ GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge 
 
 ## 待办：虚拟纹理（VT）模块重构（2026-11-22）
 
+- 2026-11-25 完整讨论归档目录为 `docs/virtual-texturing/`，记录在 [VT 系统开发讨论完整记录](docs/virtual-texturing/VT_DISCUSSION_2026-11-25.md)。下次继续 VT、纹理流送或 Lightmap VT 时，先读取该记录并主动提醒用户这项开发待办。
+- 首版讨论范围包括普通绑定、普通 Bindless 和 VT 切换，四条渲染路径与 GPU Scene，保留原贴图 key 的 SDK 批量生成，以及烘焙后 Lightmap 的 VT 流送。烘焙默认使用普通纹理并按显存预算分区。单晚只讨论了原型时间盒。当前状态为待开发。
+
 - [ ] 盘点此前 VT 实现，区分可复用代码、工程专用逻辑和需要补齐的能力。将通用部分整理成 jME3 引擎模块，明确资产格式、页表、反馈、驻留与淘汰、上传预算、调试统计和缺页回退。
 - [ ] 单独评估 LightProbe 烘焙。确定离屏捕获如何预取所需纹理页、等待驻留或选择明确的低分辨率回退；检查六面捕获的清晰度与一致性、反复烘焙的稳定性和显存成本。
 - [ ] 先用现有 VT 样例验证迁移，再用大场景验证流送峰值、缺页和 LightProbe 烘焙。与现有表面卡片流送待办协调资源预算。

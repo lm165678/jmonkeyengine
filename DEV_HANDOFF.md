@@ -956,5 +956,10 @@ $env:JAVA_HOME='C:/path/to/jdk-25'
 - Publication scope: inherited Dynamic disables resident Static Lightmaps; Static draws with a resident map do not mix live probes. PBR material-normal capture, covered subtexel resolve, chart-aware gutters, missing-sample recovery and offline seam blending are included. Existing valid UV2 and probe data can be reused to rebake affected maps.
 - Verified targeted SceneChangeListenerTest, ProbeLightmapChartOwnershipTest and native probeLightmapSmoke, plus actual TestScene2 before/after capture. The SDK remains user-built. No generated diagnostics or unrelated editor work included in this publication.
 
+## 2026-11-25 virtual texture discussion archive
+
+- The full VT discussion is in [docs/virtual-texturing/VT_DISCUSSION_2026-11-25.md](docs/virtual-texturing/VT_DISCUSSION_2026-11-25.md). The rendering roadmap links the archive and records when to remind the user about VT development.
+- The discussion covers migration, feedback and page pools, renderer and SDK integration, Lightmap streaming, budgeted bake regions, and prototype versus full first-release scope. This is documentation only. Implementation and runtime validation are pending.
+
 ## 2026-11-24 compatible publication revisions
 - Engine implementation c4b822805d0034b587fd1fcbde30ef1014f65c7d on dev_fix_lightprobe_issue and SDK implementation 1922914c11184d59393bb475c05d8590b69a4f34 on master. Use this pair for the Lightmap, GI display, AWT presentation and related SDK changes. Documentation-only commits may follow these revisions.
