@@ -1,3 +1,8 @@
+## 2026-11-26 paired direct-Lightmap and skin source checkpoint
+
+- Compatible implementation revisions: engine `a8b493ba028e374a700996fa99d86857735b0f00` on dev_fix_lightprobe_issue and SDK `1f9470e16bd8bc91d919fcedd4c7febececc6b4b` on master. Documentation-only commits may follow these revisions.
+- This pair contains the direct diffuse and static shadow bake, independent probe and Lightmap shadow sizes, skin thickness filtering and live material binding, and Java 11 LUT source compatibility. See the work-specific entries below for targeted validation and remaining SDK UI coverage.
+
 ## 2026-11-26 skin surface binding, thickness validity and mipmaps
 
 - Local working-tree feature on engine f93c8d8d5 and SDK 06680208e, alongside unrelated direct-Lightmap and Java11 compatibility work. Not committed or pushed. Preserve the other changes. The user withdrew the curvature/shadow faceting request after disabling shadows, then confirmed separate transmission artifacts without shadows. Curvature estimation and shared shadow/Lightmap algorithms were not changed by this feature.
