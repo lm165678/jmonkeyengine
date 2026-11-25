@@ -1,6 +1,8 @@
 package com.jme3.shadow;
 
 import com.jme3.asset.AssetManager;
+import com.jme3.environment.gi.BakedDirectionalShadow;
+import com.jme3.environment.gi.GiProbeVolume;
 import com.jme3.light.*;
 import com.jme3.material.RenderState;
 import com.jme3.material.MatParamOverride;
@@ -25,7 +27,8 @@ import java.util.*;
  * Viewport-owned direct-light shadows, enabled by default. Shadow maps are packed
  * into a GPU atlas and sampled inside each light's BRDF evaluation. Deferred
  * receivers are never redrawn in a PostShadow pass. Two texture units serve all
- * shadowed lights. Geometry ShadowMode still controls casting and receiving.
+ * shadowed lights plus one unit when a baked directional atlas is active.
+ * Geometry ShadowMode still controls casting and receiving.
  *
  * <pre>{@code
  * // 第一步：获取视口管理器；添加方向光、点光源或聚光灯后自动生成阴影。
@@ -84,6 +87,16 @@ public final class ShadowManager implements AutoCloseable {
     private boolean catalogDirty = true;
     private boolean hasCasters;
     private final List<Geometry> casters = new ArrayList<>();
+    private final Set<Geometry> casterSet = Collections.newSetFromMap(new IdentityHashMap<>());
+    private final List<BakedDirectionalShadow> bakedCandidates = new ArrayList<>();
+    private final List<BakedDirectionalShadow> bakedAtlasSources = new ArrayList<>();
+    private final Map<Light, BakedDirectionalShadow> bakedLights = new IdentityHashMap<>();
+    private final Map<AbstractShadowRenderer, BakedDirectionalShadow> bakedRenderers = new IdentityHashMap<>();
+    private final Map<BakedDirectionalShadow, Vector4f> bakedRects = new IdentityHashMap<>();
+    private final Map<String, Integer> bakedIndices = new HashMap<>();
+    private final Map<String, BakedDirectionalShadow> directSnapshots = new HashMap<>();
+    private final GeometryList unbakedCasters = new GeometryList(new OpaqueComparator());
+    private Texture2D bakedAtlas;
     private final GeometryList fallbackCasters = new GeometryList(new OpaqueComparator());
     private ShadowCasterBatch indirectCasters;
     private boolean indirectDrawing = true;
@@ -98,6 +111,7 @@ public final class ShadowManager implements AutoCloseable {
     private final Quad quad = new Quad(1, 1);
     private final RenderState copyState = new RenderState();
     private boolean enabled = true;
+    private boolean bakedShadowsEnabled = true;
     private long byteBudget = 128L * 1024 * 1024;
     private Texture2D atlas;
     private Texture2D records;
@@ -206,18 +220,24 @@ public final class ShadowManager implements AutoCloseable {
         assets = null;
         hasCasters = false;
         casters.clear();
+        casterSet.clear();
+        bakedCandidates.clear();
         releaseIndirectCasters();
         for (Spatial scene : catalogScenes) {
             for (Light light : scene.getWorldLightList()) {
                 catalog.add(light);
             }
             scene.depthFirstTraversal(spatial -> {
+                if (spatial instanceof GiProbeVolume) {
+                    Collections.addAll(bakedCandidates, ((GiProbeVolume) spatial).getBakedDirectionalShadows());
+                }
                 if (spatial instanceof Geometry) {
                     com.jme3.renderer.queue.RenderQueue.ShadowMode mode = spatial.getShadowMode();
                     if (mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.Cast
                             || mode == com.jme3.renderer.queue.RenderQueue.ShadowMode.CastAndReceive) {
                         hasCasters = true;
                         casters.add((Geometry) spatial);
+                        casterSet.add((Geometry) spatial);
                     }
                 }
                 for (Light light : spatial.getLocalLightList()) {
@@ -280,11 +300,22 @@ public final class ShadowManager implements AutoCloseable {
         }
     }
 
-    void renderCasters(GeometryList visible, Camera camera) {
+    void renderCasters(AbstractShadowRenderer source, GeometryList visible, Camera camera) {
+        GeometryList eligible = visible;
+        var baked = bakedRenderers.get(source);
+        if (baked != null) {
+            for (int i = 0; i < visible.size(); i++) {
+                Geometry caster = visible.get(i);
+                if (!baked.contains(caster)) {
+                    unbakedCasters.add(caster);
+                }
+            }
+            eligible = unbakedCasters;
+        }
         try {
             if (indirectCasters != null && manager.getRenderFilter() == null
                     && !ShadowCasterBatch.hasShadowOverrides(manager.getForcedMatParams())) {
-                int drawn = indirectCasters.draw(manager, visible, fallbackCasters);
+                int drawn = indirectCasters.draw(manager, eligible, fallbackCasters);
                 if (drawn > 0) {
                     indirectCasterCount += drawn;
                     if (fallbackCasters.size() != 0) {
@@ -293,9 +324,10 @@ public final class ShadowManager implements AutoCloseable {
                     return;
                 }
             }
-            viewport.getQueue().renderShadowQueue(visible, manager, camera, true);
+            viewport.getQueue().renderShadowQueue(eligible, manager, camera, true);
         } finally {
             fallbackCasters.clear();
+            unbakedCasters.clear();
             visible.clear();
         }
     }
@@ -325,11 +357,25 @@ public final class ShadowManager implements AutoCloseable {
     /** Adds only shadow-caster and atlas-copy passes to the viewport's FrameGraph. */
     public void appendPasses(FrameGraph graph) {
         indices.clear();
+        bakedIndices.clear();
+        directSnapshots.clear();
+        bakedRenderers.clear();
         active.clear();
         indirectCasterCount = 0;
         fallbackReason = null;
+        refreshCatalog();
+        if (bakedShadowsEnabled && manager.getRenderFilter() == null) {
+            for (BakedDirectionalShadow candidate : bakedCandidates) {
+                // The volume serializes the light reference. Removing it from the
+                // live light list does not remove the saved lighting recipe.
+                if (candidate != null && candidate.matchesBake(casterSet)) {
+                    directSnapshots.putIfAbsent(candidate.getId(), candidate);
+                }
+            }
+        }
         if (!enabled) {
             releaseIndirectCasters();
+            setBakedAtlas(Collections.emptyList());
             return;
         }
         if (!manager.getRenderer().getCaps().contains(Caps.FloatTexture)
@@ -338,7 +384,6 @@ public final class ShadowManager implements AutoCloseable {
             return;
         }
         Set<Light> found = Collections.newSetFromMap(new IdentityHashMap<Light, Boolean>());
-        refreshCatalog();
         for (Light light : catalog) {
             if (hasCasters && light.isEnabled() && light.isCastShadow()
                     && (light instanceof DirectionalLight || light instanceof PointLight || light instanceof SpotLight)) {
@@ -373,6 +418,7 @@ public final class ShadowManager implements AutoCloseable {
         }
         if (found.isEmpty() || assets == null) {
             releaseIndirectCasters();
+            setBakedAtlas(Collections.emptyList());
             return;
         }
         if (indirectDrawing && manager.isGpuSceneEnabled() && manager.getClass() == RenderManager.class
@@ -446,6 +492,7 @@ public final class ShadowManager implements AutoCloseable {
         if (packedHeight > limit || mapBytes + (long) packedWidth * packedHeight * 16 > byteBudget) {
             throw new IllegalStateException("Packed shadow atlas exceeds texture size or byte budget");
         }
+        selectBakedShadows(found);
         ensureAtlas(packedWidth, packedHeight, active.size());
         for (int i = 0; i < active.size(); i++) {
             Slot slot = active.get(i);
@@ -465,6 +512,122 @@ public final class ShadowManager implements AutoCloseable {
                         FrameBuffer.class, () -> slot.renderer.shadowFB[face]));
             }
         }
+    }
+
+    /** @return active managed light index for this particular baked snapshot, or -1 */
+    public int getBakedLightIndex(String id) {
+        return enabled && id != null ? bakedIndices.getOrDefault(id, -1) : -1;
+    }
+
+    /** @return whether any baked direct bands are valid, even with no realtime lights */
+    public boolean hasBakedDirectLighting() {
+        return !directSnapshots.isEmpty();
+    }
+
+    /** @return the scene light associated with an independently playable band */
+    public Light findBakedDirectLight(String id) {
+        BakedDirectionalShadow snapshot = directSnapshots.get(id);
+        return snapshot == null ? null : snapshot.getLight();
+    }
+
+    /** @return whether this frame's shadow records contain the baked atlas extension */
+    public boolean hasBakedShadowRecords() {
+        return enabled && bakedAtlas != null && !bakedIndices.isEmpty();
+    }
+
+    /**
+     * Selects saved direct Lightmap and world-space shadow playback for this viewport.
+     * Default on. Capture views can pass false before drawing to recompute original
+     * lighting and shadows, then set true on the render thread to restore playback.
+     * <pre>{@code
+     * // 第一步：离屏烘焙视口设置 false，按原场景配置重新捕获阴影。
+     * manager.getShadowManager(capture).setBakedShadowsEnabled(false);
+     * // 第二步：普通游戏视口使用默认值 true。
+     * manager.getShadowManager(gameView).setBakedShadowsEnabled(true);
+     * }</pre>
+     */
+    public void setBakedShadowsEnabled(boolean enabled) {
+        bakedShadowsEnabled = enabled;
+    }
+
+    private void selectBakedShadows(Set<Light> found) {
+        bakedLights.clear();
+        if (!bakedShadowsEnabled || bakedCandidates.isEmpty()
+                || !manager.getRenderer().getCaps().contains(Caps.OpenGL30) || manager.getRenderFilter() != null) {
+            setBakedAtlas(Collections.emptyList());
+            return;
+        }
+        var selected = new ArrayList<BakedDirectionalShadow>();
+        for (var candidate : bakedCandidates) {
+            if (candidate != null && directSnapshots.containsKey(candidate.getId())
+                    && found.contains(candidate.getLight()) && !bakedLights.containsKey(candidate.getLight())) {
+                bakedLights.put(candidate.getLight(), candidate);
+                selected.add(candidate);
+                if (selected.size() == BakedDirectionalShadow.MAX_LIGHTS) {
+                    break;
+                }
+            }
+        }
+        setBakedAtlas(selected);
+        for (Slot slot : active) {
+            var baked = bakedLights.get(slot.light);
+            if (bakedRects.containsKey(baked)) {
+                bakedRenderers.put(slot.renderer, baked);
+            }
+        }
+    }
+
+    private void setBakedAtlas(List<BakedDirectionalShadow> selected) {
+        if (selected.equals(bakedAtlasSources)) {
+            return;
+        }
+        disposeBakedAtlas();
+        if (selected.isEmpty()) {
+            return;
+        }
+        int tile = 0;
+        for (var snapshot : selected) {
+            tile = Math.max(tile, snapshot.getDepth().getImage().getWidth());
+        }
+        int columns = Math.min(2, selected.size());
+        int rows = (selected.size() + columns - 1) / columns;
+        int w = columns * tile;
+        int h = rows * tile;
+        int limit = manager.getRenderer().getLimits().getOrDefault(Limits.TextureSize, 0);
+        if (w > limit || h > limit || (long) w * h * Float.BYTES > 64L * 1024 * 1024) {
+            return;
+        }
+        ByteBuffer pixels = BufferUtils.createByteBuffer(w * h * Float.BYTES);
+        for (int i = 0; i < selected.size(); i++) {
+            var snapshot = selected.get(i);
+            Image image = snapshot.getDepth().getImage();
+            int size = image.getWidth();
+            int x = (i % columns) * tile;
+            int y = (i / columns) * tile;
+            ByteBuffer source = image.getData(0).duplicate();
+            for (int row = 0; row < size; row++) {
+                source.limit((row + 1) * size * Float.BYTES);
+                source.position(row * size * Float.BYTES);
+                pixels.position(((y + row) * w + x) * Float.BYTES);
+                pixels.put(source);
+            }
+            bakedRects.put(snapshot, new Vector4f(x / (float) w, y / (float) h,
+                    size / (float) w, size / (float) h));
+        }
+        pixels.clear();
+        bakedAtlas = new Texture2D(new Image(Image.Format.R32F, w, h, pixels, ColorSpace.Linear));
+        bakedAtlas.setMinFilter(Texture.MinFilter.NearestNoMipMaps);
+        bakedAtlas.setMagFilter(Texture.MagFilter.Nearest);
+        bakedAtlasSources.addAll(selected);
+    }
+
+    private void disposeBakedAtlas() {
+        if (bakedAtlas != null) {
+            bakedAtlas.getImage().dispose();
+            bakedAtlas = null;
+        }
+        bakedAtlasSources.clear();
+        bakedRects.clear();
     }
 
     private Light legacyLight(AbstractShadowRenderer renderer) {
@@ -527,12 +690,15 @@ public final class ShadowManager implements AutoCloseable {
             target = new FrameBuffer(w, h, 1);
             target.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(atlas));
         }
-        if (records == null || records.getImage().getHeight() != count) {
+        // The optional last row stores the projective matrices for all baked
+        // lights. The existing rows and their lookup widths are unchanged.
+        int recordCount = count + (bakedRenderers.isEmpty() ? 0 : 1);
+        if (records == null || records.getImage().getHeight() != recordCount) {
             if (records != null) {
                 records.getImage().dispose();
             }
-            records = new Texture2D(new Image(Image.Format.RGBA32F, RECORD_WIDTH, count,
-                    BufferUtils.createByteBuffer(RECORD_WIDTH * count * 16), ColorSpace.Linear));
+            records = new Texture2D(new Image(Image.Format.RGBA32F, RECORD_WIDTH, recordCount,
+                    BufferUtils.createByteBuffer(RECORD_WIDTH * recordCount * 16), ColorSpace.Linear));
             records.setMinFilter(Texture.MinFilter.NearestNoMipMaps);
             records.setMagFilter(Texture.MagFilter.Nearest);
         }
@@ -549,6 +715,8 @@ public final class ShadowManager implements AutoCloseable {
         Renderer renderer = manager.getRenderer();
         FrameBuffer previous = renderer.getCurrentFrameBuffer();
         ByteBuffer bytes = records.getImage().getData(0);
+        int bakedRow = active.size() * RECORD_WIDTH * 16;
+        int bakedOffset = 0;
         bytes.clear();
         try {
             renderer.setFrameBuffer(target);
@@ -559,6 +727,20 @@ public final class ShadowManager implements AutoCloseable {
                 int row = index * RECORD_WIDTH * 16;
                 for (int component = 0; component < RECORD_WIDTH * 4; component++) {
                     bytes.putFloat(row + component * 4, 0);
+                }
+                var baked = bakedRenderers.get(slot.renderer);
+                if (baked != null) {
+                    Matrix4f matrix = baked.getProjection();
+                    Vector4f rect = bakedRects.get(baked);
+                    indices.put(slot.light, index);
+                    bakedIndices.put(baked.getId(), index);
+                    for (int column = 0; column < 4; column++) {
+                        put(bytes, bakedRow, bakedOffset + column, matrix.get(0, column), matrix.get(1, column),
+                                matrix.get(2, column), matrix.get(3, column));
+                    }
+                    put(bytes, row, 34, rect.x, rect.y, rect.z, rect.w);
+                    put(bytes, row, 35, bakedOffset, 0, 0, 0);
+                    bakedOffset += 4;
                 }
                 if (slot.renderer.skipPostPass) {
                     continue;
@@ -624,6 +806,7 @@ public final class ShadowManager implements AutoCloseable {
     public int bind(Shader shader, int unit) {
         boolean use = enabled && !indices.isEmpty();
         shader.getUniform("g_ManagedShadows").setValue(VarType.Boolean, use);
+        boolean useBaked = hasBakedShadowRecords();
         if (!use) {
             return unit;
         }
@@ -632,10 +815,18 @@ public final class ShadowManager implements AutoCloseable {
         shader.getUniform("g_ShadowAtlas").setValue(VarType.Int, unit);
         shader.getUniform("g_ShadowRecords").setValue(VarType.Int, unit + 1);
         shader.getUniform("g_ShadowAtlasSize").setValue(VarType.Vector2, new Vector2f(width, height));
-        shader.getUniform("g_ShadowRecordCount").setValue(VarType.Float, (float) active.size());
+        shader.getUniform("g_ShadowRecordCount").setValue(VarType.Float, (float) records.getImage().getHeight());
         Matrix4f projection = viewport.getCamera().getViewProjectionMatrix();
         shader.getUniform("g_ShadowViewRow").setValue(VarType.Vector4,
                 new Vector4f(projection.m20, projection.m21, projection.m22, projection.m23));
+        if (useBaked) {
+            bindTexture(manager.getRenderer(), unit + 2, bakedAtlas);
+            shader.getUniform("g_BakedShadowAtlas").setValue(VarType.Int, unit + 2);
+            Image image = bakedAtlas.getImage();
+            shader.getUniform("g_BakedShadowAtlasSize").setValue(VarType.Vector2,
+                    new Vector2f(image.getWidth(), image.getHeight()));
+            return unit + 3;
+        }
         return unit + 2;
     }
 
@@ -679,6 +870,7 @@ public final class ShadowManager implements AutoCloseable {
     /** Releases viewport resources. RenderManager calls this when removing a viewport. */
     @Override
     public void close() {
+        disposeBakedAtlas();
         finishFrame();
         for (Spatial root : observedRoots) {
             root.removeSceneChangeListener(catalogListener);

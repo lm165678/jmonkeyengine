@@ -28,6 +28,21 @@ uniform int g_LightCount;
 uniform bool g_IsFirstLightPass;
 uniform vec3 g_CameraPosition;
 
+#if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+    uniform sampler2D m_GiBakedDirect;
+    uniform vec4 g_BakedDirectIndices;
+    uniform vec2 g_BakedDirectLayout;
+    uniform vec4 g_BakedDirectDirections[4];
+
+    vec4 readBakedDirect(int band) {
+        float size = 1.0 / g_BakedDirectLayout.x;
+        float inset = g_BakedDirectLayout.y;
+        vec2 uv = vec2(probeLightmapUv.x, float(band) * size
+                + clamp(probeLightmapUv.y * size, inset, size - inset));
+        return texture2D(m_GiBakedDirect, uv);
+    }
+#endif
+
 #ifdef USE_FOG
     #import "Common/ShaderLib/MaterialFog.glsllib"
 #endif
@@ -57,6 +72,32 @@ void main(){
     #endif
 
     #ifndef DEFERRED_GBUFFER
+    #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+        // The saved diffuse contribution is independent of runtime light-list membership.
+        // Cache coverage here for the first batch so each band only needs one sample.
+        vec4 bakedCoverage = vec4(0.0);
+        if (g_IsFirstLightPass && g_ShadowReceive) {
+            for (int band = 0; band < 4; band++) {
+                if (float(band) >= g_BakedDirectLayout.x) {
+                    break;
+                }
+                vec4 direction = g_BakedDirectDirections[band];
+                if (direction.w > 0.0) {
+                    vec4 baked = readBakedDirect(band);
+                    bakedCoverage[band] = clamp(baked.a, 0.0, 1.0);
+                    float visibility = managedDynamicShadow(g_BakedDirectIndices[band], wpos, surface.geometryNormal, true);
+                    // Version one stored diffuse with the normal already applied.
+                    float normalResponse = direction.w > 1.5 ? max(dot(surface.normal, direction.xyz), 0.0) : 1.0;
+                    vec3 diffuse = baked.rgb * surface.diffuseColor * (vec3(1.0) - surface.fZero)
+                            * normalResponse * visibility;
+                    #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
+                        diffuse *= surface.exposure;
+                    #endif
+                    surface.directLightContribution += diffuse;
+                }
+            }
+        }
+    #endif
     // Calculate direct lights
     for(int i = 0;i < NB_LIGHTS; i+=3){
         #if (defined(GL_ES) && __VERSION__ >= 300) || (!defined(GL_ES) && __VERSION__ >= 150)
@@ -65,11 +106,24 @@ void main(){
         }
         #endif
         vec4 lightData0 = g_LightData[i];
-        lightData0.rgb *= managedShadow(g_ShadowIndices[i / 3].x, wpos, surface.normal, g_ShadowReceive);
+        float shadowIndex = g_ShadowIndices[i / 3].x;
+        #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+            float diffuseWeight = 1.0;
+            int band = int(g_ShadowIndices[i / 3].y) - 1;
+            if (g_ShadowReceive && band >= 0 && g_BakedDirectDirections[band].w > 0.0) {
+                // Bilinear filtering against empty texels yields premultiplied coverage.
+                // Retain live diffuse only for the uncovered portion, and keep specular.
+                diffuseWeight -= g_IsFirstLightPass ? bakedCoverage[band] : clamp(readBakedDirect(band).a, 0.0, 1.0);
+            }
+        #endif
+        lightData0.rgb *= managedShadow(shadowIndex, wpos, surface.normal, g_ShadowReceive);
         vec4 lightData1 = g_LightData[i+1];
         vec4 lightData2 = g_LightData[i+2];    
         PBRLightingUtils_computeDirectLightContribution(
-          lightData0, lightData1, lightData2, 
+          lightData0, lightData1, lightData2,
+          #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+              diffuseWeight,
+          #endif
           surface
         );
     }

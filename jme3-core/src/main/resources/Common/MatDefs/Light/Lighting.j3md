@@ -2,6 +2,7 @@ MaterialDef Phong Lighting {
     ShadingId 1
 
     MaterialParameters {
+        Boolean BakedDirectionalShadows
         // Internal per-view motion inputs; populated by TemporalAAFilter.
         Boolean TemporalGpuInstances
         Boolean TemporalVelocity
@@ -195,6 +196,7 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
@@ -252,6 +254,7 @@ MaterialDef Phong Lighting {
         }
 
         Defines {
+            BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             TEMPORAL_GPU_INSTANCES : TemporalGpuInstances
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance

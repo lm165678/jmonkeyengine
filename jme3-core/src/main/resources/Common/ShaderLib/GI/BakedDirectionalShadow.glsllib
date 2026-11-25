@@ -1,0 +1,17 @@
+#ifndef JME_BAKED_DIRECTIONAL_SHADOW
+#define JME_BAKED_DIRECTIONAL_SHADOW
+#import "Common/ShaderLib/ShadowFilter.glsllib"
+
+// The capture encloses the entire projected footprint of the saved casters.
+// Behind the far plane only occupied texels can occlude a directional light.
+float bakedDirectionalVisibility(sampler2D depth, mat4 lightProjection, vec2 size,
+        vec4 rect, vec3 position, vec3 normal) {
+    vec3 projected = (lightProjection * vec4(position + normal * 0.02, 1.0)).xyz * 0.5 + 0.5;
+    if (projected.z <= 0.0 || any(lessThan(projected.xy, vec2(0.0)))
+            || any(greaterThan(projected.xy, vec2(1.0)))) {
+        return 1.0;
+    }
+    return ShadowFilter_Bilinear(depth, rect.xy + projected.xy * rect.zw, size, rect,
+            min(projected.z - 0.00035, 0.999999));
+}
+#endif

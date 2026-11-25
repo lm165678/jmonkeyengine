@@ -52,6 +52,9 @@ public final class ProbeLightmapControl extends AbstractControl {
     private float preloadDistance;
     private transient CompletableFuture<ProbeLightmapAsset> load;
     private transient Texture2D texture;
+    private transient Texture2D directTexture;
+    private transient String[] directShadowIds;
+    private transient boolean directionalDirectBands;
     private transient boolean missing;
 
     public ProbeLightmapControl() {
@@ -131,6 +134,9 @@ public final class ProbeLightmapControl extends AbstractControl {
             missing = decoded == null;
             if (decoded != null) {
                 texture = decoded.getTexture();
+                directTexture = decoded.getDirectTexture();
+                directShadowIds = decoded.getDirectShadowIds();
+                directionalDirectBands = decoded.usesDirectionalDirectBands();
                 if (texture.getImage().hasMipmaps()) {
                     // The chart padding only guarantees the four bilinear taps at each level.
                     texture.setAnisotropicFilter(1);
@@ -176,6 +182,32 @@ public final class ProbeLightmapControl extends AbstractControl {
             texture.getImage().dispose();
             texture = null;
         }
+        if (directTexture != null) {
+            directTexture.getImage().dispose();
+            directTexture = null;
+            directShadowIds = null;
+            directionalDirectBands = false;
+        }
+    }
+
+    /** @return the resident direct atlas, or null when this asset has no direct bands */
+    public Texture2D getDirectTexture() {
+        return directTexture;
+    }
+
+    /** @return the matching shadow snapshot identifier for the given direct band */
+    public String getDirectShadowId(int band) {
+        return directShadowIds == null || band < 0 || band >= directShadowIds.length ? null : directShadowIds[band];
+    }
+
+    /** @return number of resident direct bands */
+    public int getDirectBandCount() {
+        return directShadowIds == null ? 0 : directShadowIds.length;
+    }
+
+    /** @return whether the live shading normal must be applied to the direct bands */
+    public boolean usesDirectionalDirectBands() {
+        return directionalDirectBands;
     }
 
     @Override
@@ -199,6 +231,9 @@ public final class ProbeLightmapControl extends AbstractControl {
         super.cloneFields(cloner, original);
         bakedTransform = cloner.clone(bakedTransform);
         texture = null;
+        directTexture = null;
+        directShadowIds = null;
+        directionalDirectBands = false;
         load = null;
         missing = false;
     }

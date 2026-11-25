@@ -10,6 +10,10 @@ uniform sampler2D g_ShadowRecords;
 uniform vec2 g_ShadowAtlasSize;
 uniform float g_ShadowRecordCount;
 uniform vec4 g_ShadowViewRow;
+#ifdef BAKED_DIRECTIONAL_SHADOWS
+    uniform sampler2D g_BakedShadowAtlas;
+    uniform vec2 g_BakedShadowAtlasSize;
+#endif
 
 vec4 managedShadowRecord(float light, float texel) {
     return texture2D(g_ShadowRecords, vec2((texel + 0.5) / 36.0,
@@ -17,6 +21,9 @@ vec4 managedShadowRecord(float light, float texel) {
 }
 
 #import "Common/ShaderLib/ShadowFilter.glsllib"
+#ifdef BAKED_DIRECTIONAL_SHADOWS
+    #import "Common/ShaderLib/GI/BakedDirectionalShadow.glsllib"
+#endif
 
 // Project the receiver tangent plane analytically. Screen derivatives inside
 // per-light/cascade branches are undefined, especially in tiled deferred paths.
@@ -46,7 +53,7 @@ vec2 managedShadowDepthGradient(mat4 matrix, vec4 clip, vec3 normal, vec4 rect) 
 }
 
 // Visibility modulates one light's direct contribution, never a composed color.
-float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) {
+float managedDynamicShadow(float light, vec3 worldPosition, vec3 normal, bool receive) {
     if (!g_ManagedShadows || !receive || light < 0.0) {
         return 1.0;
     }
@@ -104,5 +111,23 @@ float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) 
             coordinate.z - header.w, radius, gradient);
     // Per-light artistic attenuation; never multiply the composed scene color.
     return mix(1.0, visibility, clamp(filterSettings.y, 0.0, 1.0));
+}
+
+float managedShadow(float light, vec3 worldPosition, vec3 normal, bool receive) {
+    float visibility = managedDynamicShadow(light, worldPosition, normal, receive);
+    #ifdef BAKED_DIRECTIONAL_SHADOWS
+        if (g_ManagedShadows && receive && light >= 0.0) {
+            vec4 rect = managedShadowRecord(light, 34.0);
+            if (rect.z > 0.0) {
+                float offset = managedShadowRecord(light, 35.0).x;
+                float row = g_ShadowRecordCount - 1.0;
+                mat4 projection = mat4(managedShadowRecord(row, offset), managedShadowRecord(row, offset + 1.0),
+                        managedShadowRecord(row, offset + 2.0), managedShadowRecord(row, offset + 3.0));
+                visibility = min(visibility, bakedDirectionalVisibility(g_BakedShadowAtlas, projection,
+                        g_BakedShadowAtlasSize, rect, worldPosition, normal));
+            }
+        }
+    #endif
+    return visibility;
 }
 #endif

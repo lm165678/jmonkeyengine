@@ -1,6 +1,13 @@
 #import "Common/ShaderLib/GLSLCompat.glsllib"
 #define GI_PROBES
 #import "Common/ShaderLib/GI/ProbeSampling.glsllib"
+#ifdef BAKE_DIRECT
+    #import "Common/ShaderLib/GI/BakedDirectionalShadow.glsllib"
+    uniform sampler2D m_BakedShadowDepth;
+    uniform mat4 m_BakedShadowProjection;
+    uniform vec2 m_BakedShadowSize;
+    uniform vec4 m_BakedLightColor;
+#endif
 varying vec3 worldPosition;
 varying vec3 worldNormal;
 uniform int m_LightmapBand;
@@ -33,11 +40,18 @@ vec3 getShadingNormal(vec3 meshNormal) {
 
 void main() {
     vec3 meshNormal = normalize(worldNormal);
-    vec3 normal = getShadingNormal(meshNormal);
-    giReceiverCurvature = giCurvature(worldPosition, meshNormal);
-    vec4 indirect = giSampleIndirectOnPlane(worldPosition, normal, giReceiverPlane(worldPosition, meshNormal));
-    // Alpha zero in the irradiance band marks untouched atlas space.
-    // Covered geometry can still have zero probe coverage.
-    indirect.a += 1.0;
-    gl_FragColor = m_LightmapBand == 2 ? vec4(giSkyBentMoment, giSkyDiffuseWeight) : indirect;
+    #ifdef BAKE_DIRECT
+        float visibility = bakedDirectionalVisibility(m_BakedShadowDepth, m_BakedShadowProjection,
+                m_BakedShadowSize, vec4(0.0, 0.0, 1.0, 1.0), worldPosition, meshNormal);
+        // One unit is reserved for raster occupancy by the common resolve.
+        gl_FragColor = vec4(m_BakedLightColor.rgb * visibility / 3.14159265, 2.0);
+    #else
+        vec3 normal = getShadingNormal(meshNormal);
+        giReceiverCurvature = giCurvature(worldPosition, meshNormal);
+        vec4 indirect = giSampleIndirectOnPlane(worldPosition, normal, giReceiverPlane(worldPosition, meshNormal));
+        // Alpha zero in the irradiance band marks untouched atlas space.
+        // Covered geometry can still have zero probe coverage.
+        indirect.a += 1.0;
+        gl_FragColor = m_LightmapBand == 2 ? vec4(giSkyBentMoment, giSkyDiffuseWeight) : indirect;
+    #endif
 }

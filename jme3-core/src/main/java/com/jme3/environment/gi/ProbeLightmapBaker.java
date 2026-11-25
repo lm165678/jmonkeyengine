@@ -16,6 +16,7 @@ import com.jme3.texture.FrameBuffer;
 import com.jme3.texture.Image;
 import com.jme3.texture.Texture;
 import com.jme3.texture.Texture2D;
+import com.jme3.texture.image.ColorSpace;
 import com.jme3.util.BufferUtils;
 import com.jme3.math.FastMath;
 import java.nio.ByteBuffer;
@@ -138,6 +139,21 @@ public final class ProbeLightmapBaker {
                 material -> field.bind(material, .05f));
     }
 
+    /**
+     * Bakes one directional light's color and static receiver visibility
+     * from the shared shadow snapshot. Playback applies the live pixel normal.
+     * The output alpha
+     * is one on covered texels and zero elsewhere. See {@link BakedDirectionalShadow}
+     * for the full workflow. The caller owns the returned texture.
+     */
+    public static Texture2D bakeDirect(RenderManager manager, AssetManager assets, Geometry geometry,
+            BakedDirectionalShadow shadow, int width, int height) {
+        return rasterize(manager, assets, geometry, width, height, false, false, material -> {
+            shadow.bindBake(material);
+            return () -> { };
+        });
+    }
+
     private static Texture2D rasterize(RenderManager manager, AssetManager assets, Geometry geometry,
             int width, int height, boolean atlas, boolean blendSeams,
             java.util.function.Function<Material, AutoCloseable> binder) {
@@ -193,8 +209,9 @@ public final class ProbeLightmapBaker {
                 ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
             }
             half.flip();
-            Image lightmap = ProbeLightmapMipChain.build(geometry.getMesh(), charts, half, owners, filled,
-                    width, height, atlas);
+            Image lightmap = bakeMaterial.getParam("BakedShadowDepth") == null
+                    ? ProbeLightmapMipChain.build(geometry.getMesh(), charts, half, owners, filled, width, height, atlas)
+                    : new Image(Image.Format.RGBA16F, width, height, half, ColorSpace.Linear);
             if (lightmap.hasMipmaps()) {
                 BufferUtils.destroyDirectBuffer(half);
             }

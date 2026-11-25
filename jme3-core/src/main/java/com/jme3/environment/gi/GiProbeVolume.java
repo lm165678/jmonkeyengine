@@ -453,6 +453,24 @@ public final class GiProbeVolume extends Node {
         bakedTransform = getWorldTransform().clone();
     }
 
+    private BakedDirectionalShadow[] directionalShadows = new BakedDirectionalShadow[0];
+
+    /** @return copies of the array of shared static shadow snapshots */
+    public BakedDirectionalShadow[] getBakedDirectionalShadows() {
+        return directionalShadows.clone();
+    }
+
+    /**
+     * Publishes the shared snapshots after a successful bake, on the scene thread.
+     * Pass an empty array to restore normal shadow submission. See
+     * {@link BakedDirectionalShadow} for the bake and publication example.
+     * @param shadows snapshots for the baked lights
+     */
+    public void setBakedDirectionalShadows(BakedDirectionalShadow[] shadows) {
+        directionalShadows = shadows.clone();
+        notifySceneChanged(com.jme3.scene.SceneChangeListener.Change.RENDERING);
+    }
+
     /** Copies the editable settings and shares the read-only bake data. */
     @Override
     public void cloneFields(com.jme3.util.clone.Cloner cloner, Object original) {
@@ -460,6 +478,7 @@ public final class GiProbeVolume extends Node {
         coverage = cloner.clone(coverage);
         counts = cloner.clone(counts);
         bakedTransform = cloner.clone(bakedTransform);
+        directionalShadows = cloner.clone(directionalShadows);
     }
 
     @Override
@@ -481,6 +500,7 @@ public final class GiProbeVolume extends Node {
         out.write(surfaceLayout, "giSurfaceLayout", false);
         out.write(fadeDistance, "giFadeDistance", 0f);
         out.write(bakedTransform, "giBakeTransform", null);
+        out.write(directionalShadows.length == 0 ? null : directionalShadows, "bakedDirectionalShadows", null);
     }
 
     @Override
@@ -502,6 +522,9 @@ public final class GiProbeVolume extends Node {
         setCurvedReceiverCorrection(in.readBoolean("giCurvedReceiverCorrection", false));
         setFadeDistance(in.readFloat("giFadeDistance", 0f));
         bakedTransform = (Transform) in.readSavable("giBakeTransform", null);
+        com.jme3.export.Savable[] shadows = in.readSavableArray("bakedDirectionalShadows", null);
+        directionalShadows = shadows == null ? new BakedDirectionalShadow[0]
+                : java.util.Arrays.copyOf(shadows, shadows.length, BakedDirectionalShadow[].class);
         getGrid();
     }
 }

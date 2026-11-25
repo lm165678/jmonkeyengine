@@ -42,6 +42,7 @@ import com.jme3.export.OutputCapsule;
 import com.jme3.material.Material;
 import com.jme3.math.Matrix4f;
 import com.jme3.renderer.Camera;
+import com.jme3.renderer.queue.RenderQueue.ShadowMode;
 import com.jme3.scene.VertexBuffer.Type;
 import com.jme3.scene.mesh.MorphTarget;
 import com.jme3.scene.threadwarden.SceneGraphThreadWarden;
@@ -64,6 +65,7 @@ import java.util.logging.Logger;
 public class Geometry extends Spatial {
     private transient com.jme3.material.MatParamOverride residentProbeLightmap;
     private transient com.jme3.material.MatParamOverride probeLightmapAtlasInset;
+    private transient com.jme3.material.MatParamOverride probeDirectLightmap;
     private transient com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> probeLightmapOverrides;
 
     /**
@@ -91,6 +93,7 @@ public class Geometry extends Spatial {
         }
         residentProbeLightmap = value == null ? null : new com.jme3.material.MatParamOverride(
                 com.jme3.shader.VarType.Texture2D, "GiStaticLightmap", value);
+        probeDirectLightmap = null;
         probeLightmapAtlasInset = hasBands ? new com.jme3.material.MatParamOverride(
                 com.jme3.shader.VarType.Float, "GiLightmapAtlasInset", .5f / value.getImage().getHeight()) : null;
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
@@ -112,6 +115,17 @@ public class Geometry extends Spatial {
         return residentProbeLightmap != null && getMobility() == Mobility.Static;
     }
 
+    /** @return the resident direct map control when this draw can sample UV2 */
+    public com.jme3.environment.gi.ProbeLightmapControl getResidentDirectLightmap() {
+        if (!usesResidentProbeLightmap() || mesh == null || mesh.getBuffer(VertexBuffer.Type.TexCoord2) == null
+                || material == null || material.getMaterialDef().getMaterialParam("GiBakedDirect") == null
+                || getShadowMode() != ShadowMode.Receive && getShadowMode() != ShadowMode.CastAndReceive) {
+            return null;
+        }
+        var maps = getControl(com.jme3.environment.gi.ProbeLightmapControl.class);
+        return maps != null && maps.isEnabled() && maps.getDirectTexture() != null ? maps : null;
+    }
+
     @Override
     public com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> getWorldMatParamOverrides() {
         var inherited = super.getWorldMatParamOverrides();
@@ -126,6 +140,16 @@ public class Geometry extends Spatial {
         probeLightmapOverrides.add(residentProbeLightmap);
         if (probeLightmapAtlasInset != null) {
             probeLightmapOverrides.add(probeLightmapAtlasInset);
+        }
+        var maps = getResidentDirectLightmap();
+        if (maps != null) {
+            if (probeDirectLightmap == null || probeDirectLightmap.getValue() != maps.getDirectTexture()) {
+                probeDirectLightmap = new com.jme3.material.MatParamOverride(com.jme3.shader.VarType.Texture2D,
+                        "GiBakedDirect", maps.getDirectTexture());
+            }
+            probeLightmapOverrides.add(probeDirectLightmap);
+        } else {
+            probeDirectLightmap = null;
         }
         return probeLightmapOverrides;
     }
@@ -651,6 +675,7 @@ public class Geometry extends Spatial {
         super.cloneFields(cloner, original);
         residentProbeLightmap = null;
         probeLightmapAtlasInset = null;
+        probeDirectLightmap = null;
         probeLightmapOverrides = null;
 
         // If this is a grouped node and if our group node is

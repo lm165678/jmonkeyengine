@@ -34,6 +34,7 @@ import java.nio.ByteBuffer;
  * Material skin = new Material(assetManager, SkinLutGenerator.MATERIAL);
  * // 第二步：绑定线性厚度图，R * SkinThickness 表示法线方向的毫米厚度。
  * // 不提供贴图时，整件物体使用 SkinThickness 的常量厚度。
+ * // SDK 厚度图 A 保存有效出口覆盖率；烘焙不到出口的区域不透射。旧图需重新烘焙。
  * skin.setFloat("SkinThickness", 30f);
  * skin.setTexture("SkinThicknessMap", thicknessMap);
  * skin.setVector3("SkinAttenuationDistance", new Vector3f(3f, 1f, .5f));
@@ -44,6 +45,8 @@ import java.nio.ByteBuffer;
  * }</pre>
  *
  * The map is normal thickness, not exact thickness for every light direction.
+ * Alpha stores resolved exit coverage. Custom opaque-alpha maps preserve their
+ * original behavior; the SDK's version 2 exports mark unresolved regions opaque.
  * Grazing paths clamp the cosine at .2. Managed shadows are evaluated at the
  * estimated light entry point; this preserves external blockers approximately,
  * but inaccurate/open thickness or nearby unrelated surfaces can still fail.

@@ -570,7 +570,7 @@ public abstract class AbstractShadowRenderer implements SceneProcessor, Savable,
             if (managedOwner == null) {
                 viewPort.getQueue().renderShadowQueue(shadowMapOccluders, renderManager, shadowCam, true);
             } else {
-                managedOwner.renderCasters(shadowMapOccluders, shadowCam);
+                managedOwner.renderCasters(this, shadowMapOccluders, shadowCam);
             }
         } finally {
             renderManager.setLightFilter(tmpLightFilter);

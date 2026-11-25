@@ -4405,12 +4405,55 @@ public final class GLRenderer implements Renderer {
         if (!caps.contains(Caps.BindlessTextures)) {
             throw new UnsupportedOperationException("Bindless textures unavailable");
         }
+        int target = convertTextureType(texture.getType(), texture.getImage().getMultiSamples(), -1);
+        int binding;
+        switch (target) {
+            case GL.GL_TEXTURE_2D:
+                binding = 0x8069; // GL_TEXTURE_BINDING_2D
+                break;
+            case GL2.GL_TEXTURE_3D:
+                binding = 0x806A; // GL_TEXTURE_BINDING_3D
+                break;
+            case GL.GL_TEXTURE_CUBE_MAP:
+                binding = 0x8514; // GL_TEXTURE_BINDING_CUBE_MAP
+                break;
+            case GLExt.GL_TEXTURE_2D_ARRAY_EXT:
+                binding = 0x8C1D; // GL_TEXTURE_BINDING_2D_ARRAY
+                break;
+            case GLExt.GL_TEXTURE_2D_MULTISAMPLE:
+                binding = 0x9104; // GL_TEXTURE_BINDING_2D_MULTISAMPLE
+                break;
+            case GLExt.GL_TEXTURE_2D_MULTISAMPLE_ARRAY:
+                binding = 0x9105; // GL_TEXTURE_BINDING_2D_MULTISAMPLE_ARRAY
+                break;
+            default:
+                throw new RendererException("Unsupported texture target for a bindless handle: " + target);
+        }
+        // Creating a handle uploads and configures the texture. Unit zero may
+        // already hold an ordinary sampler from this same draw due to budget fallback.
+        int active = context.boundTextureUnit;
+        if (active < 0) {
+            active = getInteger(0x84E0) - GL.GL_TEXTURE0; // GL_ACTIVE_TEXTURE
+        }
+        if (active != 0) {
+            gl.glActiveTexture(GL.GL_TEXTURE0);
+        }
+        context.boundTextureUnit = 0;
+        int previous = getInteger(binding);
+        WeakReference<Image> previousCache = context.boundTextures[0];
         try {
             setTexture(0, texture);
+            return gl4.glGetTextureHandle(texture.getImage().getId());
         } catch (TextureUnitException exception) {
             throw new RendererException(exception);
+        } finally {
+            gl.glBindTexture(target, previous);
+            context.boundTextures[0] = previousCache;
+            if (active != 0) {
+                gl.glActiveTexture(GL.GL_TEXTURE0 + active);
+                context.boundTextureUnit = active;
+            }
         }
-        return gl4.glGetTextureHandle(texture.getImage().getId());
     }
 
     @Override

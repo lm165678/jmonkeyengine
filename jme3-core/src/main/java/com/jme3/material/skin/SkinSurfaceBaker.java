@@ -17,8 +17,10 @@ import java.util.concurrent.CancellationException;
 /**
  * Offline UV0 thickness and smooth mesh-curvature baking. The input must be an
  * exclusively owned, undeformed model snapshot, never a live scene being edited.
- * Rays measure the first outward-facing exit along the inward vertex normal.
- * Open surfaces or exits beyond the range produce maximum (opaque) thickness.
+ * A five-ray normal cone estimates conservative thickness at welded vertices.
+ * The resulting field is smoothed on connected vertices and interpolated in UV0,
+ * avoiding discontinuities when individual texel rays change their exit face.
+ * Open surfaces or exits beyond the range have zero transmission coverage.
  * This is a normal-thickness approximation, not light-direction thickness or a
  * general BSSRDF. Overlapping UVs conservatively retain the thicker sample.
  *
@@ -27,7 +29,8 @@ import java.util.concurrent.CancellationException;
  * Spatial snapshot = assetManager.loadModel("Models/head.j3o");
  * // 第二步：按模型实际身高计算换算值；例如 8 单位高对应 400 毫米，则填 50。
  * SkinSurfaceBaker.Result maps = SkinSurfaceBaker.bake(snapshot, null, 512, 50f, 30f);
- * // 第三步：将 thickness / 30 和 curvature / SkinMaxCurvature 保存为线性纹理。
+ * // 第三步：将 thickness / 30 存入线性 R，transmissionCoverage 存入 A。
+ * // 曲率仍按 curvature / SkinMaxCurvature 保存；旧厚度图需重新烘焙才能包含有效性。
  * // 在渲染线程绑定 SkinThicknessMap、SkinCurvatureMap，并设 SkinThickness=30。
  * // 开启 SkinTransmission；关闭此选项即可恢复原有曲率 LUT 路径。
  * }</pre>
@@ -45,6 +48,8 @@ public final class SkinSurfaceBaker {
         public final int size;
         public final float[] thickness;
         public final float[] curvature;
+        /** Resolved exit coverage in [0,1]; export in thickness-map alpha. */
+        public final float[] transmissionCoverage;
         public final boolean[] covered;
         public int missingExits;
         public int overlappingTexels;
@@ -53,6 +58,7 @@ public final class SkinSurfaceBaker {
             this.size = size;
             thickness = new float[size * size];
             curvature = new float[size * size];
+            transmissionCoverage = new float[size * size];
             covered = new boolean[size * size];
             java.util.Arrays.fill(thickness, maximumThickness);
         }
@@ -161,6 +167,40 @@ public final class SkinSurfaceBaker {
             }
             curvature = next;
         }
+        float[] thickness = new float[welds.size()];
+        float[] valid = new float[thickness.length];
+        boolean[] sampled = new boolean[thickness.length];
+        for (int vertex = 0; vertex < count; vertex++) {
+            cancelled();
+            int index = welded[vertex];
+            if (!sampled[index]) {
+                thickness[index] = sampleThickness(collision, positions[vertex], normals[vertex], units, maximum);
+                valid[index] = thickness[index] < maximum ? 1f : 0f;
+                sampled[index] = true;
+            }
+        }
+        // Do not invent exits on open geometry. Smooth only resolved samples
+        // along connected faces with similar normals; UV chart borders are irrelevant.
+        for (int pass = 0; pass < 2; pass++) {
+            float[] next = thickness.clone();
+            for (int vertex = 0; vertex < thickness.length; vertex++) {
+                if (valid[vertex] == 0) {
+                    continue;
+                }
+                float sum = 0;
+                float weight = 0;
+                for (var neighbor : neighbors.get(vertex).entrySet()) {
+                    if (valid[neighbor.getKey()] > 0) {
+                        sum += thickness[neighbor.getKey()] * neighbor.getValue();
+                        weight += neighbor.getValue();
+                    }
+                }
+                if (weight > 0) {
+                    next[vertex] = .5f * thickness[vertex] + .5f * sum / weight;
+                }
+            }
+            thickness = next;
+        }
         for (int triangle = 0; triangle < indices.size(); triangle += 3) {
             cancelled();
             int a = indices.get(triangle);
@@ -187,24 +227,16 @@ public final class SkinSurfaceBaker {
                     if (Math.min(wa, Math.min(wb, wc)) < -1e-5f) {
                         continue;
                     }
-                    Vector3f position = positions[a].mult(wa).addLocal(positions[b].mult(wb)).addLocal(positions[c].mult(wc));
-                    Vector3f normal = normals[a].mult(wa).addLocal(normals[b].mult(wb)).addLocal(normals[c].mult(wc)).normalizeLocal();
-                    float epsilon = Math.max(1e-5f / units, maximumEpsilon(maximum, units));
-                    Ray ray = new Ray(position.subtract(normal.mult(epsilon)), normal.negate());
-                    ray.setLimit(maximum / units);
-                    CollisionResults hits = new CollisionResults();
-                    collision.collideWith(ray, hits);
+                    float coverage = valid[welded[a]] * wa + valid[welded[b]] * wb + valid[welded[c]] * wc;
                     float distance = maximum;
-                    boolean exit = false;
-                    for (var hit : hits) {
-                        if (hit.getDistance() > epsilon && hit.getDistance() < ray.getLimit()
-                                && hit.getContactNormal().dot(ray.getDirection()) > .01f) {
-                            distance = Math.min(maximum, (hit.getDistance() + epsilon) * units);
-                            exit = true;
-                            break;
-                        }
+                    if (coverage > 1e-5f) {
+                        // Unknown exits contribute opacity through coverage, not
+                        // an invented maximum-distance absorber inside this texel.
+                        distance = (thickness[welded[a]] * wa * valid[welded[a]]
+                                + thickness[welded[b]] * wb * valid[welded[b]]
+                                + thickness[welded[c]] * wc * valid[welded[c]]) / coverage;
                     }
-                    if (!exit) {
+                    if (coverage < 1e-5f) {
                         result.missingExits++;
                     }
                     int pixel = y * result.size + x;
@@ -213,13 +245,46 @@ public final class SkinSurfaceBaker {
                         result.overlappingTexels++;
                         distance = Math.max(distance, result.thickness[pixel]);
                         value = .5f * (value + result.curvature[pixel]);
+                        coverage = Math.min(coverage, result.transmissionCoverage[pixel]);
                     }
                     result.covered[pixel] = true;
                     result.thickness[pixel] = distance;
                     result.curvature[pixel] = value;
+                    result.transmissionCoverage[pixel] = Math.max(0f, Math.min(1f, coverage));
                 }
             }
         }
+    }
+
+    private static float sampleThickness(Spatial collision, Vector3f position, Vector3f normal,
+            float units, float maximum) {
+        Vector3f axis = Math.abs(normal.y) < .9f ? Vector3f.UNIT_Y : Vector3f.UNIT_X;
+        Vector3f tangent = normal.cross(axis).normalizeLocal();
+        Vector3f bitangent = normal.cross(tangent).normalizeLocal();
+        float[] distances = new float[5];
+        for (int sample = 0; sample < distances.length; sample++) {
+            Vector3f direction = normal.negate();
+            if (sample > 0) {
+                Vector3f offset = sample < 3 ? tangent : bitangent;
+                direction.addLocal(offset.mult((sample % 2 == 0 ? -1 : 1) * .15f)).normalizeLocal();
+            }
+            float epsilon = Math.max(1e-5f / units, maximumEpsilon(maximum, units));
+            Ray ray = new Ray(position.add(direction.mult(epsilon)), direction);
+            ray.setLimit(maximum / units);
+            CollisionResults hits = new CollisionResults();
+            collision.collideWith(ray, hits);
+            distances[sample] = maximum;
+            for (var hit : hits) {
+                if (hit.getDistance() > epsilon && hit.getDistance() < ray.getLimit()
+                        && hit.getContactNormal().dot(direction) > .1f) {
+                    distances[sample] = Math.min(maximum, (hit.getDistance() + epsilon) * units);
+                    break;
+                }
+            }
+        }
+        java.util.Arrays.sort(distances);
+        // One isolated thin hit must not make a thick or unresolved region glow.
+        return distances[3];
     }
 
     private static float maximumEpsilon(float maximum, float units) {

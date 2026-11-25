@@ -173,6 +173,7 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
         }
 
         int lightDataIndex = 0;
+        var direct = rm.hasBakedDirectLighting() ? g.getResidentDirectLightmap() : null;
         TempVars vars = TempVars.get();
         Vector4f tmpVec = vars.vect4f1;
         int curIndex;
@@ -187,7 +188,16 @@ public final class SinglePassAndImageBasedLightingLogic extends DefaultTechnique
             //Color
 
             if (l.getType() != Light.Type.Probe && l.getType() != Light.Type.Sky) {
-                shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), 0, 0, 0, lightDataIndex / 3);
+                int bakedBand = 0;
+                if (direct != null && l instanceof DirectionalLight) {
+                    for (int band = 0; band < direct.getDirectBandCount(); band++) {
+                        if (rm.findBakedDirectLight(direct.getDirectShadowId(band)) == l) {
+                            bakedBand = band + 1;
+                            break;
+                        }
+                    }
+                }
+                shadowIndices.setVector4InArray(rm.getShadowLightIndex(l), bakedBand, 0, 0, lightDataIndex / 3);
                 lightData.setVector4InArray(color.getRed(),
                         color.getGreen(),
                         color.getBlue(),

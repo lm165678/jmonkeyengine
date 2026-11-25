@@ -6,6 +6,7 @@ struct SkinInputs {
     float strength;
     #ifdef SKIN_TRANSMISSION
         float thickness;
+        float transmissionCoverage;
     #endif
 };
 
@@ -137,8 +138,11 @@ SkinInputs skinReadInputs(PBRSurface surface) {
     #endif
     #ifdef SKIN_TRANSMISSION
         skin.thickness = max(m_SkinThickness, 0.0);
+        skin.transmissionCoverage = 1.0;
         #ifdef SKIN_THICKNESS_MAP
-            skin.thickness *= clamp(texture2D(m_SkinThicknessMap, newTexCoord).r, 0.0, 1.0);
+            vec4 thicknessSample = texture2D(m_SkinThicknessMap, newTexCoord);
+            skin.thickness *= clamp(thicknessSample.r, 0.0, 1.0);
+            skin.transmissionCoverage = clamp(thicknessSample.a, 0.0, 1.0);
         #endif
     #endif
     return skin;
@@ -181,7 +185,7 @@ void skinAccumulateTransmission(vec4 data0, vec4 data1, vec4 data2, float shadow
             data0.w, data1.w, data2.w, data2.xyz);
     PBRLightingUtils_computeLightInWorldSpace(surface.position, surface.geometryNormal, surface.viewDir, light);
     float back = max(-dot(surface.geometryNormal, light.dir.xyz), 0.0);
-    if (back <= 0.0 || m_SkinTransmissionStrength <= 0.0) {
+    if (back <= 0.0 || m_SkinTransmissionStrength <= 0.0 || skin.transmissionCoverage <= 0.0) {
         return;
     }
     float distance = skin.thickness / max(back, 0.2);
@@ -189,7 +193,7 @@ void skinAccumulateTransmission(vec4 data0, vec4 data1, vec4 data2, float shadow
     vec3 entry = surface.position + light.dir.xyz * distance / max(m_SkinWorldToMillimeters, 0.0001);
     float visibility = managedShadow(shadowIndex, entry, -surface.geometryNormal, g_ShadowReceive);
     vec3 contribution = surface.diffuseColor * data0.rgb * m_SkinTransmissionColor.rgb
-            * attenuation * (back / PI) * max(m_SkinTransmissionStrength, 0.0);
+            * attenuation * (back / PI) * max(m_SkinTransmissionStrength, 0.0) * skin.transmissionCoverage;
     #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
         if (light.fallOff == 1.0) {
             contribution *= surface.exposure;

@@ -258,6 +258,10 @@ public final class DeferredPipeline implements OpaquePipeline {
     }
 
     private boolean supported(Geometry geometry) {
+        if (geometry.getResidentDirectLightmap() != null) {
+            // The per-light direct atlas is indexed in the material's forward technique.
+            return false;
+        }
         Material material = geometry.getMaterial();
         MaterialDef def = material.getMaterialDef();
         int id = models.resolve(def, assets);

@@ -589,6 +589,9 @@
             in vec4 lightData0, 
             in vec4 lightData1, 
             in vec4 lightData2,
+            #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+                in float diffuseWeight,
+            #endif
             inout PBRSurface surface
         ){
             vec4 lightColor = vec4(lightData0.rgb,1.0);
@@ -609,7 +612,11 @@
             float hdotv;
             PBRLightingUtils_computeDirectLight(light, surface, directDiffuse, directSpecular, hdotv); 
 
-            vec3 directLighting = surface.diffuseColor.rgb * directDiffuse + directSpecular;
+            #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+                vec3 directLighting = surface.diffuseColor.rgb * directDiffuse * diffuseWeight + directSpecular;
+            #else
+                vec3 directLighting = surface.diffuseColor.rgb * directDiffuse + directSpecular;
+            #endif
 
             #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
                 if (light.fallOff == 1.0) {

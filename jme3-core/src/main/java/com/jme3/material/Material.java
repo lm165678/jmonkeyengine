@@ -39,6 +39,7 @@ import com.jme3.export.JmeExporter;
 import com.jme3.export.JmeImporter;
 import com.jme3.export.OutputCapsule;
 import com.jme3.export.Savable;
+import com.jme3.light.Light;
 import com.jme3.light.LightList;
 import com.jme3.material.RenderState.BlendMode;
 import com.jme3.material.RenderState.FaceCullMode;
@@ -1244,8 +1245,9 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
         // Select shader to use
         Shader shader = technique.makeCurrent(renderManager, overrides, renderManager.getForcedMatParams(), lights, rendererCaps);
         Shader ordinaryShader = shader;
-        if (bindlessTextures || (geometry.usesResidentProbeLightmap()
-                && renderManager.isGpuSceneBindlessEnabled())) {
+        var direct = def.getMaterialParam("GiBakedDirect") == null ? null : geometry.getResidentDirectLightmap();
+        if (direct == null && (bindlessTextures || (geometry.usesResidentProbeLightmap()
+                && renderManager.isGpuSceneBindlessEnabled()))) {
             shader = renderer.getBindlessShader(shader);
         }
         boolean bindless = shader != ordinaryShader;
@@ -1261,6 +1263,27 @@ public class Material implements CloneableSmartAsset, Cloneable, Savable {
 
         // Clear any uniforms not changed by material.
         resetUniformsNotSetByCurrent(shader);
+        if (direct != null) {
+            Vector4f indices = new Vector4f(-1, -1, -1, -1);
+            int count = direct.getDirectBandCount();
+            Uniform directions = shader.getUniform("g_BakedDirectDirections");
+            directions.setVector4Length(4);
+            for (int band = 0; band < count; band++) {
+                String id = direct.getDirectShadowId(band);
+                Light light = renderManager.findBakedDirectLight(id);
+                if (light instanceof com.jme3.light.DirectionalLight) {
+                    Vector3f direction = ((com.jme3.light.DirectionalLight) light).getDirection();
+                    directions.setVector4InArray(-direction.x, -direction.y, -direction.z,
+                            direct.usesDirectionalDirectBands() ? 2f : 1f, band);
+                    indices.set(band, renderManager.getBakedShadowLightIndex(id));
+                } else {
+                    directions.setVector4InArray(0, 0, 0, 0, band);
+                }
+            }
+            shader.getUniform("g_BakedDirectIndices").setValue(VarType.Vector4, indices);
+            shader.getUniform("g_BakedDirectLayout").setValue(VarType.Vector2,
+                    new Vector2f(count, 0.5f / direct.getDirectTexture().getImage().getHeight()));
+        }
 
         // Delegate rendering to the technique
         com.jme3.renderer.queue.RenderQueue.ShadowMode shadowMode = geometry.getShadowMode();

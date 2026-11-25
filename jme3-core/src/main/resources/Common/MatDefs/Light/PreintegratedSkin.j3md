@@ -2,6 +2,7 @@ MaterialDef Preintegrated Skin {
     // This material uses the forward queue in deferred viewports.
 
     MaterialParameters {
+        Boolean BakedDirectionalShadows
         // SkinLutGenerator supplies matching texture/range/dimensions.
         Texture2D SkinLut -LINEAR
         Vector2 SkinLutSize : 256.0 128.0
@@ -27,6 +28,7 @@ MaterialDef Preintegrated Skin {
         // Optional thin-surface transmission; disabled variants omit all related work.
         Boolean SkinTransmission : false
         // R stores normal thickness / SkinThickness, linear; white means maximum thickness.
+        // A stores resolved exit coverage (1 for ordinary opaque-alpha thickness maps).
         Texture2D SkinThicknessMap -LINEAR
         // Millimeters; also the constant thickness when no map is bound.
         Float SkinThickness : 30.0
@@ -253,6 +255,7 @@ MaterialDef Preintegrated Skin {
         }
 
         Defines {
+            BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             SKIN_LUT : SkinLut
             SKIN_CURVATURE : SkinCurvatureMap
             SKIN_MASK : SkinMask

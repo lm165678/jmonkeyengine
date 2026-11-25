@@ -154,6 +154,15 @@ public final class Technique {
         if (environmentDefine != null && !com.jme3.environment.EnvironmentLighting.available(lights)) {
             dynamicDefines.set(environmentDefine, false);
         }
+        Integer bakedShadowDefine = def.getShaderParamDefineId("BakedDirectionalShadows");
+        if (bakedShadowDefine != null) {
+            boolean bakedShadows = renderManager.hasBakedShadowRecords();
+            dynamicDefines.set(bakedShadowDefine, bakedShadows);
+        }
+        Integer directDefine = def.getShaderParamDefineId("GiBakedDirect");
+        if (directDefine != null && !renderManager.hasBakedDirectLighting()) {
+            dynamicDefines.set(directDefine, false);
+        }
         return logic.makeCurrent(assetManager, renderManager, rendererCaps, lights, dynamicDefines);
     }
     

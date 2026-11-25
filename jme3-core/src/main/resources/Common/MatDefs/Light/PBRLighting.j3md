@@ -2,6 +2,7 @@ MaterialDef PBR Lighting {
     ShadingId 2
 
     MaterialParameters {
+        Boolean BakedDirectionalShadows
         // Internal per-view motion inputs; populated by TemporalAAFilter.
         Boolean TemporalGpuInstances
         Boolean TemporalVelocity
@@ -14,6 +15,7 @@ MaterialDef PBR Lighting {
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiStaticLightmap -LINEAR
+        Texture2D GiBakedDirect -LINEAR
         Float GiLightmapAtlasInset : 0.0
         Texture2D GiMoments -LINEAR
         Texture2D GiSkyVisibility -LINEAR
@@ -225,6 +227,8 @@ MaterialDef PBR Lighting {
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
+            BAKED_DIRECT_LIGHTMAP : GiBakedDirect
+            BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             BOUND_DRAW_BUFFER: BoundDrawBuffer       
             BASECOLORMAP : BaseColorMap            

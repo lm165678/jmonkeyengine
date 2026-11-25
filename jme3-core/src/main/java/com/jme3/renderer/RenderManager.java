@@ -121,6 +121,29 @@ public class RenderManager {
         return currentShadows == null ? -1 : currentShadows.getLightIndex(light);
     }
 
+    /** Internal per-draw lookup for a resident direct Lightmap band. */
+    public int getBakedShadowLightIndex(String id) {
+        return currentShadows == null || getForcedTechnique() != null || getForcedMaterial() != null
+                ? -1 : currentShadows.getBakedLightIndex(id);
+    }
+
+    /** @return whether the current view can play saved direct Lightmap bands */
+    public boolean hasBakedDirectLighting() {
+        return currentShadows != null && getForcedTechnique() == null && getForcedMaterial() == null
+                && currentShadows.hasBakedDirectLighting();
+    }
+
+    /** @return the light identity for a valid baked direct band in the current view */
+    public com.jme3.light.Light findBakedDirectLight(String id) {
+        return hasBakedDirectLighting() ? currentShadows.findBakedDirectLight(id) : null;
+    }
+
+    /** @return whether the current shadow record layout includes static directional depth */
+    public boolean hasBakedShadowRecords() {
+        return currentShadows != null && getForcedTechnique() == null && getForcedMaterial() == null
+                && currentShadows.hasBakedShadowRecords();
+    }
+
     /** Internal material/deferred binding hook; returns the next free texture unit. */
     public int bindManagedShadows(Shader shader, int unit) {
         if (currentShadows == null || getForcedTechnique() != null || getForcedMaterial() != null) {

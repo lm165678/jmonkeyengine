@@ -14,6 +14,7 @@ final class GiCaptureShadows {
 
     static void configure(RenderManager manager, Spatial scene, ViewPort capture, GiSceneBaker.Settings settings) {
         ShadowManager shadows = manager.getShadowManager(capture);
+        shadows.setBakedShadowsEnabled(false);
         shadows.setEnabled(settings.captureShadows);
         shadows.setByteBudget(Math.max(1, settings.shadowByteBudget));
         if (!settings.captureShadows) {
