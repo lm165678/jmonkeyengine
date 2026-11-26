@@ -1,6 +1,6 @@
 layout(local_size_x = 64) in;
 struct Instance {
-    mat4 world;
+    mat4 world; // First three columns' w components store AABB half-extents, or negative x for spheres.
     vec4 sphere;
 };
 layout(std430) readonly buffer m_Instances {
@@ -189,12 +189,29 @@ void main() {
     }
     if (m_Frustum) {
         mat4 rows = transpose(m_ViewProjection);
+        vec4 center = vec4(sphere.xyz, 1.0);
+        int boxPlanes = 0;
         for (int axis = 0; axis < 3; axis++) {
             vec4 a = rows[3] + rows[axis];
             vec4 b = rows[3] - rows[axis];
-            if (dot(a, vec4(sphere.xyz, 1.0)) < -sphere.w * length(a.xyz)
-                    || dot(b, vec4(sphere.xyz, 1.0)) < -sphere.w * length(b.xyz)) {
+            float da = dot(a, center);
+            float db = dot(b, center);
+            if (da < -sphere.w * length(a.xyz) || db < -sphere.w * length(b.xyz)) {
                 return;
+            }
+            // A plane can reject the box only if its center is on the outside.
+            boxPlanes |= (int(da < 0.0) | (int(db < 0.0) << 1)) << (axis * 2);
+        }
+        if (boxPlanes != 0 && instances[id].world[0].w >= 0.0) {
+            vec3 extent = vec3(instances[id].world[0].w, instances[id].world[1].w, instances[id].world[2].w);
+            while (boxPlanes != 0) {
+                int side = findLSB(boxPlanes);
+                vec4 axisRow = rows[side >> 1];
+                vec4 plane = rows[3] + ((side & 1) == 0 ? axisRow : -axisRow);
+                if (dot(plane, center) < -dot(abs(plane.xyz), extent)) {
+                    return;
+                }
+                boxPlanes &= boxPlanes - 1;
             }
         }
     }
@@ -221,7 +238,7 @@ void main() {
     uint draw = range.x + uint(level);
     uint slot = drawMetadata[draw].w + atomicAdd(command[draw * 5u + 1u], 1u);
     mat4 instanceMatrix = instances[id].world;
-    // Existing jME instance-attribute ABI reserves bottom-row components for normal quaternion.
+    // Strip packed AABB data before publishing the existing instance attributes.
     instanceMatrix[0].w = 0.0;
     instanceMatrix[1].w = 0.0;
     instanceMatrix[2].w = 0.0;

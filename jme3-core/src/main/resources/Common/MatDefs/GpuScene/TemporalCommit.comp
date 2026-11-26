@@ -1,6 +1,6 @@
 layout(local_size_x = 64) in;
 struct Instance {
-    mat4 world;
+    mat4 world; // First three columns' w components store the culling-only AABB data.
     vec4 sphere;
 };
 struct TemporalInstance {
@@ -21,7 +21,11 @@ void main() {
     }
     // One commit per viewport frame, after all Hi-Z phases. Never advance history
     // inside culling: one instance may be culled more than once in a frame.
-    history[id].previousWorld = instances[id].world;
+    mat4 world = instances[id].world;
+    world[0].w = 0.0;
+    world[1].w = 0.0;
+    world[2].w = 0.0;
+    history[id].previousWorld = world;
     history[id].visibility.x = history[id].visibility.y;
     history[id].visibility.y = 0u;
 }

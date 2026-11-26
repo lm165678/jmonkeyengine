@@ -1,6 +1,7 @@
 // Scatter only changed instance records into persistent scene storage.
-// Each update is 21 floats: exact integer instance index, column-major matrix,
-// then world-space bounding sphere. Float indices are exact up to 2^24 entries.
+// Each update is 21 floats: exact integer instance index, column-major matrix
+// with AABB data in the affine row, then world-space bounding sphere.
+// Float indices are exact up to 2^24 entries.
 layout(local_size_x = 64) in;
 struct Instance {
     mat4 world;

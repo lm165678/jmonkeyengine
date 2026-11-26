@@ -2,6 +2,7 @@ package jme3test.gpuDrivenRendering;
 
 import com.jme3.app.SimpleApplication;
 import com.jme3.bounding.BoundingBox;
+import com.jme3.bounding.BoundingSphere;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.Vector3f;
@@ -12,6 +13,7 @@ import com.jme3.renderer.gpuscene.GpuScenePipeline;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Node;
 import com.jme3.scene.Spatial;
+import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
 import com.jme3.texture.Image;
 import com.jme3.util.BufferUtils;
@@ -26,7 +28,9 @@ import java.nio.ByteBuffer;
  * GPU on/off restoration, Bindless off, material edits, Forward/Deferred selection,
  * and unsupported-device fallback by comparing rendered images. Exits on success.
  * Also verifies saved scene LOD thresholds, automatic defaults and restoration
- * on unloading through GPU triangle counts.
+ * on unloading through GPU triangle counts. The final orthographic fixture
+ * verifies GPU frustum culling for a thin world AABB and a spherical bound,
+ * including updates after both instances move. No keyboard input is required.
  * <pre>{@code
  * // 第一步：默认请求 GPU Scene 和 Bindless；旧项目可在启动前关闭。
  * AppSettings settings = new AppSettings(true);
@@ -43,6 +47,13 @@ import java.nio.ByteBuffer;
  * renderManager.setRenderPath(RenderPath.TiledDeferredGPU);
  * // 第六步：SceneComposer 保存 GPU Scene LOD 后，游戏加载并挂载场景即可生效。
  * rootNode.attachChild(assetManager.loadModel("Scenes/Level.j3o"));
+ * // 第七步：添加细长盒子并移动到视锥内外，GPU Scene 会读取更新后的世界包围盒。
+ * Geometry thin = new Geometry("Thin bound", new Box(.25f, 8, .25f));
+ * thin.setMaterial(material);
+ * thin.setLocalTranslation(3, 0, -4);
+ * rootNode.attachChild(thin);
+ * // 在后续 simpleUpdate 中平移，保持引擎默认的球体和 AABB 视锥测试。
+ * thin.setLocalTranslation(0, 0, -4);
  * }</pre>
  */
 public final class TestGpuSceneSettings extends SimpleApplication {
@@ -53,6 +64,8 @@ public final class TestGpuSceneSettings extends SimpleApplication {
     private long fullTriangles;
     private long defaultTriangles;
     private long reducedTriangles;
+    private Geometry thinBox;
+    private Geometry sphereBoundBox;
 
     public static void main(String[] args) {
         TestGpuSceneSettings app = new TestGpuSceneSettings();
@@ -137,7 +150,36 @@ public final class TestGpuSceneSettings extends SimpleApplication {
         } else if (frame == 23) {
             lodSettings = reloadLodSettings(100000, 50000, 10000, 1000);
             rootNode.attachChild(lodSettings);
+        } else if (frame == 27) {
+            setupFrustumFixture();
+        } else if (frame == 28) {
+            thinBox.setLocalTranslation(0, 0, -4);
+        } else if (frame == 29) {
+            sphereBoundBox.setLocalTranslation(3, 0, -8);
+        } else if (frame == 30) {
+            thinBox.setLocalTranslation(3, 0, -4);
         }
+    }
+
+    private void setupFrustumFixture() {
+        rootNode.detachAllChildren();
+        cam.setLocation(Vector3f.ZERO);
+        cam.lookAtDirection(Vector3f.UNIT_Z.negate(), Vector3f.UNIT_Y);
+        cam.setParallelProjection(true);
+        cam.setFrustum(1, 30, -1, 1, 1, -1);
+
+        // The AABB lies to the right of the orthographic view. Its enclosing
+        // sphere reaches across both side planes because of its height.
+        thinBox = new Geometry("Thin frustum fixture", new Box(.25f, 8, .25f));
+        thinBox.setMaterial(material);
+        thinBox.setLocalTranslation(3, 0, -4);
+        rootNode.attachChild(thinBox);
+
+        sphereBoundBox = new Geometry("Sphere bound frustum fixture", new Box(.25f, .25f, .25f));
+        sphereBoundBox.setModelBound(new BoundingSphere(.5f, Vector3f.ZERO));
+        sphereBoundBox.setMaterial(material);
+        sphereBoundBox.setLocalTranslation(0, 0, -8);
+        rootNode.attachChild(sphereBoundBox);
     }
 
     @Override
@@ -172,6 +214,17 @@ public final class TestGpuSceneSettings extends SimpleApplication {
             }
             System.out.println("GPU_SCENE_WORLD_LOD_PASS " + fullTriangles + " "
                     + defaultTriangles + " " + reducedTriangles + " " + restored);
+        } else if (frame >= 27) {
+            int expected = frame == 28 ? 2 : frame == 30 ? 0 : 1;
+            GpuScenePipeline gpu = (GpuScenePipeline) renderManager.getPipeline(viewPort);
+            int visible = gpu.readVisibleCount();
+            if (visible != expected) {
+                throw new AssertionError("GPU frustum instance count on frame " + frame
+                        + ": " + visible + " expected " + expected);
+            }
+        }
+        if (frame == 30) {
+            System.out.println("GPU_SCENE_AABB_PASS outside/moved/inside/sphere");
             System.out.println("GPU_SETTINGS_PASS automatic/runtime/material/deferred/fallback");
             stop();
         }

@@ -68,6 +68,8 @@ import java.util.*;
  * application-enabled indices and custom Node subclasses are left alone.
  * Screen-size thresholds and Hi-Z targets use physical render-target pixels on
  * HiDPI displays; the application's logical camera size remains unchanged.
+ * Frustum culling first tests the bounding sphere, then refines intersecting
+ * instances that have a world-space bounding box. Sphere bounds need no refinement.
  * <pre>{@code
  * // 第一步：手动接管视口时创建管线；普通应用使用 AppSettings 自动策略即可。
  * GpuScenePipeline pipeline = new GpuScenePipeline(assetManager, models);
@@ -76,7 +78,7 @@ import java.util.*;
  * pipeline.setEnabled(true);
  * pipeline.setMaxDistance(200); // 0 禁用距离剔除，按包围球最近距离判断。
  * pipeline.setMinPixels(2); // 0 禁用屏幕尺寸剔除。
- * pipeline.setFrustumCulling(true);
+ * pipeline.setFrustumCulling(true); // 默认开启，球体通过后可用世界包围盒进一步剔除。
  * // 第三步：移动模型后正常 updateGeometricState；GPU 数据随绘制更新。
  * // 第四步：关闭后使用原材质，释放 GPU 专用缓存，不修改源模型。
  * pipeline.setEnabled(false);
@@ -938,7 +940,11 @@ public final class GpuScenePipeline implements OpaquePipeline {
         minPixels = pixels;
     }
 
-    /** @param enabled enables conservative GPU frustum tests; default true */
+    /**
+     * Enables the GPU sphere test and the subsequent world-space AABB test for
+     * box bounds. The default is enabled; see the class usage example.
+     * @param enabled whether to cull against the view frustum
+     */
     public void setFrustumCulling(boolean enabled) {
         frustum = enabled;
     }
@@ -1727,18 +1733,32 @@ public final class GpuScenePipeline implements OpaquePipeline {
             for (int i = dirty.nextSetBit(0); i >= 0; i = dirty.nextSetBit(i + 1)) {
                 Geometry geometry = instances.get(i);
                 Matrix4f world = geometry.getWorldMatrix();
+                int base = i * 20;
                 for (int column = 0; column < 4; column++) {
-                    for (int row = 0; row < 4; row++) {
-                        records[i * 20 + column * 4 + row] = world.get(row, column);
+                    for (int row = 0; row < 3; row++) {
+                        records[base + column * 4 + row] = world.get(row, column);
                     }
                 }
                 com.jme3.bounding.BoundingVolume bound = geometry.getWorldBound();
                 Vector3f center = bound.getCenter();
-                records[i * 20 + 16] = center.x;
-                records[i * 20 + 17] = center.y;
-                records[i * 20 + 18] = center.z;
-                records[i * 20 + 19] = bound instanceof BoundingBox
-                        ? ((BoundingBox) bound).getExtent(extent).length() : ((BoundingSphere) bound).getRadius();
+                // Pack the AABB into the unused affine row without growing either SSBO.
+                // Cull and TemporalCommit restore the row before publishing matrices.
+                if (bound instanceof BoundingBox) {
+                    ((BoundingBox) bound).getExtent(extent);
+                    records[base + 3] = extent.x;
+                    records[base + 7] = extent.y;
+                    records[base + 11] = extent.z;
+                    records[base + 19] = extent.length();
+                } else {
+                    records[base + 3] = -1f;
+                    records[base + 7] = 0f;
+                    records[base + 11] = 0f;
+                    records[base + 19] = ((BoundingSphere) bound).getRadius();
+                }
+                records[base + 15] = 1f;
+                records[base + 16] = center.x;
+                records[base + 17] = center.y;
+                records[base + 18] = center.z;
                 if (!initial) {
                     proxy.expandBound(bound);
                 }
