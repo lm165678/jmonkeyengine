@@ -196,7 +196,8 @@ public final class SceneServicesState extends AbstractAppState {
             return false;
         });
         WorldSettings world = selectWorld();
-        boolean lightmapMipEnabled = world != null && world.isLightmapMipEnabled()
+        boolean lightmapMipEnabled = (world == null
+                ? WorldSettings.DEFAULT_LIGHTMAP_MIP_ENABLED : world.isLightmapMipEnabled())
                 && ProbeLightmapControl.supportsMipSampling(app.getRenderer());
         for (var control : catalog.controls) {
             if (control instanceof com.jme3.environment.gi.ProbeLightmapControl) {
@@ -205,7 +206,8 @@ public final class SceneServicesState extends AbstractAppState {
                 lightmap.updateResidency(app.getAssetManager(), app.getCamera().getLocation(), true, lightmapMipEnabled);
             }
         }
-        boolean useDirectional = world != null && world.isDirectionalLightmapEnabled();
+        boolean useDirectional = world == null
+                ? WorldSettings.DEFAULT_DIRECTIONAL_LIGHTMAP_ENABLED : world.isDirectionalLightmapEnabled();
         if (useDirectional || directionalLightmapsActive) {
             for (var lightmap : lightmaps) {
                 lightmap.updateDirectionalResidency(app.getAssetManager(), useDirectional);

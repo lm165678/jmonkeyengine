@@ -48,7 +48,7 @@ public final class WorldSettings extends AbstractControl {
     private Map<String, Double> options = new LinkedHashMap<>();
     private int priority;
     private long revision;
-    private DisplayOutput displayOutput = DisplayOutput.Hdr;
+    private DisplayOutput displayOutput = DisplayOutput.Sdr;
     private float[] gpuLodThresholds = new float[0];
     private GiStreaming giStreaming = GiStreaming.DEFAULTS;
     /** New scenes prefer one hardware-filtered moment lookup per probe. */
@@ -57,13 +57,17 @@ public final class WorldSettings extends AbstractControl {
     public static final boolean DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE = true;
     private boolean singleProbeVisibility = DEFAULT_SINGLE_PROBE_VISIBILITY;
     private boolean octahedralProbeIrradiance = DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE;
-    private boolean lightmapMipEnabled;
-    private boolean directionalLightmapEnabled;
+    /** Use stored Lightmap mip levels unless a scene explicitly disables them. */
+    public static final boolean DEFAULT_LIGHTMAP_MIP_ENABLED = true;
+    /** Use resident directional companions, with ordinary RGB fallback. */
+    public static final boolean DEFAULT_DIRECTIONAL_LIGHTMAP_ENABLED = true;
+    private boolean lightmapMipEnabled = DEFAULT_LIGHTMAP_MIP_ENABLED;
+    private boolean directionalLightmapEnabled = DEFAULT_DIRECTIONAL_LIGHTMAP_ENABLED;
 
     /**
      * Selects trilinear filtering for streamed lightmaps with baked mip levels.
-     * Disabled by default, including in old scenes. Lightmaps with only a base
-     * level keep their existing filtering. Automatic desktop OpenGL and OpenGL
+     * Enabled by default, including scenes without a saved choice. Lightmaps
+     * with only a base level keep their existing filtering. Desktop OpenGL and OpenGL
      * ES 3 scene services apply the change during the next render update.
      * Set from the application thread. Existing resident textures are reused
      * and mip levels are never generated at runtime for this setting.
@@ -92,8 +96,8 @@ public final class WorldSettings extends AbstractControl {
     }
 
     /**
-     * Enables optional directional indirect Lightmap playback. The default is
-     * false, and scenes without companion textures retain RGB playback.
+     * Enables optional directional indirect Lightmap playback. Enabled by default,
+     * including missing saved fields; scenes without companions retain RGB playback.
      * Set on the scene thread. Scene services stream the companion while
      * enabled and release it when disabled.
      * <pre>{@code
@@ -285,7 +289,7 @@ public final class WorldSettings extends AbstractControl {
 
     /**
      * Selects display output independently of the scene's post-processing filters.
-     * New settings default to HDR; older files without an output field follow
+     * New settings default to SDR; older files without an output field follow
      * AppSettings. HDR requires a supported Windows LWJGL3
      * window and falls back to SDR when unavailable. SimpleApplication uses the
      * highest-priority world and restores the application setting on detach.
@@ -413,8 +417,8 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(probeGiFullFallback, "probeGiFullFallback", true);
         capsule.write(singleProbeVisibility, "singleProbeVisibility", false);
         capsule.write(octahedralProbeIrradiance, "octahedralProbeIrradiance", false);
-        capsule.write(lightmapMipEnabled, "lightmapMipEnabled", false);
-        capsule.write(directionalLightmapEnabled, "directionalLightmapEnabled", false);
+        capsule.write(lightmapMipEnabled, "lightmapMipEnabled", DEFAULT_LIGHTMAP_MIP_ENABLED);
+        capsule.write(directionalLightmapEnabled, "directionalLightmapEnabled", DEFAULT_DIRECTIONAL_LIGHTMAP_ENABLED);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -430,8 +434,8 @@ public final class WorldSettings extends AbstractControl {
         InputCapsule capsule = importer.getCapsule(this);
         singleProbeVisibility = capsule.readBoolean("singleProbeVisibility", false);
         octahedralProbeIrradiance = capsule.readBoolean("octahedralProbeIrradiance", false);
-        lightmapMipEnabled = capsule.readBoolean("lightmapMipEnabled", false);
-        directionalLightmapEnabled = capsule.readBoolean("directionalLightmapEnabled", false);
+        lightmapMipEnabled = capsule.readBoolean("lightmapMipEnabled", DEFAULT_LIGHTMAP_MIP_ENABLED);
+        directionalLightmapEnabled = capsule.readBoolean("directionalLightmapEnabled", DEFAULT_DIRECTIONAL_LIGHTMAP_ENABLED);
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);

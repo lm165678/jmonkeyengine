@@ -79,17 +79,19 @@ public class ProbeLightmapMipPlaybackTest {
     }
 
     @Test
-    public void sceneMipPlaybackIsOptInAndRoundTrips() throws Exception {
+    public void lightmapPlaybackDefaultsOnAndExplicitOffRoundTrips() throws Exception {
         Node scene = new Node("Scene");
         WorldSettings world = new WorldSettings();
         scene.addControl(world);
         File file = files.newFile("scene.j3o");
-        assertFalse(world.isLightmapMipEnabled());
-        assertFalse(roundTrip(scene, file).isLightmapMipEnabled());
-        world.setLightmapMipEnabled(true);
+        assertTrue(world.isLightmapMipEnabled());
+        assertTrue(world.isDirectionalLightmapEnabled());
         assertTrue(roundTrip(scene, file).isLightmapMipEnabled());
+        assertTrue(roundTrip(scene, file).isDirectionalLightmapEnabled());
         world.setLightmapMipEnabled(false);
+        world.setDirectionalLightmapEnabled(false);
         assertFalse(roundTrip(scene, file).isLightmapMipEnabled());
+        assertFalse(roundTrip(scene, file).isDirectionalLightmapEnabled());
     }
 
     private DesktopAssetManager manager() {
