@@ -12,6 +12,7 @@
 | On | Updated | 5.241 | 6.248 | 190.8 | 68 / 0 |
 
 - Off: all six full RGBA captures have the same SHA-256. Median GPU GBuffer time 1.346 -> 1.345 ms. On: the two rendering paths differ at some pixels; mean absolute RGB delta 0.011 on the 0..255 scale, 629 of 3,686,400 pixels differ by more than eight levels. No cross-device or exclusive fullscreen equivalence claim. The GPU smoke `gradlew :jme3-examples:bakedDirectLightmapSmoke` passed multi-band fallback and single-band Forward/deferred pixel comparisons, including partial UV2 coverage, disabled lights, moving casters, fog and sun exposure.
+- Follow-up backlog: the user accepts the current version. The target for full direct and static-shadow baking is a clear runtime speedup over indirect-only baking at equivalent image quality. Read-only inspection found all 103 meshes marked Static, with 89 in the baked directional snapshot and 14 AlphaDiscardThreshold casters still handled by live shadows. The remaining costs and Alpha cutout baking are follow-ups in RENDERING_QUALITY_ROADMAP.md.
 
 ## 2026-11-26 configurable direct Lightmap shadow filter
 
