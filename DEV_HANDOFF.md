@@ -1,3 +1,7 @@
+## 2026-11-26 ray-cast Lightmap shadow bake backlog
+
+- Added a roadmap item for optional bake-time visibility rays from UV2 surface samples toward static directional lights. On resuming direct Lightmaps or shadow-map resolution tuning, remind the user to compare ray visibility with the existing depth bake at fixed resolution using the TestScene2 curtain and lantern. Status: planned.
+
 ## 2026-11-26 paired direct-Lightmap and skin source checkpoint
 
 - Compatible implementation revisions: engine `a8b493ba028e374a700996fa99d86857735b0f00` on dev_fix_lightprobe_issue and SDK `1f9470e16bd8bc91d919fcedd4c7febececc6b4b` on master. Documentation-only commits may follow these revisions.
