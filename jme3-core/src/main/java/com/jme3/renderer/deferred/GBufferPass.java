@@ -99,9 +99,19 @@ final class GBufferPass implements DeferredPass {
                 if (probeGi != null) {
                     giInLighting.setEnabled(probeGi.includes(geometry));
                 }
+                boolean direct = frame.batch.directShadowId != null && geometry.getResidentDirectLightmap() != null;
                 try {
+                    if (direct) {
+                        // Forced capture techniques suppress normal shadow and Lightmap bindings.
+                        // This receiver needs both while writing its native PBR GBuffer surface.
+                        rm.setForcedTechnique(null);
+                        material.selectTechnique("GBuffer", rm);
+                    }
                     rm.renderGeometry(geometry);
                 } finally {
+                    if (direct) {
+                        rm.setForcedTechnique("GBuffer");
+                    }
                     rm.removeForcedMatParam(shadingIdOverride);
                     if (needsLightData) {
                         rm.removeForcedMatParam(lightDataOverride);

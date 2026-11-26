@@ -46,6 +46,10 @@
  * GPU contexts/capacities select CPU. Unsupported viewport states select Forward,
  * with a diagnostic available from the processor. MSAA targets use Forward;
  * use a single-sample target with FXAA for deferred rendering.
+ * A static built-in PBR receiver with one baked directional band writes its
+ * diffuse Lightmap contribution in the GBuffer pass. The lighting pass retains
+ * live specular and uses UV2 coverage for the remaining diffuse response.
+ * Multi-band receivers retain forward shading to resolve each band's coverage.
  *
  * Each viewport owns its resources. Removing a viewport releases its managed
  * pipeline. Forward transitions release the managed pipeline; custom model

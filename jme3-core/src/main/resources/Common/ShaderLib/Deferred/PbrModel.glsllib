@@ -6,6 +6,10 @@
 // gbuffer2.rgb: F0
 // gbuffer3.rgb: precomputed IBL/indirect/emissive; .a: opacity
 // gbuffer4.rg: fog transmission/sun exposure; .a: modifier flags (bit 0 enables factors)
+#ifdef DEFERRED_BAKED_DIRECT
+// gbuffer4.b: coverage of the batch's baked light, zero on ordinary PBR receivers.
+uniform int m_BakedDirectLightIndex;
+#endif
 struct PbrSurface {
     vec3 diffuse;
     vec3 normal;
@@ -15,11 +19,18 @@ struct PbrSurface {
     float opacity;
     vec2 terrainFactors;
     int flags;
+    #ifdef DEFERRED_BAKED_DIRECT
+        float bakedCoverage;
+    #endif
 };
 // PBR uses upstream inverse-square attenuation. Phong/custom models retain
 // getLight's legacy attenuation; changing that shared helper would alter them.
+#ifdef DEFERRED_BAKED_DIRECT
+DeferredLight getPbrLightByIndex(int index, vec3 worldPosition, vec3 normal) {
+#else
 DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition, vec3 normal) {
     int index = list.allLights ? entry : readLightIndex(list.offset + entry);
+#endif
     vec4 colorAndType = texelFetch(Lights, ivec2(0, index), 0);
     vec4 positionAndRadius = texelFetch(Lights, ivec2(1, index), 0);
     vec4 spot = texelFetch(Lights, ivec2(2, index), 0);
@@ -43,6 +54,11 @@ DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition,
     }
     return light;
 }
+#ifdef DEFERRED_BAKED_DIRECT
+DeferredLight getPbrLight(DeferredLightList list, int entry, vec3 worldPosition, vec3 normal) {
+    return getPbrLightByIndex(list.allLights ? entry : readLightIndex(list.offset + entry), worldPosition, normal);
+}
+#endif
 PbrSurface decodePbrSurface() {
     vec4 record0 = getGBuffer0();
     vec4 record1 = getGBuffer1();
@@ -59,6 +75,9 @@ PbrSurface decodePbrSurface() {
     surface.opacity = record3.a;
     surface.terrainFactors = record4.rg;
     surface.flags = int(record4.a);
+    #ifdef DEFERRED_BAKED_DIRECT
+        surface.bakedCoverage = record4.b;
+    #endif
     return surface;
 }
 vec3 evaluatePbrLight(PbrSurface surface, vec3 viewDirection, DeferredLight light) {
@@ -84,8 +103,18 @@ vec4 shadePbrSurface() {
     DeferredLightList lights = getLightList();
     vec3 result = surface.indirect;
     for (int entry = 0; entry < lights.count; ++entry) {
-        DeferredLight light = getPbrLight(lights, entry, position, surface.normal);
-        result += evaluatePbrLight(surface, viewDirection, light);
+        #ifdef DEFERRED_BAKED_DIRECT
+            int index = lights.allLights ? entry : readLightIndex(lights.offset + entry);
+            DeferredLight light = getPbrLightByIndex(index, position, surface.normal);
+            PbrSurface live = surface;
+            if (index == m_BakedDirectLightIndex) {
+                live.diffuse *= 1.0 - surface.bakedCoverage;
+            }
+            result += evaluatePbrLight(live, viewDirection, light);
+        #else
+            DeferredLight light = getPbrLight(lights, entry, position, surface.normal);
+            result += evaluatePbrLight(surface, viewDirection, light);
+        #endif
     }
     return vec4(result, surface.opacity);
 }

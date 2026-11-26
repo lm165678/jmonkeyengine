@@ -61,7 +61,7 @@ final class DeferredResources {
     Texture2D lightTexture, tileTexture;
     BufferObject gpuIndices;
     final Mesh quad = new Quad(1, 1);
-    private final Shader[] lightingShaders = new Shader[16];
+    private final Shader[] lightingShaders = new Shader[32];
     private final Shader[] probeGiShaders = new Shader[4];
     private Shader computeShader;
     private int gpuRecords;
@@ -134,18 +134,19 @@ final class DeferredResources {
     }
 
     Shader lightingShader(boolean gpu, ShadingModelRegistry models, boolean probeGi, boolean halfGi) {
-        return lightingShader(gpu, models, probeGi, halfGi, false);
+        return lightingShader(gpu, models, probeGi, halfGi, false, false);
     }
 
     Shader lightingShader(boolean gpu, ShadingModelRegistry models, boolean probeGi, boolean halfGi,
-            boolean bakedShadows) {
+            boolean bakedShadows, boolean directLightmaps) {
         requireOpen();
         if (modelVersion != models.getVersion()) {
             deleteLightingShaders();
             modelVersion = models.getVersion();
         }
         Map<Integer, String> customModels = models.getSources();
-        int variant = (gpu ? 1 : 0) + (probeGi ? 2 : 0) + (halfGi ? 4 : 0) + (bakedShadows ? 8 : 0);
+        int variant = (gpu ? 1 : 0) + (probeGi ? 2 : 0) + (halfGi ? 4 : 0) + (bakedShadows ? 8 : 0)
+                + (directLightmaps ? 16 : 0);
         Shader shader = lightingShaders[variant];
         if (shader == null) {
             String source = (String) assets.loadAsset(ROOT + "Lighting.frag");
@@ -158,7 +159,8 @@ final class DeferredResources {
                 DeferredRenderContext.uniformDefines() + (gpu ? "#define GPU_TILES\n" : "")
                         + (probeGi ? "#define DEFERRED_GI_LIGHT\n#define GI_PROBES\n" : "")
                         + (halfGi ? "#define DEFERRED_GI_HALF\n" : "")
-                        + (bakedShadows ? "#define BAKED_DIRECTIONAL_SHADOWS\n" : ""), language);
+                        + (bakedShadows ? "#define BAKED_DIRECTIONAL_SHADOWS\n" : "")
+                        + (directLightmaps ? "#define DEFERRED_BAKED_DIRECT\n" : ""), language);
             lightingShaders[variant] = shader;
         }
         return shader;

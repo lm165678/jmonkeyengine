@@ -258,10 +258,6 @@ public final class DeferredPipeline implements OpaquePipeline {
     }
 
     private boolean supported(Geometry geometry) {
-        if (geometry.getResidentDirectLightmap() != null) {
-            // The per-light direct atlas is indexed in the material's forward technique.
-            return false;
-        }
         Material material = geometry.getMaterial();
         MaterialDef def = material.getMaterialDef();
         int id = models.resolve(def, assets);
@@ -362,6 +358,22 @@ public final class DeferredPipeline implements OpaquePipeline {
         GeometryList opaque = queue.getOpaqueQueue();
         for (Geometry geometry : opaque) {
             LightList worldLights = geometry.getWorldLightList();
+            var direct = geometry.getResidentDirectLightmap();
+            String directId = null;
+            if (direct != null) {
+                // Native PBR stores one band's UV2 coverage. Multi-band atlases need independent weights.
+                MaterialDef def = geometry.getMaterial().getMaterialDef();
+                if (direct.getDirectBandCount() != 1 || def.getShadingId() != 2
+                        || !"Common/MatDefs/Light/PBRLighting.j3md".equals(def.getAssetName())
+                        || GBufferPass.parameter(geometry, "DebugValuesMode") != null) {
+                    forward.add(geometry);
+                    continue;
+                }
+                String id = direct.getDirectShadowId(0);
+                if (rm.findBakedDirectLight(id) != null) {
+                    directId = id;
+                }
+            }
             if (!supported(geometry) || !supportedLights(worldLights)) {
                 forward.add(geometry);
                 continue;
@@ -387,6 +399,14 @@ public final class DeferredPipeline implements OpaquePipeline {
                         selected.identities.add(light);
                     }
                 }
+            }
+            if (directId != null) {
+                if (selected.directShadowId != null && !selected.directShadowId.equals(directId)) {
+                    // Keep the original light scope in a single fullscreen pass.
+                    forward.add(geometry);
+                    continue;
+                }
+                selected.directShadowId = directId;
             }
             selected.geometries.add(geometry);
         }

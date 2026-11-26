@@ -71,33 +71,41 @@ void main(){
         return;
     #endif
 
-    #ifndef DEFERRED_GBUFFER
     #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
         // The saved diffuse contribution is independent of runtime light-list membership.
         // Cache coverage here for the first batch so each band only needs one sample.
         vec4 bakedCoverage = vec4(0.0);
         if (g_IsFirstLightPass && g_ShadowReceive) {
+            #ifdef DEFERRED_GBUFFER
+            {
+                const int band = 0;
+            #else
             for (int band = 0; band < 4; band++) {
                 if (float(band) >= g_BakedDirectLayout.x) {
                     break;
                 }
+            #endif
                 vec4 direction = g_BakedDirectDirections[band];
                 if (direction.w > 0.0) {
                     vec4 baked = readBakedDirect(band);
                     bakedCoverage[band] = clamp(baked.a, 0.0, 1.0);
-                    float visibility = managedDynamicShadow(g_BakedDirectIndices[band], wpos, surface.geometryNormal, true);
                     // Version one stored diffuse with the normal already applied.
                     float normalResponse = direction.w > 1.5 ? max(dot(surface.normal, direction.xyz), 0.0) : 1.0;
                     vec3 diffuse = baked.rgb * surface.diffuseColor * (vec3(1.0) - surface.fZero)
-                            * normalResponse * visibility;
+                            * normalResponse;
                     #if defined(EXPOSUREMAP) || defined(STATIC_SUN_INTENSITY) || defined(USE_VERTEX_COLORS_AS_SUN_INTENSITY) || defined(STATIC_SUN_EXPOSURE) || defined(USE_VERTEX_COLORS_AS_SUN_EXPOSURE)
                         diffuse *= surface.exposure;
                     #endif
-                    surface.directLightContribution += diffuse;
+                    // A moving caster can only attenuate existing baked irradiance.
+                    if (any(notEqual(diffuse, vec3(0.0)))) {
+                        surface.directLightContribution += diffuse * managedDynamicShadow(
+                                g_BakedDirectIndices[band], wpos, surface.geometryNormal, true);
+                    }
                 }
             }
         }
     #endif
+    #ifndef DEFERRED_GBUFFER
     // Calculate direct lights
     for(int i = 0;i < NB_LIGHTS; i+=3){
         #if (defined(GL_ES) && __VERSION__ >= 300) || (!defined(GL_ES) && __VERSION__ >= 150)
@@ -221,5 +229,9 @@ void main(){
         writeDeferredSurface(surface.diffuseColor, surface.normal, deferredRoughness,
                 surface.fZero, gl_FragColor.rgb, surface.alpha,
                 vec3(transmission, surface.exposure, 0.0), 1.0, model);
+        #if defined(BAKED_DIRECT_LIGHTMAP) && defined(STATIC_PROBE_LIGHTMAP)
+            // The batch identifies the light. Keep the original fog/exposure flags in alpha.
+            outGBuffer4.b = bakedCoverage.x;
+        #endif
     #endif
 }

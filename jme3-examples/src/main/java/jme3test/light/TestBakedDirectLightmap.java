@@ -12,6 +12,7 @@ import com.jme3.light.DirectionalLight;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.FastMath;
+import com.jme3.math.Vector2f;
 import com.jme3.math.Vector3f;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.RenderPath;
@@ -39,7 +40,7 @@ import java.util.List;
  * Two-light direct Lightmap playback with moving casters and receivers.
  * Run {@code gradlew :jme3-examples:bakedDirectLightmapSmoke}. Requires
  * desktop OpenGL 4.3. No input controls. The example checks pixels on the
- * Forward and TiledDeferredGPU paths, using a reloaded scene and streamed map.
+ * Forward and deferred paths, using reloaded single- and two-light maps.
  * <pre>
  * 第一步：为固定几何配置 UV2 和 Cast/Receive，在渲染线程调用 capture 保存方向光深度。
  * 第二步：逐灯调用 bakeDirect，使用 withDirect 将直射层附加到原有间接 Lightmap。
@@ -65,6 +66,7 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
     private int stage;
     private float firstShadow;
     private float bakedAfterDisable;
+    private final float[] reference = new float[4];
 
     public static void main(String[] args) {
         var app = new TestBakedDirectLightmap();
@@ -124,6 +126,18 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
         try {
             directory = Files.createTempDirectory("jme-direct-lightmap-");
             new BinaryExporter().save(map, directory.resolve("direct.j3o").toFile());
+            var single = ProbeLightmapAsset.withDirect(indirect, false, List.of(redDirect), List.of(a));
+            // Mimic a partially covered chart edge across the exposed comparison pixel.
+            ByteBuffer band = single.getDirectTexture().getImage().getData(0);
+            for (int row = 0; row < 64; row++) {
+                for (int column = 40; column < 44; column++) {
+                    int offset = (row * 64 + column) * 8;
+                    float redValue = FastMath.convertHalfToFloat(band.getShort(offset));
+                    band.putShort(offset, FastMath.convertFloatToHalf(redValue * .5f));
+                    band.putShort(offset + 6, FastMath.convertFloatToHalf(.5f));
+                }
+            }
+            new BinaryExporter().save(single, directory.resolve("single.j3o").toFile());
             originalFloor.addControl(new ProbeLightmapControl("direct.j3o", originalFloor.getWorldTransform(), 100));
             new BinaryExporter().save(scene, directory.resolve("scene.j3o").toFile());
             assetManager.registerLocator(directory.toString(), FileLocator.class);
@@ -277,8 +291,17 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
                     || floor.getShadowMode() != ShadowMode.Receive) {
                 throw new AssertionError("A changed static caster did not restore realtime lighting and shadows");
             }
-            System.out.println("BAKED_DIRECT_LIGHTMAP_PASS");
-            stop();
+            enqueue(() -> {
+                fixedCaster.move(0, -1.6f, 0);
+                floor.removeControl(floor.getControl(ProbeLightmapControl.class));
+                floor.addControl(new ProbeLightmapControl("single.j3o", floor.getWorldTransform(), 100));
+                viewPort.setRenderPath(RenderPath.Forward);
+            });
+            stage++;
+            return;
+        }
+        if (stage >= 10) {
+            verifySingleBand();
             return;
         }
         if (resident.getDirectBandCount() != 2
@@ -317,6 +340,60 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
         }
     }
 
+    private void verifySingleBand() {
+        // Compare fully lit and shadowed samples. Only red is baked; blue stays live.
+        float[] values = {pixel(.9f, 0), pixel(.9f, 2), pixel(-1f, 0), pixel(1.5f, 1.6f, 0)};
+        if (stage == 10 || stage == 14 || stage == 16) {
+            if (stage == 14 && (values[0] < .1f || values[1] < .1f)) {
+                throw new AssertionError("Disabled baked red or live blue light lost its diffuse contribution");
+            }
+            System.arraycopy(values, 0, reference, 0, values.length);
+        } else {
+            if (renderManager.getRenderPipeline(viewPort).getForwardGeometryCount() != 0) {
+                throw new AssertionError("A single direct band escaped the deferred pass");
+            }
+            for (int i = 0; i < values.length; i++) {
+                if (Math.abs(reference[i] - values[i]) > .015f) {
+                    throw new AssertionError("Single-band pixel " + i + " at stage " + stage + ": "
+                            + values[i] + " versus forward " + reference[i]);
+                }
+            }
+        }
+        switch (stage++) {
+            case 10:
+                enqueue(() -> viewPort.setRenderPath(RenderPath.Deferred));
+                break;
+            case 11:
+                enqueue(() -> viewPort.setRenderPath(RenderPath.TiledDeferredCPU));
+                break;
+            case 12:
+            case 14:
+            case 16:
+                enqueue(() -> viewPort.setRenderPath(RenderPath.TiledDeferredGPU));
+                break;
+            case 13:
+                enqueue(() -> {
+                    redLight.setEnabled(false);
+                    viewPort.setRenderPath(RenderPath.Forward);
+                });
+                break;
+            case 15:
+                enqueue(() -> {
+                    redLight.setEnabled(true);
+                    Material material = floor.getMaterial();
+                    material.setBoolean("UseFog", true);
+                    material.setColor("FogColor", new ColorRGBA(.04f, .1f, .02f, 1f));
+                    material.setVector2("LinearFog", new Vector2f(0f, 18f));
+                    material.setFloat("StaticSunIntensity", .4f);
+                    viewPort.setRenderPath(RenderPath.Forward);
+                });
+                break;
+            default:
+                System.out.println("BAKED_DIRECT_LIGHTMAP_PASS");
+                stop();
+        }
+    }
+
     private void applyDetailNormal() {
         ByteBuffer pixels = BufferUtils.createByteBuffer(16);
         for (int x = 0; x < 4; x++) {
@@ -351,6 +428,7 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
         if (directory != null) {
             try {
                 Files.deleteIfExists(directory.resolve("direct.j3o"));
+                Files.deleteIfExists(directory.resolve("single.j3o"));
                 Files.deleteIfExists(directory.resolve("scene.j3o"));
                 Files.deleteIfExists(directory);
             } catch (IOException failure) {

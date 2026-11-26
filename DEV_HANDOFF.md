@@ -1,3 +1,18 @@
+## 2026-11-26 direct Lightmap playback performance in TestGame
+
+- Engine change on 2bbca552c, compatible with SDK eaf71114. The SDK bake, asset format and Main.java need no changes. Previously every resident direct Lightmap receiver used Forward. Built-in opaque PBR with one direct band can now use Deferred, TiledDeferredCPU and TiledDeferredGPU. The surface shader applies saved diffuse and evaluates remaining caster visibility only for nonzero diffuse. Its UV2 coverage in PBR record4.b suppresses the corresponding live diffuse in the lighting pass. The per-batch light index is independent of shadow-casting and runtime light list order. The original fog/exposure channels and alpha flag are retained. Multi-band receivers, debug surfaces and receivers with conflicting snapshot IDs in the same light batch retain forward shading.
+- The extra writer and reader are compiled only for direct maps and their lighting batches. No additional MRT or probe-volume lookup. Without a direct map there is no new light index lookup/upload or shadow calculation. CPU batching still tests for the feature. MSVC preprocessing of the two changed fragment sources matched the baseline tokens for 16 off configurations, with identical imports. This verifies the tested shader branches, not CPU binary identity.
+- Read-only test: RTX 5060 Ti, GL 4.3, 2560x1440 offscreen, VSync off, same saved start camera and TiledDeferredGPU selection as TestGame. Compared its saved indirect-only TestScene2 and its SDK history revision with 103 direct maps / one directional snapshot. Baseline used classes and shaders from 2bbca552c. Three alternating runs per cell, 800 warmup frames and 1200 measured frames per run. Table shows medians across the three runs, FPS derived from median frame time. Logs, RGBA readbacks and local asset-dependent harness are in ignored build/direct-perf.
+
+| Direct bake | Engine | Median (ms) | P95 (ms) | FPS | Deferred / forward opaque draws (geometries) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Off | Baseline | 4.484 | 5.460 | 223.0 | 68 / 0 |
+| Off | Updated | 4.478 | 5.528 | 223.3 | 68 / 0 |
+| On | Baseline | 7.262 | 8.528 | 137.7 | 0 / 68 |
+| On | Updated | 5.241 | 6.248 | 190.8 | 68 / 0 |
+
+- Off: all six full RGBA captures have the same SHA-256. Median GPU GBuffer time 1.346 -> 1.345 ms. On: the two rendering paths differ at some pixels; mean absolute RGB delta 0.011 on the 0..255 scale, 629 of 3,686,400 pixels differ by more than eight levels. No cross-device or exclusive fullscreen equivalence claim. The GPU smoke `gradlew :jme3-examples:bakedDirectLightmapSmoke` passed multi-band fallback and single-band Forward/deferred pixel comparisons, including partial UV2 coverage, disabled lights, moving casters, fog and sun exposure.
+
 ## 2026-11-26 configurable direct Lightmap shadow filter
 
 - The render-thread ProbeLightmapBaker.bakeDirect overload takes a shadow-map radius of 0..8 texels and 2..8 bilinear PCF samples per axis. Zero selects the legacy comparison. The SDK snapshots these settings per submitted volume and bakes the filter into its direct UV2 bands. Existing maps work as before. This is a fixed-width depth-map filter. Ray-cast visibility and light-size-dependent penumbrae remain roadmap work.

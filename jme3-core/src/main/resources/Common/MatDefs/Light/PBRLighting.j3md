@@ -427,6 +427,7 @@ MaterialDef PBR Lighting {
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
+            BAKED_DIRECT_LIGHTMAP : GiBakedDirect
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER
             DEFERRED_GI_PAYLOAD : DeferredGiPayload

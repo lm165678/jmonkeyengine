@@ -49,6 +49,7 @@ final class DeferredBatch {
     final Set<Light> identities = Collections.newSetFromMap(new IdentityHashMap<Light, Boolean>());
     Texture colorRamp;
     DeferredProbeGi probeGi;
+    String directShadowId;
 
     void reset() {
         geometries.clear();
@@ -56,6 +57,7 @@ final class DeferredBatch {
         identities.clear();
         colorRamp = null;
         probeGi = null;
+        directShadowId = null;
     }
 
     boolean matches(LightList list, Texture ramp) {
