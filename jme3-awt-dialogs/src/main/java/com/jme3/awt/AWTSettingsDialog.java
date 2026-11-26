@@ -62,6 +62,25 @@ import javax.swing.*;
  * `start()` is invoked.
  * <p>
  * The `AppSettings` instance to be configured is passed to the constructor.
+ * Resolution selects the window size; the framebuffer size is derived by the
+ * backend using Display Scale. Borderless fullscreen uses the desktop mode.
+ * Select exclusive fullscreen to change the monitor resolution and refresh rate.
+ * The dialog keeps the existing borderless default and preserves custom display
+ * scale values. HDR falls back to SDR if the backend or display cannot support it.
+ * Call the blocking dialog from outside the Swing EDT, before starting the app.
+ * <pre>{@code
+ * // 第一步：设置初始窗口大小；已有偏好可在对话框中重新选择。
+ * AppSettings settings = new AppSettings(true);
+ * settings.setWindowSize(1280, 720);
+ * // 第二步：选择独占全屏时，分辨率和刷新率才会切换显示器模式。
+ * settings.setFullscreenMode(AppSettings.FULLSCREEN_MODE_EXCLUSIVE_FULLSCREEN);
+ * // 第三步：确认后启动；取消不会把对话框中的修改复制回 settings。
+ * if (AWTSettingsDialog.showDialog(settings)) {
+ *     app.setSettings(settings);
+ *     app.setShowSettings(false);
+ *     app.start();
+ * }
+ * }</pre>
  *
  * @see AppSettings
  * @author Mark Powell
@@ -126,6 +145,7 @@ public final class AWTSettingsDialog extends JFrame {
     private JCheckBox gammaBox = null;
     private JCheckBox hdrDisplayOutputBox;
     private JCheckBox fullscreenBox = null;
+    private JComboBox<String> fullscreenModeCombo;
     private JCheckBox x11PlatformPreferredBox = null;
     private JComboBox<String> displayResCombo = null;
     private JComboBox<String> colorDepthCombo = null;
@@ -463,6 +483,7 @@ public final class AWTSettingsDialog extends JFrame {
         displayResCombo.addKeyListener(aListener);
         colorDepthCombo = new JComboBox<>();
         colorDepthCombo.addKeyListener(aListener);
+        colorDepthCombo.setToolTipText(resourceBundle.getString("tooltip.colorDepth"));
         displayFreqCombo = new JComboBox<>();
         displayFreqCombo.addKeyListener(aListener);
         antialiasCombo = new JComboBox<>();
@@ -473,6 +494,14 @@ public final class AWTSettingsDialog extends JFrame {
         displayScaleModeCombo.addKeyListener(aListener);
         fullscreenBox = new JCheckBox(resourceBundle.getString("checkbox.fullscreen"));
         fullscreenBox.setSelected(source.isFullscreen());
+        fullscreenModeCombo = new JComboBox<>(new String[] {
+                resourceBundle.getString("fullscreenMode.borderless"),
+                resourceBundle.getString("fullscreenMode.exclusive")
+        });
+        fullscreenModeCombo.setSelectedIndex(
+                AppSettings.FULLSCREEN_MODE_EXCLUSIVE_FULLSCREEN.equals(source.getFullscreenMode()) ? 1 : 0);
+        fullscreenModeCombo.addKeyListener(aListener);
+        fullscreenModeCombo.addActionListener(e -> updateResolutionChoices());
         fullscreenBox.addActionListener(new ActionListener() {
 
             @Override
@@ -603,10 +632,21 @@ public final class AWTSettingsDialog extends JFrame {
         gbc.anchor = GridBagConstraints.WEST;
         mainPanel.add(displayScaleModeCombo, gbc);
 
+        gbc = new GridBagConstraints();
+        gbc.insets = new Insets(4, 4, 4, 4);
+        gbc.gridx = 0;
+        gbc.gridy = 6;
+        gbc.anchor = GridBagConstraints.EAST;
+        mainPanel.add(new JLabel(resourceBundle.getString("label.fullscreenMode")), gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 3;
+        gbc.anchor = GridBagConstraints.WEST;
+        mainPanel.add(fullscreenModeCombo, gbc);
+
         if (JmeSystem.getPlatform().getOs() == Platform.Os.Windows) {
             gbc = new GridBagConstraints();
             gbc.gridx = 0;
-            gbc.gridy = 6;
+            gbc.gridy = 7;
             gbc.gridwidth = 4;
             gbc.anchor = GridBagConstraints.CENTER;
             mainPanel.add(hdrDisplayOutputBox, gbc);
@@ -646,14 +686,14 @@ public final class AWTSettingsDialog extends JFrame {
         gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridwidth = 2;
-        gbc.gridy = 7;
+        gbc.gridy = 8;
         gbc.anchor = GridBagConstraints.EAST;
         mainPanel.add(ok, gbc);
         gbc = new GridBagConstraints();
         gbc.insets = new Insets(4, 16, 4, 4);
         gbc.gridx = 2;
         gbc.gridwidth = 2;
-        gbc.gridy = 7;
+        gbc.gridy = 8;
         gbc.anchor = GridBagConstraints.WEST;
         mainPanel.add(cancel, gbc);
 
@@ -679,8 +719,8 @@ public final class AWTSettingsDialog extends JFrame {
                 // same insets as that is used to resize the "full screen
                 // windowed" mode appropriately.
                 updateResolutionChoices();
-                if (source.getWidth() != 0 && source.getHeight() != 0) {
-                    displayResCombo.setSelectedItem(source.getWidth() + " x " + source.getHeight());
+                if (source.getWindowWidth() > 0 && source.getWindowHeight() > 0) {
+                    displayResCombo.setSelectedItem(source.getWindowWidth() + " x " + source.getWindowHeight());
                 } else {
                     displayResCombo.setSelectedIndex(displayResCombo.getItemCount() - 1);
                 }
@@ -741,7 +781,7 @@ public final class AWTSettingsDialog extends JFrame {
 
         String freqString = (String) displayFreqCombo.getSelectedItem();
         int freq = -1;
-        if (fullscreen) {
+        if (isExclusiveFullscreen()) {
             if (freqString.equals("???")) {
                 freq = 0;
             } else {
@@ -778,11 +818,15 @@ public final class AWTSettingsDialog extends JFrame {
 
         if (valid) {
             // use the AppSettings class to save it to backing store
-            source.setWidth(width);
-            source.setHeight(height);
+            // Saved window dimensions take precedence over framebuffer dimensions.
+            source.setWindowSize(width, height);
+            source.setResolution(width, height);
             source.setBitsPerPixel(depth);
             source.setFrequency(freq);
             source.setFullscreen(fullscreen);
+            source.setFullscreenMode(fullscreenModeCombo.getSelectedIndex() == 1
+                    ? AppSettings.FULLSCREEN_MODE_EXCLUSIVE_FULLSCREEN
+                    : AppSettings.FULLSCREEN_MODE_BORDERLESS_WINDOW);
             source.setVSync(vsync);
             source.setGammaCorrection(gamma);
             source.setHdrDisplayOutput(hdrDisplayOutputBox.isSelected());
@@ -911,7 +955,7 @@ public final class AWTSettingsDialog extends JFrame {
      * display frequency options to match the currently selected resolution.
      */
     private void updateDisplayChoices() {
-        if (!fullscreenBox.isSelected()) {
+        if (!isExclusiveFullscreen()) {
             // don't run this function when changing windowed settings
             return;
         }
@@ -935,10 +979,13 @@ public final class AWTSettingsDialog extends JFrame {
         // Try to reset freq
         displayFreqCombo.setSelectedItem(displayFreq);
 
-        if (!displayFreqCombo.getSelectedItem().equals(displayFreq)) {
+        if (!displayFreq.equals(displayFreqCombo.getSelectedItem())) {
             // Cannot find saved frequency in available frequencies.
             // Choose the closest one to 60 Hz.
-            displayFreqCombo.setSelectedItem(getBestFrequency(resolution, modes));
+            String bestFrequency = getBestFrequency(resolution, modes);
+            if (bestFrequency != null) {
+                displayFreqCombo.setSelectedItem(bestFrequency);
+            }
         }
     }
 
@@ -949,8 +996,23 @@ public final class AWTSettingsDialog extends JFrame {
      * calls <code>updateDisplayChoices</code> (if fullscreen).
      */
     private void updateResolutionChoices() {
-        if (!fullscreenBox.isSelected()) {
-            displayResCombo.setModel(new DefaultComboBoxModel<>(getWindowedResolutions(windowModes)));
+        String resolution = (String) displayResCombo.getSelectedItem();
+        boolean borderless = fullscreenBox.isSelected() && !isExclusiveFullscreen();
+        fullscreenModeCombo.setEnabled(fullscreenBox.isSelected());
+        displayResCombo.setEnabled(!borderless);
+        displayResCombo.setToolTipText(borderless ? resourceBundle.getString("tooltip.desktopMode") : null);
+        displayFreqCombo.setToolTipText(!isExclusiveFullscreen()
+                ? resourceBundle.getString("tooltip.desktopMode") : null);
+        if (!isExclusiveFullscreen()) {
+            String[] resolutions;
+            if (borderless) {
+                DisplayMode desktop = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                        .getDefaultScreenDevice().getDisplayMode();
+                resolutions = new String[] { desktop.getWidth() + " x " + desktop.getHeight() };
+            } else {
+                resolutions = getWindowedResolutions(windowModes);
+            }
+            displayResCombo.setModel(new DefaultComboBoxModel<>(resolutions));
             if (displayResCombo.getItemCount() > 0) {
                 displayResCombo.setSelectedIndex(displayResCombo.getItemCount() - 1);
             }
@@ -968,6 +1030,13 @@ public final class AWTSettingsDialog extends JFrame {
             displayFreqCombo.setEnabled(true);
             updateDisplayChoices();
         }
+        if (resolution != null) {
+            displayResCombo.setSelectedItem(resolution);
+        }
+    }
+
+    private boolean isExclusiveFullscreen() {
+        return fullscreenBox.isSelected() && fullscreenModeCombo.getSelectedIndex() == 1;
     }
 
     private void updateAntialiasChoices() {
@@ -977,7 +1046,11 @@ public final class AWTSettingsDialog extends JFrame {
                 resourceBundle.getString("antialias.disabled"), "2x", "4x", "6x", "8x", "16x"
         };
         antialiasCombo.setModel(new DefaultComboBoxModel<>(choices));
-        antialiasCombo.setSelectedItem(choices[Math.min(source.getSamples() / 2, 5)]);
+        String selected = source.getSamples() <= 1 ? choices[0] : source.getSamples() + "x";
+        if (!Arrays.asList(choices).contains(selected)) {
+            antialiasCombo.addItem(selected);
+        }
+        antialiasCombo.setSelectedItem(selected);
     }
 
     //
@@ -1103,6 +1176,9 @@ public final class AWTSettingsDialog extends JFrame {
         Set<String> freqs = new LinkedHashSet<>(4); // Use LinkedHashSet for uniqueness and order
         for (DisplayMode mode : modes) {
             String res = mode.getWidth() + " x " + mode.getHeight();
+            if (!res.equals(resolution)) {
+                continue;
+            }
             String freq;
             if (mode.getRefreshRate() == DisplayMode.REFRESH_RATE_UNKNOWN) {
                 freq = "???";
