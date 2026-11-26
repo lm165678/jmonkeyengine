@@ -11,6 +11,7 @@ import com.jme3.export.binary.BinaryExporter;
 import com.jme3.light.DirectionalLight;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
+import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.RenderPath;
@@ -42,6 +43,7 @@ import java.util.List;
  * <pre>
  * 第一步：为固定几何配置 UV2 和 Cast/Receive，在渲染线程调用 capture 保存方向光深度。
  * 第二步：逐灯调用 bakeDirect，使用 withDirect 将直射层附加到原有间接 Lightmap。
+ * 可选：设置阴影半径和每轴采样数后重烘焙；本例比较同一快照的阴影边缘，半径 0 恢复默认。
  * 第三步：GiProbeVolume 保存共享快照，ProbeLightmapControl 引用独立贴图，保存场景。
  * 第四步：运行时移动 Dynamic 投影者和接收者，观察两套阴影同时生效。
  * 第五步：清除共享快照可恢复该光源原有实时路径，无需修改节点 Cast/Receive。
@@ -112,6 +114,7 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
         BakedDirectionalShadow a = BakedDirectionalShadow.capture(renderManager, scene, red, 128);
         BakedDirectionalShadow b = BakedDirectionalShadow.capture(renderManager, scene, blue, 128);
         Texture2D redDirect = ProbeLightmapBaker.bakeDirect(renderManager, assetManager, originalFloor, a, 64, 64);
+        verifySoftShadow(originalFloor, a, redDirect);
         Texture2D blueDirect = ProbeLightmapBaker.bakeDirect(renderManager, assetManager, originalFloor, b, 64, 64);
         ByteBuffer black = BufferUtils.createByteBuffer(64 * 64 * 8);
         Texture2D indirect = new Texture2D(new Image(Image.Format.RGBA16F, 64, 64, black, ColorSpace.Linear));
@@ -140,6 +143,43 @@ public final class TestBakedDirectLightmap extends SimpleApplication {
         }
         rootNode.attachChild(loaded);
         viewPort.setRenderPath(RenderPath.Forward);
+    }
+
+    private void verifySoftShadow(Geometry receiver, BakedDirectionalShadow shadow, Texture2D original) {
+        Texture2D low = ProbeLightmapBaker.bakeDirect(renderManager, assetManager, receiver, shadow, 64, 64, 8, 2);
+        Texture2D high = ProbeLightmapBaker.bakeDirect(renderManager, assetManager, receiver, shadow, 64, 64, 8, 8);
+        try {
+            ByteBuffer hard = original.getImage().getData(0);
+            ByteBuffer coarse = low.getImage().getData(0);
+            ByteBuffer fine = high.getImage().getData(0);
+            int hardEdge = 0;
+            int softEdge = 0;
+            int qualityDifferences = 0;
+            for (int pixel = 0; pixel < hard.capacity(); pixel += 8) {
+                float before = FastMath.convertHalfToFloat(hard.getShort(pixel));
+                float after = FastMath.convertHalfToFloat(fine.getShort(pixel));
+                if (before > .01f && before < .30f) {
+                    hardEdge++;
+                }
+                if (after > .01f && after < .30f) {
+                    softEdge++;
+                }
+                if (fine.getShort(pixel) != coarse.getShort(pixel)) {
+                    qualityDifferences++;
+                }
+                if (fine.getShort(pixel + 6) != hard.getShort(pixel + 6)) {
+                    throw new AssertionError("Soft shadow changed UV2 coverage");
+                }
+            }
+            if (softEdge <= hardEdge || qualityDifferences == 0) {
+                throw new AssertionError("Shadow filter did not respond to radius and sample density");
+            }
+            System.out.println("Soft shadow transition texels: " + hardEdge + " -> " + softEdge
+                    + ", changed by sampling density: " + qualityDifferences);
+        } finally {
+            low.getImage().dispose();
+            high.getImage().dispose();
+        }
     }
 
     private Geometry geometry(String name, com.jme3.scene.Mesh mesh, float x, float y, float z,

@@ -148,8 +148,32 @@ public final class ProbeLightmapBaker {
      */
     public static Texture2D bakeDirect(RenderManager manager, AssetManager assets, Geometry geometry,
             BakedDirectionalShadow shadow, int width, int height) {
+        return bakeDirect(manager, assets, geometry, shadow, width, height, 0, 3);
+    }
+
+    /**
+     * Bakes a fixed-width PCF shadow into a direct Lightmap. Radius is measured
+     * in shadow-map texels. Zero restores the original bilinear comparison.
+     * Samples per axis (2..8) control the sampling density at the chosen radius
+     * (0..8), independently of the UV2 resolution. Call on the render thread.
+     * <pre>{@code
+     * // 第一步：捕获静态方向光深度，可复用同一快照比较过滤参数。
+     * BakedDirectionalShadow depth = BakedDirectionalShadow.capture(manager, scene, light, 2048);
+     * // 第二步：半径 2 个阴影纹素，每轴 5 个采样，烘焙到该物体的 UV2。
+     * Texture2D band = ProbeLightmapBaker.bakeDirect(manager, assets, receiver, depth, 512, 512, 2, 5);
+     * // 第三步：用 ProbeLightmapAsset.withDirect 保存直射层；恢复旧效果时以半径 0 重烘焙。
+     * }</pre>
+     * @return the direct band, owned by the caller
+     */
+    public static Texture2D bakeDirect(RenderManager manager, AssetManager assets, Geometry geometry,
+            BakedDirectionalShadow shadow, int width, int height, int radius, int samplesPerAxis) {
+        if (radius < 0 || radius > 8 || samplesPerAxis < 2 || samplesPerAxis > 8) {
+            throw new IllegalArgumentException("Direct shadow filter requires radius 0..8 and samples per axis 2..8");
+        }
         return rasterize(manager, assets, geometry, width, height, false, false, material -> {
             shadow.bindBake(material);
+            material.setInt("BakedShadowRadius", radius);
+            material.setInt("BakedShadowSamples", samplesPerAxis);
             return () -> { };
         });
     }

@@ -6,7 +6,38 @@
     uniform sampler2D m_BakedShadowDepth;
     uniform mat4 m_BakedShadowProjection;
     uniform vec2 m_BakedShadowSize;
+    uniform int m_BakedShadowRadius;
+    uniform int m_BakedShadowSamples;
     uniform vec4 m_BakedLightColor;
+
+    float directVisibility(vec3 position, vec3 normal) {
+        vec3 projected = bakedShadowCoordinates(m_BakedShadowProjection, position, normal);
+        vec4 rect = vec4(0.0, 0.0, 1.0, 1.0);
+        if (m_BakedShadowRadius == 0) {
+            return bakedProjectedVisibility(m_BakedShadowDepth, m_BakedShadowSize, rect, projected);
+        }
+
+        // Compare each tap at the receiver plane to avoid widening self-shadow on slopes.
+        vec3 dx = dFdx(projected);
+        vec3 dy = dFdy(projected);
+        float det = dx.x * dy.y - dx.y * dy.x;
+        vec2 gradient = vec2(0.0);
+        if (abs(det) > 1e-12) {
+            gradient = vec2(dx.z * dy.y - dy.z * dx.y, dx.x * dy.z - dy.x * dx.z) / det;
+        }
+        float visibility = 0.0;
+        for (int y = 0; y < m_BakedShadowSamples; y++) {
+            for (int x = 0; x < m_BakedShadowSamples; x++) {
+                // Stratified cell centers cover the same footprint at every quality level.
+                vec2 cell = (vec2(x, y) + 0.5) / float(m_BakedShadowSamples);
+                vec2 offset = (2.0 * cell - 1.0) * float(m_BakedShadowRadius) / m_BakedShadowSize;
+                float dz = clamp(dot(gradient, offset), -0.02, 0.02);
+                visibility += bakedProjectedVisibility(m_BakedShadowDepth, m_BakedShadowSize, rect,
+                        projected + vec3(offset, dz));
+            }
+        }
+        return visibility / float(m_BakedShadowSamples * m_BakedShadowSamples);
+    }
 #endif
 varying vec3 worldPosition;
 varying vec3 worldNormal;
@@ -41,8 +72,7 @@ vec3 getShadingNormal(vec3 meshNormal) {
 void main() {
     vec3 meshNormal = normalize(worldNormal);
     #ifdef BAKE_DIRECT
-        float visibility = bakedDirectionalVisibility(m_BakedShadowDepth, m_BakedShadowProjection,
-                m_BakedShadowSize, vec4(0.0, 0.0, 1.0, 1.0), worldPosition, meshNormal);
+        float visibility = directVisibility(worldPosition, meshNormal);
         // One unit is reserved for raster occupancy by the common resolve.
         gl_FragColor = vec4(m_BakedLightColor.rgb * visibility / 3.14159265, 2.0);
     #else

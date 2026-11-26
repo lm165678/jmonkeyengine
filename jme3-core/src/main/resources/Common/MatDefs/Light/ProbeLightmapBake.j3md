@@ -7,6 +7,8 @@ MaterialDef Probe Lightmap Bake {
         Texture2D BakedShadowDepth -LINEAR
         Matrix4 BakedShadowProjection
         Vector2 BakedShadowSize
+        Int BakedShadowRadius
+        Int BakedShadowSamples
         Color BakedLightColor
         Boolean GiEnabled
         Boolean GiBakeBounce

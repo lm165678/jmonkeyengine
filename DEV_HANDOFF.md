@@ -1,3 +1,8 @@
+## 2026-11-26 configurable direct Lightmap shadow filter
+
+- The render-thread ProbeLightmapBaker.bakeDirect overload takes a shadow-map radius of 0..8 texels and 2..8 bilinear PCF samples per axis. Zero selects the legacy comparison. The SDK snapshots these settings per submitted volume and bakes the filter into its direct UV2 bands. Existing maps work as before. This is a fixed-width depth-map filter. Ray-cast visibility and light-size-dependent penumbrae remain roadmap work.
+- Engine verification: `gradlew :jme3-examples:bakedDirectLightmapSmoke` passed on RTX 5060 Ti, OpenGL 4.3. At fixed 128 shadow / 64 UV2 resolution the test measured 20 transition texels with the baseline and 98 with radius 8 and 8 samples per axis. Changing density alone affected 102 texels. UV2 coverage matched. The paired SDK inspector test passed settings restoration, per-volume isolation, J3O round trip and queue handling. Installed SDK and TestScene2 rebake remain unverified. See the corresponding SDK handoff for source pairing.
+
 ## 2026-11-26 ray-cast Lightmap shadow bake backlog
 
 - Added a roadmap item for optional bake-time visibility rays from UV2 surface samples toward static directional lights. On resuming direct Lightmaps or shadow-map resolution tuning, remind the user to compare ray visibility with the existing depth bake at fixed resolution using the TestScene2 curtain and lantern. Status: planned.
