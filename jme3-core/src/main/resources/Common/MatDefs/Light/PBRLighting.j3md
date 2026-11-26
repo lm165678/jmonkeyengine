@@ -15,6 +15,7 @@ MaterialDef PBR Lighting {
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiStaticLightmap -LINEAR
+        Texture2D GiDirectionalLightmap -LINEAR
         Texture2D GiBakedDirect -LINEAR
         Float GiLightmapAtlasInset : 0.0
         Texture2D GiMoments -LINEAR
@@ -227,6 +228,7 @@ MaterialDef PBR Lighting {
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
+            DIRECTIONAL_PROBE_LIGHTMAP : GiDirectionalLightmap
             BAKED_DIRECT_LIGHTMAP : GiBakedDirect
             BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             ENVIRONMENT_LIGHTING : EnvironmentLighting
@@ -427,6 +429,7 @@ MaterialDef PBR Lighting {
             TEMPORAL_VELOCITY : TemporalVelocity
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
+            DIRECTIONAL_PROBE_LIGHTMAP : GiDirectionalLightmap
             BAKED_DIRECT_LIGHTMAP : GiBakedDirect
             ENVIRONMENT_LIGHTING : EnvironmentLighting
             DEFERRED_GBUFFER

@@ -4,6 +4,7 @@ MaterialDef Probe Lightmap Bake {
         Texture2D NormalMap -LINEAR
         Float NormalType
         Float NormalScale
+        Boolean DirectionalIndirect
         Texture2D BakedShadowDepth -LINEAR
         Matrix4 BakedShadowProjection
         Vector2 BakedShadowSize
@@ -38,6 +39,7 @@ MaterialDef Probe Lightmap Bake {
         Defines {
             NORMALMAP : NormalMap
             BAKE_DIRECT : BakedShadowDepth
+            BAKE_DIRECTIONAL_INDIRECT : DirectionalIndirect
         }
         RenderState {
             DepthTest Off

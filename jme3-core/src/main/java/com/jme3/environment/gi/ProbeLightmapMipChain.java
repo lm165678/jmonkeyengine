@@ -27,7 +27,17 @@ final class ProbeLightmapMipChain {
 
     static Image build(Mesh mesh, ProbeLightmapChartOwnership.Charts charts, ByteBuffer base,
             int[] baseOwners, BitSet baseFilled, int width, int height, boolean skyBand) {
-        int bands = skyBand ? 2 : 1;
+        return build(mesh, charts, base, baseOwners, baseFilled, width, height, skyBand ? 2 : 1, skyBand);
+    }
+
+    static Image buildDirections(Mesh mesh, ProbeLightmapChartOwnership.Charts charts, ByteBuffer base,
+            int[] baseOwners, BitSet baseFilled, int width, int height) {
+        // Match the paired two-band Lightmap's safe levels for trilinear sampling.
+        return build(mesh, charts, base, baseOwners, baseFilled, width, height, 1, true);
+    }
+
+    private static Image build(Mesh mesh, ProbeLightmapChartOwnership.Charts charts, ByteBuffer base,
+            int[] baseOwners, BitSet baseFilled, int width, int height, int bands, boolean protectBandEdge) {
         if (baseOwners == null || baseFilled.isEmpty()) {
             return new Image(Image.Format.RGBA16F, width, height * bands, base, ColorSpace.Linear);
         }
@@ -45,7 +55,7 @@ final class ProbeLightmapMipChain {
             int nextHeight = levelHeight / 2;
             int[] nextOwners = new int[nextWidth * nextHeight];
             Arrays.fill(nextOwners, -1);
-            if (!assignFootprints(charts, drawIndices, nextWidth, nextHeight, skyBand, nextOwners)) {
+            if (!assignFootprints(charts, drawIndices, nextWidth, nextHeight, protectBandEdge, nextOwners)) {
                 break;
             }
 
@@ -98,7 +108,7 @@ final class ProbeLightmapMipChain {
     }
 
     private static boolean assignFootprints(ProbeLightmapChartOwnership.Charts charts, List<IndexBuffer> draws,
-            int width, int height, boolean skyBand, int[] owners) {
+            int width, int height, boolean protectBandEdge, int[] owners) {
         if (draws.isEmpty()) {
             return false;
         }
@@ -110,7 +120,7 @@ final class ProbeLightmapMipChain {
                 int a = indices.get(i);
                 int b = indices.get(i + 1);
                 int c = indices.get(i + 2);
-                if (!assignTriangle(charts, width, height, skyBand, owners, a, b, c)) {
+                if (!assignTriangle(charts, width, height, protectBandEdge, owners, a, b, c)) {
                     return false;
                 }
             }
@@ -119,7 +129,7 @@ final class ProbeLightmapMipChain {
     }
 
     private static boolean assignTriangle(ProbeLightmapChartOwnership.Charts charts, int width, int height,
-            boolean skyBand, int[] owners, int a, int b, int c) {
+            boolean protectBandEdge, int[] owners, int a, int b, int c) {
         if (a < 0 || a >= charts.owners.length || b < 0 || b >= charts.owners.length
                 || c < 0 || c >= charts.owners.length) {
             return false;
@@ -138,7 +148,7 @@ final class ProbeLightmapMipChain {
         }
         float minY = Math.min(ay, Math.min(by, cy));
         float maxY = Math.max(ay, Math.max(by, cy));
-        if (skyBand && (minY < .5f || maxY > height - .5f)) {
+        if (protectBandEdge && (minY < .5f || maxY > height - .5f)) {
             return false;
         }
         float minX = Math.min(ax, Math.min(bx, cx));

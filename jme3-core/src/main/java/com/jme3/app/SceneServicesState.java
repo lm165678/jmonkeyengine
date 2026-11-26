@@ -71,6 +71,7 @@ public final class SceneServicesState extends AbstractAppState {
     private Start activeStart;
     private boolean startCameraEnabled = true;
     private final com.jme3.post.WorldSettingsRuntime worldSettings = new com.jme3.post.WorldSettingsRuntime();
+    private boolean directionalLightmapsActive;
     private DisplayOutput displayOutput = DisplayOutput.Application;
     private final ScenePhysicsBridge physics = new ScenePhysicsBridge();
     private final SceneServiceCatalog catalog = new SceneServiceCatalog();
@@ -203,6 +204,13 @@ public final class SceneServicesState extends AbstractAppState {
                 lightmaps.add(lightmap);
                 lightmap.updateResidency(app.getAssetManager(), app.getCamera().getLocation(), true, lightmapMipEnabled);
             }
+        }
+        boolean useDirectional = world != null && world.isDirectionalLightmapEnabled();
+        if (useDirectional || directionalLightmapsActive) {
+            for (var lightmap : lightmaps) {
+                lightmap.updateDirectionalResidency(app.getAssetManager(), useDirectional);
+            }
+            directionalLightmapsActive = useDirectional;
         }
         if (seen.isEmpty()) {
             closeGi();
@@ -339,5 +347,6 @@ public final class SceneServicesState extends AbstractAppState {
     private void clearLightmaps() {
         lightmaps.forEach(com.jme3.environment.gi.ProbeLightmapControl::clearResidency);
         lightmaps.clear();
+        directionalLightmapsActive = false;
     }
 }

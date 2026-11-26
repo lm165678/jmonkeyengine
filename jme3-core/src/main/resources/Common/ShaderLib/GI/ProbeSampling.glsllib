@@ -24,6 +24,9 @@ vec3 giSkyDirection(vec3 normal) {
 #if defined(GI_PROBES) || defined(STATIC_PROBE_LIGHTMAP)
 #ifdef STATIC_PROBE_LIGHTMAP
 uniform sampler2D m_GiStaticLightmap;
+#ifdef DIRECTIONAL_PROBE_LIGHTMAP
+uniform sampler2D m_GiDirectionalLightmap;
+#endif
 uniform float m_GiLightmapAtlasInset;
 varying vec2 probeLightmapUv;
 #endif
@@ -805,7 +808,14 @@ vec3 giSampleIrradiance(vec3 worldPosition, vec3 normal, vec3 geometryNormal) {
             // A resident static lightmap owns its diffuse result, including
             // partial coverage. Its RGB already includes the coverage weight.
             giEnvironmentDiffuseWeight = mix(1.0, clamp(m_GiEnvironmentMix, 0.0, 1.0), cached.a);
+            #ifdef DIRECTIONAL_PROBE_LIGHTMAP
+                // The signed gradient adjusts the cached diffuse around its
+                // baked material-normal response, which is stored in alpha.
+                vec4 angular = texture2D(m_GiDirectionalLightmap, probeLightmapUv);
+                return cached.rgb * clamp(1.0 + dot(angular.rgb, normal) - angular.a, 0.0, 2.0);
+            #else
             return cached.rgb;
+            #endif
         }
     #endif
     // A missing static lightmap does not opt this receiver into the live volume.

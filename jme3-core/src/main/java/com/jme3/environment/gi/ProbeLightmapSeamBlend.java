@@ -6,6 +6,7 @@ import com.jme3.scene.VertexBuffer.Type;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,16 +50,26 @@ final class ProbeLightmapSeamBlend {
         final float r;
         final float g;
         final float b;
+        final float a;
 
-        Change(float weight, float r, float g, float b) {
+        Change(float weight, float[] channels) {
             this.weight = weight;
-            this.r = r;
-            this.g = g;
-            this.b = b;
+            this.r = channels[0];
+            this.g = channels[1];
+            this.b = channels[2];
+            this.a = channels.length == 4 ? channels[3] : 0f;
         }
     }
 
     static void blend(Mesh mesh, ByteBuffer pixels, int width, int height, int[] owners) {
+        blend(mesh, pixels, width, height, owners, null);
+    }
+
+    static void blendDirections(Mesh mesh, ByteBuffer pixels, int width, int height, int[] owners, BitSet filled) {
+        blend(mesh, pixels, width, height, owners, filled);
+    }
+
+    private static void blend(Mesh mesh, ByteBuffer pixels, int width, int height, int[] owners, BitSet filled) {
         if (owners == null
                 || !(mesh.getBuffer(Type.Position).getData() instanceof FloatBuffer)
                 || !(mesh.getBuffer(Type.Normal).getData() instanceof FloatBuffer)
@@ -104,16 +115,21 @@ final class ProbeLightmapSeamBlend {
             Side a = pair.get(0);
             Side b = pair.get(1);
             if (!a.start.matches(b.start) || !a.end.matches(b.end)) {
-                blendSide(a, b, pixels, width, height, owners, changes);
-                blendSide(b, a, pixels, width, height, owners, changes);
+                blendSide(a, b, pixels, width, height, owners, filled, changes);
+                blendSide(b, a, pixels, width, height, owners, filled, changes);
             }
         }
         for (var entry : changes.entrySet()) {
             int offset = entry.getKey() * TEXEL_BYTES;
             Change change = entry.getValue();
-            write(pixels, offset, change.r, change.weight);
-            write(pixels, offset + 2, change.g, change.weight);
-            write(pixels, offset + 4, change.b, change.weight);
+            float coverage = coverage(pixels, entry.getKey(), filled);
+            write(pixels, offset, change.r, change.weight, coverage);
+            write(pixels, offset + 2, change.g, change.weight, coverage);
+            write(pixels, offset + 4, change.b, change.weight, coverage);
+            if (filled != null) {
+                // The signed reference in alpha must follow the same blend as its gradient.
+                write(pixels, offset + 6, change.a, change.weight, coverage);
+            }
         }
     }
 
@@ -137,7 +153,7 @@ final class ProbeLightmapSeamBlend {
     }
 
     private static void blendSide(Side destination, Side source, ByteBuffer pixels, int width, int height,
-            int[] owners, Map<Integer, Change> changes) {
+            int[] owners, BitSet filled, Map<Integer, Change> changes) {
         float dx = destination.end.x - destination.start.x;
         float dy = destination.end.y - destination.start.y;
         float lengthSquared = dx * dx + dy * dy;
@@ -148,7 +164,7 @@ final class ProbeLightmapSeamBlend {
         int lastX = Math.min(width - 1, (int) Math.floor(Math.max(destination.start.x, destination.end.x) + BAND_RADIUS));
         int firstY = Math.max(0, (int) Math.floor(Math.min(destination.start.y, destination.end.y) - BAND_RADIUS));
         int lastY = Math.min(height - 1, (int) Math.floor(Math.max(destination.start.y, destination.end.y) + BAND_RADIUS));
-        float[] rgb = new float[3];
+        float[] channels = new float[filled == null ? 3 : 4];
         for (int y = firstY; y <= lastY; y++) {
             for (int x = firstX; x <= lastX; x++) {
                 float px = x + .5f - destination.start.x;
@@ -170,14 +186,14 @@ final class ProbeLightmapSeamBlend {
                 Point src = interior(source, t);
                 int pixel = y * width + x;
                 if (owners[pixel] < 0 || owners[pixel] != ownerAt(dst, width, height, owners)
-                        || alpha(pixels, pixel) <= 0f) {
+                        || coverage(pixels, pixel, filled) <= 0f) {
                     continue;
                 }
                 float weight = .5f * (1f - distance / BAND_RADIUS);
                 Change existing = changes.get(pixel);
                 if ((existing == null || weight > existing.weight)
-                        && sample(pixels, src, width, height, owners, rgb)) {
-                    changes.put(pixel, new Change(weight, rgb[0], rgb[1], rgb[2]));
+                        && sample(pixels, src, width, height, owners, filled, channels)) {
+                    changes.put(pixel, new Change(weight, channels));
                 }
             }
         }
@@ -198,7 +214,8 @@ final class ProbeLightmapSeamBlend {
         return owners[y * width + x];
     }
 
-    private static boolean sample(ByteBuffer pixels, Point point, int width, int height, int[] owners, float[] rgb) {
+    private static boolean sample(ByteBuffer pixels, Point point, int width, int height, int[] owners,
+            BitSet filled, float[] channels) {
         int chart = ownerAt(point, width, height, owners);
         if (chart < 0) {
             return false;
@@ -210,7 +227,7 @@ final class ProbeLightmapSeamBlend {
         float fx = x - x0;
         float fy = y - y0;
         float sum = 0f;
-        java.util.Arrays.fill(rgb, 0f);
+        java.util.Arrays.fill(channels, 0f);
         for (int dy = 0; dy < 2; dy++) {
             for (int dx = 0; dx < 2; dx++) {
                 int column = x0 + dx;
@@ -222,16 +239,16 @@ final class ProbeLightmapSeamBlend {
                 if (owners[pixel] != chart) {
                     continue;
                 }
-                float coverage = alpha(pixels, pixel);
+                float coverage = coverage(pixels, pixel, filled);
                 if (coverage <= 0f) {
                     continue;
                 }
                 float weight = (dx == 0 ? 1f - fx : fx) * (dy == 0 ? 1f - fy : fy);
-                // The cache stores coverage-weighted RGB. Compare per-covered
-                // irradiance and preserve the destination's coverage and sky.
+                // Compare per-covered irradiance for the base RGB bake. For the
+                // companion texture the validity bit only excludes empty texels.
                 float scale = weight / coverage;
-                for (int channel = 0; channel < 3; channel++) {
-                    rgb[channel] += FastMath.convertHalfToFloat(pixels.getShort(pixel * TEXEL_BYTES + channel * 2)) * scale;
+                for (int channel = 0; channel < channels.length; channel++) {
+                    channels[channel] += FastMath.convertHalfToFloat(pixels.getShort(pixel * TEXEL_BYTES + channel * 2)) * scale;
                 }
                 sum += weight;
             }
@@ -239,19 +256,21 @@ final class ProbeLightmapSeamBlend {
         if (sum <= 0f) {
             return false;
         }
-        for (int channel = 0; channel < 3; channel++) {
-            rgb[channel] /= sum;
+        for (int channel = 0; channel < channels.length; channel++) {
+            channels[channel] /= sum;
         }
         return true;
     }
 
-    private static float alpha(ByteBuffer pixels, int pixel) {
+    private static float coverage(ByteBuffer pixels, int pixel, BitSet filled) {
+        if (filled != null) {
+            return filled.get(pixel) ? 1f : 0f;
+        }
         return FastMath.convertHalfToFloat(pixels.getShort(pixel * TEXEL_BYTES + 6));
     }
 
-    private static void write(ByteBuffer pixels, int offset, float value, float weight) {
+    private static void write(ByteBuffer pixels, int offset, float value, float weight, float coverage) {
         float original = FastMath.convertHalfToFloat(pixels.getShort(offset));
-        float coverage = alpha(pixels, offset / TEXEL_BYTES);
         pixels.putShort(offset, FastMath.convertFloatToHalf(original + weight * (coverage * value - original)));
     }
 }

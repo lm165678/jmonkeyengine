@@ -66,6 +66,7 @@ public class Geometry extends Spatial {
     private transient com.jme3.material.MatParamOverride residentProbeLightmap;
     private transient com.jme3.material.MatParamOverride probeLightmapAtlasInset;
     private transient com.jme3.material.MatParamOverride probeDirectLightmap;
+    private transient com.jme3.material.MatParamOverride probeDirectionalLightmap;
     private transient com.jme3.util.SafeArrayList<com.jme3.material.MatParamOverride> probeLightmapOverrides;
 
     /**
@@ -94,6 +95,7 @@ public class Geometry extends Spatial {
         residentProbeLightmap = value == null ? null : new com.jme3.material.MatParamOverride(
                 com.jme3.shader.VarType.Texture2D, "GiStaticLightmap", value);
         probeDirectLightmap = null;
+        probeDirectionalLightmap = null;
         probeLightmapAtlasInset = hasBands ? new com.jme3.material.MatParamOverride(
                 com.jme3.shader.VarType.Float, "GiLightmapAtlasInset", .5f / value.getImage().getHeight()) : null;
         notifySceneChanged(SceneChangeListener.Change.RENDERING);
@@ -103,6 +105,34 @@ public class Geometry extends Spatial {
     public com.jme3.texture.Texture2D getResidentProbeLightmap() {
         return residentProbeLightmap == null ? null
                 : (com.jme3.texture.Texture2D) residentProbeLightmap.getValue();
+    }
+
+    /**
+     * Sets the transient directional companion of the installed indirect Lightmap
+     * on the render thread. Its lifetime is owned by the caller. Most applications
+     * use a ProbeLightmapControl and enable playback through WorldSettings.
+     * <pre>{@code
+     * // 第一步：安装 RGB 贴图，第二步：绑定相同 UV2 的方向贴图。
+     * geometry.setResidentProbeLightmap(indirect, true);
+     * geometry.setResidentDirectionalLightmap(directional);
+     * // 第三步：恢复普通 Lightmap，需要释放方向纹理时先解绑。
+     * geometry.setResidentDirectionalLightmap(null);
+     * }</pre>
+     * @param value resident direction texture or null to clear it
+     */
+    public void setResidentDirectionalLightmap(com.jme3.texture.Texture2D value) {
+        if (getResidentDirectionalLightmap() == value || value != null && residentProbeLightmap == null) {
+            return;
+        }
+        probeDirectionalLightmap = value == null ? null : new com.jme3.material.MatParamOverride(
+                com.jme3.shader.VarType.Texture2D, "GiDirectionalLightmap", value);
+        notifySceneChanged(SceneChangeListener.Change.RENDERING);
+    }
+
+    /** @return the direction companion of the resident indirect Lightmap, or null */
+    public com.jme3.texture.Texture2D getResidentDirectionalLightmap() {
+        return probeDirectionalLightmap == null ? null
+                : (com.jme3.texture.Texture2D) probeDirectionalLightmap.getValue();
     }
 
     /**
@@ -140,6 +170,9 @@ public class Geometry extends Spatial {
         probeLightmapOverrides.add(residentProbeLightmap);
         if (probeLightmapAtlasInset != null) {
             probeLightmapOverrides.add(probeLightmapAtlasInset);
+        }
+        if (probeDirectionalLightmap != null) {
+            probeLightmapOverrides.add(probeDirectionalLightmap);
         }
         var maps = getResidentDirectLightmap();
         if (maps != null) {
@@ -676,6 +709,7 @@ public class Geometry extends Spatial {
         residentProbeLightmap = null;
         probeLightmapAtlasInset = null;
         probeDirectLightmap = null;
+        probeDirectionalLightmap = null;
         probeLightmapOverrides = null;
 
         // If this is a grouped node and if our group node is

@@ -137,6 +137,13 @@ tasks.register('bakedDirectLightmapSmoke', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
 }
 
+tasks.register('directionalProbeLightmapSmoke', JavaExec) {
+    group = 'verification'
+    dependsOn 'classes'
+    mainClass = 'jme3test.light.TestDirectionalProbeLightmap'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
 tasks.register('giProbeRegionsSmoke', JavaExec) {
     group = 'verification'
     dependsOn 'classes'

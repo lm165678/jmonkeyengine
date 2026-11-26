@@ -66,6 +66,9 @@ import java.util.List;
 public final class ProbeLightmapBaker {
     private static final int GUTTER_RADIUS = 2;
     private static final int FLOAT_PIXEL_BYTES = 4 * Float.BYTES;
+    // The bake shader adds this offset to retain its signed [-3, 3] response
+    // while resolved raster coverage is still detected by alpha >= 1.
+    private static final float DIRECTIONAL_RASTER_ALPHA_OFFSET = 4f;
     private ProbeLightmapBaker() {
     }
 
@@ -74,7 +77,7 @@ public final class ProbeLightmapBaker {
         if (data.hasSeparatedSky()) {
             throw new IllegalArgumentException("Separated sky requires a probe field lightmap");
         }
-        return rasterize(manager, assets, geometry, width, height, false, true,
+        return rasterize(manager, assets, geometry, width, height, false, true, false,
                 material -> data.bind(material, offset, .05f));
     }
 
@@ -135,7 +138,35 @@ public final class ProbeLightmapBaker {
      */
     public static Texture2D bakeField(RenderManager manager, AssetManager assets, Geometry geometry,
             GiProbeSet field, int width, int height, boolean blendSeams) {
-        return rasterize(manager, assets, geometry, width, height, true, blendSeams,
+        return rasterize(manager, assets, geometry, width, height, true, blendSeams, false,
+                material -> field.bind(material, .05f));
+    }
+
+    /**
+     * Bakes an optional single-band companion to {@link #bakeField}.
+     * RGB stores the signed world-space gradient of relative diffuse irradiance
+     * with respect to the shading normal. Alpha stores the gradient's response
+     * to the authored shading normal used for the base RGB bake. Subtracting the
+     * reference before applying the gradient avoids applying the baked normal
+     * response twice. This local approximation represents luminance changes.
+     * Use the same field, geometry, dimensions and seam setting for both maps.
+     * Call on the render thread, with the same open field, before closing it.
+     * <pre>{@code
+     * // 第一步：按原路径烘焙间接光与天空层。
+     * Texture2D base = ProbeLightmapBaker.bakeField(renderManager, assetManager,
+     *         geometry, field, 512, 512, blendSeams);
+     * // 第二步：只在启用方向性间接光时生成补充纹理并独立保存。
+     * Texture2D directions = ProbeLightmapBaker.bakeDirectionalField(renderManager,
+     *         assetManager, geometry, field, 512, 512, blendSeams);
+     * BinaryExporter.getInstance().save(directions, directionFile);
+     * // 第三步：关闭方向性选项时继续用原间接光贴图。
+     * }</pre>
+     *
+     * @return the linear RGBA16F companion, owned by the caller
+     */
+    public static Texture2D bakeDirectionalField(RenderManager manager, AssetManager assets, Geometry geometry,
+            GiProbeSet field, int width, int height, boolean blendSeams) {
+        return rasterize(manager, assets, geometry, width, height, false, blendSeams, true,
                 material -> field.bind(material, .05f));
     }
 
@@ -170,7 +201,7 @@ public final class ProbeLightmapBaker {
         if (radius < 0 || radius > 8 || samplesPerAxis < 2 || samplesPerAxis > 8) {
             throw new IllegalArgumentException("Direct shadow filter requires radius 0..8 and samples per axis 2..8");
         }
-        return rasterize(manager, assets, geometry, width, height, false, false, material -> {
+        return rasterize(manager, assets, geometry, width, height, false, false, false, material -> {
             shadow.bindBake(material);
             material.setInt("BakedShadowRadius", radius);
             material.setInt("BakedShadowSamples", samplesPerAxis);
@@ -179,7 +210,7 @@ public final class ProbeLightmapBaker {
     }
 
     private static Texture2D rasterize(RenderManager manager, AssetManager assets, Geometry geometry,
-            int width, int height, boolean atlas, boolean blendSeams,
+            int width, int height, boolean atlas, boolean blendSeams, boolean directional,
             java.util.function.Function<Material, AutoCloseable> binder) {
         if (geometry.getMobility() != Mobility.Static || geometry.getMesh().isAnimated()
                 || geometry.getMesh().getMorphTargets().length != 0 || geometry.getMesh().getBuffer(Type.Normal) == null
@@ -190,14 +221,17 @@ public final class ProbeLightmapBaker {
         }
         var renderer = manager.getRenderer();
         int outputHeight = atlas ? 2 * height : height;
+        // Match the paired field's subtexel sampling even if its second band
+        // makes the larger temporary target hit the texture size limit.
+        int pairedHeight = directional ? 2 * height : outputHeight;
         int textureLimit = renderer.getLimits().getOrDefault(Limits.TextureSize, 0);
-        if (width > textureLimit || outputHeight > textureLimit) {
+        if (width > textureLimit || pairedHeight > textureLimit) {
             throw new IllegalArgumentException("Lightmap exceeds maximum texture size");
         }
         // Subtexel coverage recovers narrow UV triangles missed by the center
         // sample. Cap the temporary target to bound the readback cost.
         int samplesPerAxis = width <= 512 && height <= 512
-                && width * 2 <= textureLimit && outputHeight * 2 <= textureLimit ? 2 : 1;
+                && width * 2 <= textureLimit && pairedHeight * 2 <= textureLimit ? 2 : 1;
         int rasterWidth = width * samplesPerAxis;
         int rasterHeight = outputHeight * samplesPerAxis;
         var oldTarget = renderer.getCurrentFrameBuffer();
@@ -209,6 +243,9 @@ public final class ProbeLightmapBaker {
         proxy.setIgnoreTransform(geometry.isIgnoreTransform());
         Material bakeMaterial = new Material(assets, "Common/MatDefs/Light/ProbeLightmapBake.j3md");
         bindPbrNormalMap(geometry, bakeMaterial);
+        if (directional) {
+            bakeMaterial.setBoolean("DirectionalIndirect", true);
+        }
         proxy.setMaterial(bakeMaterial);
         proxy.updateGeometricState();
         ByteBuffer readback = BufferUtils.createByteBuffer(rasterWidth * rasterHeight * FLOAT_PIXEL_BYTES);
@@ -220,7 +257,7 @@ public final class ProbeLightmapBaker {
                 resolveSubtexels(readback, resolved, width, height, atlas, samplesPerAxis, null, null, null);
             }
             boolean[] boundary = width <= 256 && height <= 256
-                    && width * 4 <= textureLimit && outputHeight * 4 <= textureLimit ? new boolean[width * height] : null;
+                    && width * 4 <= textureLimit && pairedHeight * 4 <= textureLimit ? new boolean[width * height] : null;
             var charts = ProbeLightmapChartOwnership.charts(geometry.getMesh());
             int[] owners = ProbeLightmapChartOwnership.rasterize(charts, width, height, GUTTER_RADIUS, boundary);
             if (owners != null && boundary != null && markMissing(resolved, boundary)) {
@@ -228,14 +265,25 @@ public final class ProbeLightmapBaker {
             }
             ByteBuffer half = BufferUtils.createByteBuffer(width * outputHeight * 8);
             BitSet filled = new BitSet();
-            fillLightmapGutters(resolved, half, width, height, atlas, owners, filled);
+            fillLightmapGutters(resolved, half, width, height, atlas, owners, filled,
+                    directional ? DIRECTIONAL_RASTER_ALPHA_OFFSET : 1f);
             if (blendSeams) {
-                ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
+                if (directional) {
+                    ProbeLightmapSeamBlend.blendDirections(geometry.getMesh(), half, width, height, owners, filled);
+                } else {
+                    ProbeLightmapSeamBlend.blend(geometry.getMesh(), half, width, height, owners);
+                }
             }
             half.flip();
-            Image lightmap = bakeMaterial.getParam("BakedShadowDepth") == null
-                    ? ProbeLightmapMipChain.build(geometry.getMesh(), charts, half, owners, filled, width, height, atlas)
-                    : new Image(Image.Format.RGBA16F, width, height, half, ColorSpace.Linear);
+            Image lightmap;
+            if (directional) {
+                lightmap = ProbeLightmapMipChain.buildDirections(geometry.getMesh(), charts, half,
+                        owners, filled, width, height);
+            } else if (bakeMaterial.getParam("BakedShadowDepth") == null) {
+                lightmap = ProbeLightmapMipChain.build(geometry.getMesh(), charts, half, owners, filled, width, height, atlas);
+            } else {
+                lightmap = new Image(Image.Format.RGBA16F, width, height, half, ColorSpace.Linear);
+            }
             if (lightmap.hasMipmaps()) {
                 BufferUtils.destroyDirectBuffer(half);
             }
@@ -385,7 +433,7 @@ public final class ProbeLightmapBaker {
     }
 
     private static void fillLightmapGutters(ByteBuffer raster, ByteBuffer half,
-            int width, int height, boolean atlas, int[] owners, BitSet filled) {
+            int width, int height, boolean atlas, int[] owners, BitSet filled, float rasterAlphaOffset) {
         int bandPixels = width * height;
         int[] sources = atlas ? new int[bandPixels] : null;
         for (int y = 0; y < height; y++) {
@@ -401,13 +449,13 @@ public final class ProbeLightmapBaker {
                 if (owners != null && source >= 0) {
                     filled.set(pixel);
                 }
-                writeTexel(raster, half, source, true);
+                writeTexel(raster, half, source, rasterAlphaOffset);
             }
         }
         if (atlas) {
             // Both bands follow the same source to keep bent sky and irradiance aligned.
             for (int source : sources) {
-                writeTexel(raster, half, source < 0 ? -1 : bandPixels + source, false);
+                writeTexel(raster, half, source < 0 ? -1 : bandPixels + source, 0f);
             }
         }
     }
@@ -435,7 +483,7 @@ public final class ProbeLightmapBaker {
         return closest;
     }
 
-    private static void writeTexel(ByteBuffer raster, ByteBuffer half, int pixel, boolean irradiance) {
+    private static void writeTexel(ByteBuffer raster, ByteBuffer half, int pixel, float rasterAlphaOffset) {
         if (pixel < 0) {
             half.putLong(0L);
             return;
@@ -445,7 +493,7 @@ public final class ProbeLightmapBaker {
             half.putShort(FastMath.convertFloatToHalf(raster.getFloat(offset + channel * Float.BYTES)));
         }
         float alpha = raster.getFloat(offset + 3 * Float.BYTES);
-        // Remove the temporary raster occupancy marker from the stored coverage.
-        half.putShort(FastMath.convertFloatToHalf(irradiance ? alpha - 1f : alpha));
+        // Restore the original alpha after resolve uses the raster occupancy marker.
+        half.putShort(FastMath.convertFloatToHalf(rasterAlphaOffset == 0f ? alpha : alpha - rasterAlphaOffset));
     }
 }

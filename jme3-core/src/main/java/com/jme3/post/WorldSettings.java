@@ -58,6 +58,7 @@ public final class WorldSettings extends AbstractControl {
     private boolean singleProbeVisibility = DEFAULT_SINGLE_PROBE_VISIBILITY;
     private boolean octahedralProbeIrradiance = DEFAULT_OCTAHEDRAL_PROBE_IRRADIANCE;
     private boolean lightmapMipEnabled;
+    private boolean directionalLightmapEnabled;
 
     /**
      * Selects trilinear filtering for streamed lightmaps with baked mip levels.
@@ -88,6 +89,29 @@ public final class WorldSettings extends AbstractControl {
     /** @return whether stored lightmap mip levels are enabled for this world */
     public boolean isLightmapMipEnabled() {
         return lightmapMipEnabled;
+    }
+
+    /**
+     * Enables optional directional indirect Lightmap playback. The default is
+     * false, and scenes without companion textures retain RGB playback.
+     * Set on the scene thread. Scene services stream the companion while
+     * enabled and release it when disabled.
+     * <pre>{@code
+     * // 第一步：在 SDK 中烘焙方向性间接光贴图并保存场景。
+     * // 第二步：在渲染线程开启方向性间接光，等待伴随贴图驻留。
+     * world.setDirectionalLightmapEnabled(true);
+     * // 第三步：恢复原 RGB Lightmap，释放方向数据。
+     * world.setDirectionalLightmapEnabled(false);
+     * }</pre>
+     * @param enabled true to sample baked directional companions when available
+     */
+    public void setDirectionalLightmapEnabled(boolean enabled) {
+        directionalLightmapEnabled = enabled;
+    }
+
+    /** @return whether directional indirect Lightmap playback is enabled */
+    public boolean isDirectionalLightmapEnabled() {
+        return directionalLightmapEnabled;
     }
 
     /**
@@ -390,6 +414,7 @@ public final class WorldSettings extends AbstractControl {
         capsule.write(singleProbeVisibility, "singleProbeVisibility", false);
         capsule.write(octahedralProbeIrradiance, "octahedralProbeIrradiance", false);
         capsule.write(lightmapMipEnabled, "lightmapMipEnabled", false);
+        capsule.write(directionalLightmapEnabled, "directionalLightmapEnabled", false);
         capsule.write(options.keySet().toArray(new String[0]), "optionNames", new String[0]);
         double[] values = new double[options.size()];
         int index = 0;
@@ -406,6 +431,7 @@ public final class WorldSettings extends AbstractControl {
         singleProbeVisibility = capsule.readBoolean("singleProbeVisibility", false);
         octahedralProbeIrradiance = capsule.readBoolean("octahedralProbeIrradiance", false);
         lightmapMipEnabled = capsule.readBoolean("lightmapMipEnabled", false);
+        directionalLightmapEnabled = capsule.readBoolean("directionalLightmapEnabled", false);
         postProcessing = capsule.readByteArray("postProcessing", new byte[0]);
         priority = capsule.readInt("priority", 0);
         displayOutput = capsule.readEnum("displayOutput", DisplayOutput.class, DisplayOutput.Application);
