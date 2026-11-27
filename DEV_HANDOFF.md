@@ -1,3 +1,9 @@
+## 2026-11-27 Goad and runtime sky specular with total Probe GI
+
+- Reopened the user's 77,678,116-byte TestScene2 save with Goad at the reported camera (-9.3528, 5.6471, -3.7101). Native Forward test used the corrected sky mip layout, nine resident Probe slots, sky intensity 0.1, scene mobility and a fixed linear frame. With GI active, full SkyLight and specular-only were identical across all 370,944 pixels. The fully metallic GoldMat sphere's effective roughness median was 0.0919. Its 21,527 sampled pixels averaged 0.082518 luminance from SkyLight specular in both GI states. The saved J3O hash was unchanged.
+- Left wall null_37 had 0.000498 baked diffuse contribution and 0.000707 SkyLight specular contribution with GI enabled. With GI disabled, the same 0.000707 specular remains alongside 0.015955 global sky diffuse. Neutral sky specular can dominate dim indoor GI without changing the GI data. The sky Cast Shadow checkbox does not add a SkyLight to the managed shadow renderer. See build/sky-leak-verification/goad-composition.
+- Godot 4.3 Forward+ SDFGI uses hit scene radiance and optionally samples sky on ray misses. It uses local diffuse and local specular within coverage, blending to global environment at the edge. Its opaque GI buffer path can trace SDF reflections for low roughness. Indoor local reflected radiance and sky fallback visibility remain separate future work for runtime JME. This diagnosis changed no engine behavior.
+
 ## 2026-11-27 SkyLight cubemap upload after reopening
 
 - User video reproduces normal fresh SkyLight followed by broad, excessive specular after closing and reopening. The second clip has neither DirectionalLight nor GI Volume. Read-only TestScene2 and TestScene6 deserialize with SkyLight ready and capture dirty false. The loader uploads the saved map. A genuine refresh clones and renders only the sky spatial.
