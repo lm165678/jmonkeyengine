@@ -33,6 +33,7 @@ package com.jme3.light;
 
 import com.jme3.bounding.*;
 import com.jme3.environment.EnvironmentCamera;
+import com.jme3.environment.baker.SpecularMipLayout;
 import com.jme3.environment.LightProbeFactory;
 import com.jme3.export.*;
 import com.jme3.math.*;
@@ -197,6 +198,7 @@ public class LightProbe extends Light implements Savable {
         diffuseEnabled = ic.readBoolean("diffuseEnabled", true);
 
         prefilteredEnvMap = (TextureCubeMap) ic.readSavable("prefilteredEnvMap", null);
+        SpecularMipLayout.repairLegacy(prefilteredEnvMap);
         position = (Vector3f) ic.readSavable("position", null);
         area = (ProbeArea)ic.readSavable("area", null);
         if(area == null) {

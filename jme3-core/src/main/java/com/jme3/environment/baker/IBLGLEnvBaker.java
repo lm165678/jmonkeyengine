@@ -95,12 +95,7 @@ public class IBLGLEnvBaker extends GenericEnvBaker implements IBLEnvBaker {
         int nbMipMaps = (int) (Math.log(specular_size) / Math.log(2) + 1);
         nbMipMaps = limitMips(nbMipMaps, specular.getImage().getWidth(), specular.getImage().getHeight(), rm);
 
-        int[] sizes = new int[nbMipMaps];
-        for (int i = 0; i < nbMipMaps; i++) {
-            int size = (int) FastMath.pow(2, nbMipMaps - 1 - i);
-            sizes[i] = size * size * (specular.getImage().getFormat().getBitsPerPixel() / 8);
-        }
-        specular.getImage().setMipMapSizes(sizes);
+        specular.getImage().setMipMapSizes(SpecularMipLayout.sizes(specular.getImage(), nbMipMaps));
 
         brtf = new Texture2D(brtf_size, brtf_size, format);
         brtf.setMagFilter(MagFilter.Bilinear);

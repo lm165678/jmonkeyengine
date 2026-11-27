@@ -95,12 +95,7 @@ public class IBLHybridEnvBakerLight extends GenericEnvBaker implements IBLEnvBak
         int nbMipMaps = (int) (Math.log(specular_size) / Math.log(2) + 1);
         nbMipMaps = limitMips(nbMipMaps, specular.getImage().getWidth(), specular.getImage().getHeight(), rm);
 
-        int[] sizes = new int[nbMipMaps];
-        for (int i = 0; i < nbMipMaps; i++) {
-            int size = (int) FastMath.pow(2, nbMipMaps - 1 - i);
-            sizes[i] = size * size * (specular.getImage().getFormat().getBitsPerPixel() / 8);
-        }
-        specular.getImage().setMipMapSizes(sizes);
+        specular.getImage().setMipMapSizes(SpecularMipLayout.sizes(specular.getImage(), nbMipMaps));
         specular.getImage().setMipmapsGenerated(true);
 
     }

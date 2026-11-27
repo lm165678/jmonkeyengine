@@ -2,6 +2,7 @@ package com.jme3.light;
 
 import com.jme3.bounding.BoundingBox;
 import com.jme3.bounding.BoundingSphere;
+import com.jme3.environment.baker.SpecularMipLayout;
 import com.jme3.math.Vector3f;
 import com.jme3.renderer.Camera;
 import com.jme3.scene.Spatial;
@@ -18,6 +19,8 @@ import com.jme3.util.TempVars;
  * falls back to this sky when no local reflection probe covers the geometry.
  * One enabled ready sky per light scope is supported; the first wins.
  * Use SkyLightControl on the sky for automatic baking and lifecycle management.
+ * Saved prefiltered maps from the older GPU baker have their mip layout repaired
+ * on load when the original pixel data is complete.
  * <pre>{@code
  * // 第一步：创建天空；SkyFactory 自动添加 SkyLightControl。
  * Spatial sky = SkyFactory.createSky(assetManager, "Textures/Sky/Path.hdr",
@@ -188,6 +191,7 @@ public class SkyLight extends Light {
             }
         }
         prefilteredEnvMap = (com.jme3.texture.TextureCubeMap) in.readSavable("prefilteredEnvMap", null);
+        SpecularMipLayout.repairLegacy(prefilteredEnvMap);
         nbMipMaps = in.readInt("nbMipMaps", 0);
         ready = in.readBoolean("ready", false) && values != null && values.length == 9;
         diffuseEnabled = in.readBoolean("diffuseEnabled", true);
