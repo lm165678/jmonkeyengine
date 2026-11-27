@@ -49,7 +49,8 @@ import java.nio.ByteBuffer;
  * Native FSR1/FSR2, render-scale, AA restoration and native-size GUI regression.
  * Requires LWJGL3 OpenGL4.3 and float render targets. Run --verify or Gradle
  * upscalingSmoke. Checks all four render paths; success prints UPSCALING_GPU_PASS.
- * Includes moving geometry/current-minus-previous motion, disocclusion and alpha
+ * Includes both FSR2 opaque velocity modes, moving geometry/current-minus-previous
+ * motion, disocclusion and alpha
  * preservation, plus a static edge ROI warmed for 64 frames and sampled for 32
  * frames (per-channel range <= .25). These are synthetic regressions, not a
  * production moving-scene quality guarantee or performance benchmark.
@@ -62,7 +63,10 @@ import java.nio.ByteBuffer;
  * upscale.setAlgorithm(UpscalingPass.Algorithm.FSR2);
  * upscale.setRenderScale(.67f);
  * fpp.addFilter(upscale);
- * // 第三步：GUI 继续挂到独立 guiViewPort，不放入低分辨率场景。
+ * // 第三步：在渲染线程切换独立速度 Pass；恢复默认主绘制用 true，切换会重置历史。
+ * upscale.setBasePassOutputsVelocity(false);
+ * upscale.setBasePassOutputsVelocity(true);
+ * // GUI 继续挂到独立 guiViewPort，不放入低分辨率场景。
  * // 第四步：upscale.setEnabled(false) 恢复原生尺寸及原抗锯齿；相机切换需 resetHistory。
  * // 第五步：烘焙前对超分、TAA 取得临时句柄，等待一个正常帧再采样。
  * Filter.CaptureSuspension scope = upscale.suspendForCapture();
@@ -71,6 +75,7 @@ import java.nio.ByteBuffer;
  * }</pre>
  */
 public class TestUpscaling extends SimpleApplication {
+    private static final int SEPARATE_VELOCITY_STAGE = 7;
     private final RenderPath[] paths = {RenderPath.Forward, RenderPath.Deferred,
             RenderPath.TiledDeferredCPU, RenderPath.TiledDeferredGPU};
     private FilterPostProcessor fpp;
@@ -153,6 +158,7 @@ public class TestUpscaling extends SimpleApplication {
         viewPort.setRenderPath(paths[path]);
         upscale.setAlgorithm(stage == 1 || stage == 2 || stage >= 5
                 ? UpscalingPass.Algorithm.FSR2 : UpscalingPass.Algorithm.FSR1);
+        upscale.setBasePassOutputsVelocity(stage != SEPARATE_VELOCITY_STAGE);
         upscale.setRenderScale(stage == 2 ? 2f / 3f : .5f);
         upscale.setEnabled(stage != 3);
         if (stage == 5) {
@@ -242,6 +248,9 @@ public class TestUpscaling extends SimpleApplication {
             throw new AssertionError("GUI did not retain native output size");
         }
         if (temporal) {
+            if (viewPort.getTemporalScene().isBasePass() != (stage != SEPARATE_VELOCITY_STAGE)) {
+                throw new AssertionError("FSR2 did not use the requested opaque velocity pass");
+            }
             Texture2D velocity = viewPort.getTemporalScene().getVelocity();
             FrameBuffer velocityBuffer = new FrameBuffer(velocity.getImage().getWidth(), velocity.getImage().getHeight(), 1);
             velocityBuffer.addColorTarget(FrameBuffer.FrameBufferTarget.newTarget(velocity));
@@ -262,7 +271,7 @@ public class TestUpscaling extends SimpleApplication {
             }
         }
         System.out.println("UPSCALING_STAGE_PASS " + paths[path] + "/" + stage);
-        if (++stage == 7) {
+        if (++stage > SEPARATE_VELOCITY_STAGE) {
             stage = 0;
             if (++path == paths.length) {
                 System.out.println("UPSCALING_GPU_PASS");

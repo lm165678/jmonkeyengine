@@ -36,7 +36,7 @@ import java.util.Map;
  * TemporalAAFilter taa = new TemporalAAFilter();
  * fpp.addFilter(taa);
  * viewPort.addProcessor(fpp);
- * // 第二步：选择主绘制 MRT，或切换独立 OpaqueVelocityPass。
+ * // 第二步：选择主绘制 MRT，或切换独立 OpaqueVelocityPass。MRT 不足时自动回退。
  * taa.setBasePassOutputsVelocity(true);
  * taa.setBasePassOutputsVelocity(false);
  * // 第三步：按需补充 Transparent 桶的运动；不新增 Depth Prepass。
@@ -98,7 +98,13 @@ public final class TemporalAAFilter extends HdrGraphFilter {
 
     }
 
-    /** Select MRT output or separate opaque velocity; changing it resets history. */
+    /**
+     * Prefer base-pass MRT output (default) or use separate opaque velocity.
+     * Insufficient MRT support falls back to the separate pass. Change on the
+     * render thread between frames; switching resets the TAA history.
+     *
+     * @param value true to prefer the base pass, false for the separate pass
+     */
     public void setBasePassOutputsVelocity(boolean value) {
         if (value != basePassOutputsVelocity) {
             resetHistory();
@@ -172,10 +178,6 @@ public final class TemporalAAFilter extends HdrGraphFilter {
     protected void preFrame(float tpf) {
         if (view.getOutputFrameBuffer() != null && view.getOutputFrameBuffer().getSamples() > 1) {
             throw new IllegalStateException("Set FPP samples to 1 before enabling Temporal AA");
-        }
-        int requiredMrt = view.getRenderPath() == com.jme3.renderer.RenderPath.Forward ? 2 : 6;
-        if (basePassOutputsVelocity && manager.getRenderer().getLimits().get(com.jme3.renderer.Limits.FrameBufferMrtAttachments) < requiredMrt) {
-            throw new IllegalStateException("Base-pass temporal motion requires six MRT attachments; select separate velocity");
         }
         view.setTemporalScene(temporal);
         temporal.configure(basePassOutputsVelocity, translucentVelocityEnabled, translucentAlphaThreshold);

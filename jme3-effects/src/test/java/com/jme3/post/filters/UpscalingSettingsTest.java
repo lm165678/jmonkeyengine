@@ -74,9 +74,11 @@ public class UpscalingSettingsTest {
         FXAAFilter fxaa = new FXAAFilter();
         fxaa.setEnabled(false);
         UpscalingPass upscale = new UpscalingPass();
+        assertTrue(upscale.isBasePassOutputsVelocity());
         upscale.setAlgorithm(UpscalingPass.Algorithm.FSR2);
         upscale.setRenderScale(.5f);
         upscale.setSharpness(.4f);
+        upscale.setBasePassOutputsVelocity(false);
         chain.addFilter(taa);
         chain.addFilter(upscale);
         chain.addFilter(fxaa);
@@ -91,6 +93,7 @@ public class UpscalingSettingsTest {
         assertEquals(UpscalingPass.Algorithm.FSR2, saved.getAlgorithm());
         assertEquals(.5f, saved.getRenderScale(), 0);
         assertEquals(.4f, saved.getSharpness(), 0);
+        assertFalse(saved.isBasePassOutputsVelocity());
         assertTrue(copy.getFilter(TemporalAAFilter.class).isEnabled());
         assertFalse(copy.getFilter(FXAAFilter.class).isEnabled());
         saved.setEnabled(false);

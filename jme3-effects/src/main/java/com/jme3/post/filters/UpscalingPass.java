@@ -73,9 +73,13 @@ import java.util.ServiceLoader;
  * UpscalingPass upscale = new UpscalingPass();
  * upscale.setAlgorithm(UpscalingPass.Algorithm.FSR2);
  * upscale.setRenderScale(2f / 3f);
+ * // 默认在 GBuffer 或 Forward 主绘制输出运动矢量，可切换到独立 Pass。
+ * upscale.setBasePassOutputsVelocity(false);
  * fpp.addFilter(upscale);
  * viewPort.addProcessor(fpp);
- * // 第三步：GUI 在独立 GUI 视口绘制；最终呈现只编码一次。
+ * // 第三步：在渲染线程恢复主绘制输出，切换会重置历史；MRT 不足时自动走独立 Pass。
+ * upscale.setBasePassOutputsVelocity(true);
+ * // GUI 在独立 GUI 视口绘制；最终呈现只编码一次。
  * // 第四步：关闭超分恢复原生场景尺寸及先前抗锯齿选择，不清除用户参数。
  * upscale.setEnabled(false);
  * }</pre>
@@ -88,6 +92,7 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
     private Algorithm algorithm = Algorithm.FSR1;
     private float renderScale = 2f / 3f;
     private float sharpness = .2f;
+    private boolean basePassOutputsVelocity = true;
     private int outputWidth, outputHeight, sample;
     private float deltaSeconds;
     private boolean reset = true;
@@ -134,6 +139,30 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
     public void setSharpness(float value) {
         sharpness = bounded(value, 0, 1, "Sharpness");
     }
+
+    /**
+     * Selects the opaque motion-vector producer used by FSR2. By default the
+     * renderer writes motion with the GBuffer or forward color when supported.
+     * Passing false selects the separate opaque pass. Insufficient MRT support
+     * also selects the separate pass. Change on the render thread between frames.
+     * Switching resets FSR2 history. FSR1 never uses this setting.
+     *
+     * @param value true to prefer the base pass, false for the separate pass
+     */
+    public void setBasePassOutputsVelocity(boolean value) {
+        if (basePassOutputsVelocity != value) {
+            basePassOutputsVelocity = value;
+            if (algorithm == Algorithm.FSR2) {
+                resetHistory();
+            }
+        }
+    }
+
+    /** @return the preferred opaque velocity mode, before any renderer fallback */
+    public boolean isBasePassOutputsVelocity() {
+        return basePassOutputsVelocity;
+    }
+
     /** Optional linear masks owned by the caller. Pass null to use zero masks. */
     public void setReactiveMasks(Texture2D reactive, Texture2D composition) {
         reactiveMask = reactive;
@@ -215,7 +244,7 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
         deltaSeconds = tpf;
         if (temporal != null) {
             view.setTemporalScene(temporal);
-            temporal.configure(true, true, .5f);
+            temporal.configure(basePassOutputsVelocity, true, .5f);
             int phases = Math.max(1, (int) (8.0 * outputWidth * outputWidth / ((double) width * width)));
             int index = sample++ % phases + 1;
             jitter.set(halton(index, 2) - .5f, halton(index, 3) - .5f);
@@ -292,6 +321,7 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
         capsule.write(algorithm, "algorithm", Algorithm.FSR1);
         capsule.write(renderScale, "renderScale", 2f / 3f);
         capsule.write(sharpness, "sharpness", .2f);
+        capsule.write(basePassOutputsVelocity, "basePassOutputsVelocity", true);
     }
     @Override
     public void read(JmeImporter importer) throws IOException {
@@ -300,5 +330,6 @@ public final class UpscalingPass extends HdrGraphFilter implements UpscalingStag
         algorithm = capsule.readEnum("algorithm", Algorithm.class, Algorithm.FSR1);
         setRenderScale(capsule.readFloat("renderScale", 2f / 3f));
         setSharpness(capsule.readFloat("sharpness", .2f));
+        setBasePassOutputsVelocity(capsule.readBoolean("basePassOutputsVelocity", true));
     }
 }

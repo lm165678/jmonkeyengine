@@ -1875,19 +1875,32 @@ public class RenderManager {
         // Do not capture that framebuffer before preFrame has executed.
         graph.beginFrame();
         FrameGraph.PassBuilder preFrame = graph.addPass("PreFrame", context -> {
-            if (processors != null) {
-                if (prof != null) {
-                    prof.vpStep(VpStep.PreFrame, vp, null);
-                }
-                for (SceneProcessor proc : processors.getArray()) {
-                    if (!proc.isInitialized()) {
-                        proc.initialize(this, vp);
-                    }
-                    proc.setProfiler(this.prof);
+            // Each frame needs a live consumer. A diagnostic filter can cut off
+            // a temporal effect without disabling it or calling its preFrame.
+            var previousTemporal = vp.getTemporalScene();
+            if (previousTemporal != null) {
+                previousTemporal.restoreCamera();
+                vp.setTemporalScene(null);
+            }
+            try {
+                if (processors != null) {
                     if (prof != null) {
-                        prof.spStep(SpStep.ProcPreFrame, proc.getClass().getSimpleName());
+                        prof.vpStep(VpStep.PreFrame, vp, null);
                     }
-                    proc.preFrame(tpf);
+                    for (SceneProcessor proc : processors.getArray()) {
+                        if (!proc.isInitialized()) {
+                            proc.initialize(this, vp);
+                        }
+                        proc.setProfiler(this.prof);
+                        if (prof != null) {
+                            prof.spStep(SpStep.ProcPreFrame, proc.getClass().getSimpleName());
+                        }
+                        proc.preFrame(tpf);
+                    }
+                }
+            } finally {
+                if (previousTemporal != null && previousTemporal != vp.getTemporalScene()) {
+                    previousTemporal.resetHistory();
                 }
             }
         }).sideEffect();
@@ -1958,37 +1971,31 @@ public class RenderManager {
                 appendQueuePasses(current, vp, true);
             }
         }).sideEffect().after(opaquePipeline);
-        FrameGraph.PassBuilder temporalVelocity = graph.addExpansionPass("TemporalVelocity", current -> {
-            current.addPass("OpaqueVelocityPass", context -> {
-                currentTemporal = null;
-                if (vp.getTemporalScene() != null) {
-                    vp.getTemporalScene().renderSupplement(false);
-                }
-            }).sideEffect();
-            current.addPass("TranslucentVelocityPass", context -> {
-                if (vp.getTemporalScene() != null) {
-                    vp.getTemporalScene().renderSupplement(true);
-                }
-            }).sideEffect();
-        }).sideEffect().after(forwardAndBuckets);
         FrameGraph.PassBuilder postProcessing = graph.addExpansionPass("PostProcessing", current -> {
-            if (processors != null) {
-                if (prof != null) {
-                    prof.vpStep(VpStep.PostFrame, vp, null);
-                }
-                int index = 0;
-                for (SceneProcessor proc : processors.getArray()) {
-                    if (prof != null) {
-                        prof.spStep(SpStep.ProcPostFrame, proc.getClass().getSimpleName());
+            // Active processors install temporal inputs during PreFrame. With
+            // no consumer, leave the motion passes out of the viewport graph.
+            if (vp.getTemporalScene() != null) {
+                current.addPass("OpaqueVelocityPass", context -> {
+                    currentTemporal = null;
+                    if (vp.getTemporalScene() != null) {
+                        vp.getTemporalScene().renderSupplement(false);
                     }
-                    current.addExpansionPass("Processor[" + index++ + "]:" + proc.getClass().getSimpleName(),
-                        target -> proc.appendPostFramePasses(target, vp));
+                }).sideEffect();
+                current.addPass("TranslucentVelocityPass", context -> {
+                    if (vp.getTemporalScene() != null) {
+                        vp.getTemporalScene().renderSupplement(true);
+                    }
+                }).sideEffect();
+                if (processors != null) {
+                    current.addExpansionPass("Processors", target -> appendViewPortPostProcessing(target, vp, processors));
                 }
-                if (prof != null) {
-                    prof.vpStep(VpStep.ProcEndRender, vp, null);
-                }
+                return;
             }
-        }).sideEffect().after(temporalVelocity);
+            if (currentTemporal != null) {
+                current.addPass("EndTemporalMain", context -> currentTemporal = null).sideEffect();
+            }
+            appendViewPortPostProcessing(current, vp, processors);
+        }).sideEffect().after(forwardAndBuckets);
         FrameGraph.PassBuilder translucent = graph.addPass("Translucent", context -> {
             renderTranslucentQueue(vp);
         }).sideEffect().after(postProcessing);
@@ -2019,6 +2026,26 @@ public class RenderManager {
         }
         if (prof != null) {
             prof.vpStep(VpStep.EndRender, vp, null);
+        }
+    }
+
+    private void appendViewPortPostProcessing(FrameGraph graph, ViewPort vp, SafeArrayList<SceneProcessor> processors) {
+        if (processors == null) {
+            return;
+        }
+        if (prof != null) {
+            prof.vpStep(VpStep.PostFrame, vp, null);
+        }
+        int index = 0;
+        for (SceneProcessor proc : processors.getArray()) {
+            if (prof != null) {
+                prof.spStep(SpStep.ProcPostFrame, proc.getClass().getSimpleName());
+            }
+            graph.addExpansionPass("Processor[" + index++ + "]:" + proc.getClass().getSimpleName(),
+                    target -> proc.appendPostFramePasses(target, vp));
+        }
+        if (prof != null) {
+            prof.vpStep(VpStep.ProcEndRender, vp, null);
         }
     }
 

@@ -177,8 +177,10 @@ public class ViewPort {
     }
 
     /**
-     * Internal render-thread installation by TemporalAAFilter. Never share across views.
-     * Applications install the filter in FPP; removing it restores the null default.
+     * Internal render-thread installation by a temporal effect during preFrame.
+     * FrameGraph refreshes this claim each frame so an effect skipped by
+     * post-processing does not retain it. Never share the scene across views.
+     * Applications install TAA or temporal upscaling through FPP.
      */
     public void setTemporalScene(com.jme3.renderer.temporal.TemporalScene scene) {
         if (scene != null && temporalScene != null && scene != temporalScene) {

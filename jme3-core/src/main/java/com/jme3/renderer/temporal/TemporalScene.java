@@ -38,6 +38,7 @@ public final class TemporalScene implements AutoCloseable {
     private FrameBuffer velocityBuffer;
     private boolean reset = true;
     private boolean basePass = true;
+    private boolean gbufferPass = true;
     private boolean translucent = true;
     private boolean drawing;
     private int frame;
@@ -67,11 +68,29 @@ public final class TemporalScene implements AutoCloseable {
         velocityMaterial = new Material(assets, "Common/MatDefs/Temporal/Velocity.j3md");
     }
 
+    /**
+     * Applies the motion output preference on the render thread before begin.
+     * A main pass without enough color attachments uses the separate pass.
+     * GBuffer eligibility is also checked independently for installed pipelines.
+     *
+     * @param basePass whether to prefer writing motion in the main geometry pass
+     * @param translucent whether transparent draws contribute motion
+     * @param alphaThreshold minimum alpha for a transparent motion draw
+     */
     public void configure(boolean basePass, boolean translucent, float alphaThreshold) {
-        if (this.basePass != basePass || this.translucent != translucent) {
+        RenderPath path = view.getRenderPath();
+        if (path == RenderPath.Inherit) {
+            path = manager.getRenderPath();
+        }
+        int attachments = manager.getRenderer().getLimits().getOrDefault(Limits.FrameBufferMrtAttachments, 1);
+        boolean supportedBasePass = basePass && attachments >= (path == RenderPath.Forward ? 2 : 6);
+        boolean supportedGBufferPass = supportedBasePass && attachments >= 6;
+        if (this.basePass != supportedBasePass || this.gbufferPass != supportedGBufferPass
+                || this.translucent != translucent) {
             resetHistory();
         }
-        this.basePass = basePass;
+        this.basePass = supportedBasePass;
+        gbufferPass = supportedGBufferPass;
         this.translucent = translucent;
         this.alphaThreshold = alphaThreshold;
     }
@@ -81,6 +100,12 @@ public final class TemporalScene implements AutoCloseable {
         return basePass;
 
     }
+
+    /** @return whether the active preference and renderer support a GBuffer motion attachment */
+    public boolean isGBufferPass() {
+        return gbufferPass;
+    }
+
     public Texture2D getVelocity() {
         return velocity;
     }
@@ -331,6 +356,9 @@ public final class TemporalScene implements AutoCloseable {
             return null;
         }
         boolean gbuffer = "GBuffer".equals(manager.getForcedTechnique());
+        if (gbuffer && !gbufferPass) {
+            return null;
+        }
         // Multipass additive lighting would add velocity once per light. Use the
         // independent pass for that legacy forward mode instead.
         if (!gbuffer && (manager.getForcedTechnique() != null
@@ -406,7 +434,9 @@ public final class TemporalScene implements AutoCloseable {
         }
         renderer.copyFrameBuffer(source, velocityBuffer, false, true);
         renderer.setFrameBuffer(velocityBuffer);
-        manager.setCamera(view.getCamera(), false);
+        // The jittered camera still has logical dimensions under FSR2.
+        // Match the physical scene and motion targets to reuse the scene depth.
+        manager.setCamera(view.getCamera(), false, width, height);
         drawing = true;
         try {
             for (Map.Entry<Geometry, Pose> entry : poses.entrySet()) {

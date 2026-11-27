@@ -425,7 +425,7 @@ public final class DeferredPipeline implements OpaquePipeline {
     private void appendBatch(DeferredBatch batch, int index) {
         String name = "Batch[" + index + "]/";
         boolean[] ready = {false};
-        boolean temporal = vp.getTemporalScene() != null && vp.getTemporalScene().isBasePass();
+        boolean temporal = vp.getTemporalScene() != null && vp.getTemporalScene().isGBufferPass();
         if (rm.isDeferredProbeGiInLighting()
                 && renderer.getLimits().get(Limits.FrameBufferMrtAttachments) >= 7
                 && renderer.getLimits().get(Limits.FragmentTextureUnits) >= 20) {
