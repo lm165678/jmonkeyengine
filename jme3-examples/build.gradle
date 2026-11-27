@@ -1073,6 +1073,14 @@ tasks.register('skyTotalVolumeCompositionSmoke', JavaExec) {
     enableAssertions = true
 }
 
+tasks.register('skyBakeOcclusionSmoke', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'jme3test.light.TestSkyVolumeComposition'
+    systemProperty 'gi.test.captureSkyOcclusion', 'true'
+    enableAssertions = true
+}
+
 tasks.register('skyLightPngSmoke', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'jme3test.light.TestSkyLight'

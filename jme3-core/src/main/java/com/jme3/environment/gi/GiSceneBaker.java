@@ -55,7 +55,7 @@ import java.util.function.IntConsumer;
  * surface radiance SH. In that opt-in mode, visibility SH also supplies a bent-normal first moment.
  * This is a low-frequency directional approximation, not full sky transfer:
  * strongly colored directional skies can require higher-fidelity transport.
- * Sky illumination still participates when shading captured surfaces. Set
+ * Sky illumination on captured surfaces uses bake-time directional depth. Set
  * Settings.separateSky=false (the default) for total-irradiance capture. Existing
  * total assets retain compatibility and should be rebaked before additive use.
  * Visibility defaults to 16 texels per axis. New bakes preserve independent
@@ -133,6 +133,22 @@ public final class GiSceneBaker {
          * runtime SkyLight with a bent-normal direction; this low-frequency field approximates
          * directional colored-sky transport, not exact Lumen ray tracing. */
         public boolean separateSky = false;
+        /**
+         * Occludes SkyLight on captured surfaces with a shared directional
+         * depth atlas. Defaults to true. Older renderers, scenes without a
+         * ready diffuse SkyLight, and jobs without sufficient atlas memory
+         * retain the previous capture behavior.
+         * <pre>{@code
+         * // 第一步：场景中配置已捕获的 SkyLight 和能遮挡天空的屋顶、墙面。
+         * GiSceneBaker.Settings quality = new GiSceneBaker.Settings();
+         * // 第二步：在渲染线程重烘探针，再更新使用探针的 Lightmap。
+         * GiSceneBaker.bake(renderManager, scene, volume, quality,
+         *         viewport -> { }, () -> false, probe -> { });
+         * // 第三步：关闭此选项后重烘焙，可作原始捕获的对照。
+         * quality.captureSkyOcclusion = false;
+         * }</pre>
+         */
+        public boolean captureSkyOcclusion = true;
         public boolean classifyProbes = true;
         /** Minimum world-space clearance, default 0.05. Classification uses at
          * least 1.25 times near, preventing surfaces clipped by capture cameras.
@@ -174,6 +190,7 @@ public final class GiSceneBaker {
             copy.background = background.clone();
             copy.compactStorage = compactStorage;
             copy.separateSky = separateSky;
+            copy.captureSkyOcclusion = captureSkyOcclusion;
             copy.classifyProbes = classifyProbes;
             copy.probeClearance = probeClearance;
             copy.relativeProbeClearance = relativeProbeClearance;
@@ -225,6 +242,12 @@ public final class GiSceneBaker {
     public static GiBakeJob start(RenderManager manager, Spatial scene, GiProbeVolume volume,
             Settings settings, Consumer<ViewPort> configureCapture, BooleanSupplier cancelled,
             IntConsumer completedProbes) {
+        return start(manager, scene, volume, settings, configureCapture, cancelled, completedProbes, null);
+    }
+
+    static GiBakeJob start(RenderManager manager, Spatial scene, GiProbeVolume volume,
+            Settings settings, Consumer<ViewPort> configureCapture, BooleanSupplier cancelled,
+            IntConsumer completedProbes, GiCaptureSky sharedCaptureSky) {
         settings = settings.copy();
         settings.validate();
         java.util.Objects.requireNonNull(configureCapture);
@@ -254,7 +277,8 @@ public final class GiSceneBaker {
                 || manager.getForcedRenderState() != null) {
             throw new IllegalStateException("Bake outside a forced-material/technique/render-state pass");
         }
-        return new GiBakeJob(manager, scene, volume, settings, configureCapture, cancelled, completedProbes);
+        return new GiBakeJob(manager, scene, volume, settings, settings.maxWorkingBytes - workingBytes,
+                sharedCaptureSky, configureCapture, cancelled, completedProbes);
     }
 
     static final class Capture {

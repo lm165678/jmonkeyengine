@@ -44,6 +44,8 @@ import java.util.function.IntConsumer;
  * }</pre>
  * Requires the same GPU capabilities as GiSceneBaker. maxWorkingBytes also caps
  * the aggregate staged payload estimate; capture work is still per volume.
+ * If sky occlusion is enabled, all volumes share one depth atlas within the
+ * remaining budget. The job releases it before publication or on cancellation.
  * Adaptive baking always enables classification, and planning uses the same
  * validator and effective clearance as capture. maxRefinements=0 restores the
  * caller's ordinary classification choice. Multi-bounce capture currently requires
@@ -63,6 +65,7 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
     private final Consumer<ViewPort> configure;
     private final BooleanSupplier cancelled;
     private final IntConsumer progress;
+    private final GiCaptureSky captureSky;
     private final List<GiProbeVolume> pending = new ArrayList<>();
     private List<GiProbeVolume> published;
     private GiBakeJob current;
@@ -132,6 +135,11 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
         if (estimate > quality.maxWorkingBytes) {
             throw new IllegalArgumentException("Adaptive bake staging exceeds working memory budget");
         }
+        // The snapshot and world-space sky visibility are shared by every brick.
+        // Reserve the atlas after accounting for all retained brick output.
+        captureSky = this.quality.captureSkyOcclusion
+                ? GiCaptureSky.create(manager, scene, quality.maxWorkingBytes - estimate) : null;
+        this.quality.captureSkyOcclusion = false;
     }
 
     /** Processes one brick within the soft budget and publishes the batch atomically. */
@@ -154,7 +162,7 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
             if (current == null) {
                 int baseline = completed;
                 current = GiSceneBaker.start(manager, scene, pending.get(index), quality, configure,
-                        cancelled, count -> progress.accept(baseline + count));
+                        cancelled, count -> progress.accept(baseline + count), captureSky);
             }
             if (!current.step(budgetNanos)) {
                 return false;
@@ -165,6 +173,9 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
             index++;
             if (index < pending.size()) {
                 return false;
+            }
+            if (captureSky != null) {
+                captureSky.close();
             }
             // Nothing is exposed until every result is complete. No GPU calls
             // or callbacks intervene during this scene-thread commit.
@@ -225,13 +236,19 @@ public final class GiAdaptiveBakeJob implements AutoCloseable {
             return;
         }
         closed = true;
-        if (current != null) {
-            current.close();
-        }
-        for (GiProbeVolume volume : pending) {
-            GiProbeData data = volume.getData();
-            if (data != null) {
-                data.dispose();
+        try {
+            if (current != null) {
+                current.close();
+            }
+            for (GiProbeVolume volume : pending) {
+                GiProbeData data = volume.getData();
+                if (data != null) {
+                    data.dispose();
+                }
+            }
+        } finally {
+            if (captureSky != null) {
+                captureSky.close();
             }
         }
     }

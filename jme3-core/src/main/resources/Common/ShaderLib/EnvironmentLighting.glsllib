@@ -9,6 +9,70 @@ uniform samplerCube g_SkyMap;
 uniform float g_SkyMipCount;
 uniform float g_SkyIntensity;
 uniform mat4 g_EnvironmentLocalData;
+
+#ifdef GI_CAPTURE_SKY
+    uniform sampler2D m_GiCaptureSkyDepth;
+    uniform mat4 m_GiCaptureSkyMatrices[16];
+    uniform vec4 m_GiCaptureSkyRays[16];
+    uniform vec2 m_GiCaptureSkyTexelScale;
+
+    float giCaptureSkyVisibility(int index, vec3 position) {
+        vec3 projected = (m_GiCaptureSkyMatrices[index] * vec4(position, 1.0)).xyz * 0.5 + 0.5;
+        if (projected.z <= 0.0 || any(lessThan(projected.xy, vec2(0.0)))
+                || any(greaterThan(projected.xy, vec2(1.0)))) {
+            return 1.0;
+        }
+        vec2 tile = vec2(mod(float(index), 4.0), floor(float(index) * 0.25)) * 0.25;
+        vec2 texel = m_GiCaptureSkyTexelScale;
+        vec2 samplePosition = (tile + projected.xy * 0.25) / texel - 0.5;
+        vec2 fraction = fract(samplePosition);
+        vec2 base = (floor(samplePosition) + 0.5) * texel;
+        vec2 lo = tile + texel * 0.5;
+        vec2 hi = tile + 0.25 - texel * 0.5;
+        float reference = min(projected.z - 0.00035, 0.999999);
+        // Filter visibility after depth comparison and clamp taps to this direction's tile.
+        float a = step(reference, texture2D(m_GiCaptureSkyDepth, clamp(base, lo, hi)).r);
+        float b = step(reference, texture2D(m_GiCaptureSkyDepth, clamp(base + vec2(texel.x, 0.0), lo, hi)).r);
+        float c = step(reference, texture2D(m_GiCaptureSkyDepth, clamp(base + vec2(0.0, texel.y), lo, hi)).r);
+        float d = step(reference, texture2D(m_GiCaptureSkyDepth, clamp(base + texel, lo, hi)).r);
+        return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+    }
+
+    vec3 giCaptureSkyMask(vec3 position, vec3 geometryNormal, vec3 normal, out float hemisphere) {
+        hemisphere = 1.0;
+        if (g_EnvironmentData.z < 0.5 || g_SkyIntensity <= 0.0) {
+            return vec3(1.0);
+        }
+        vec3 openRadiance = vec3(0.0);
+        vec3 visibleRadiance = vec3(0.0);
+        float weightSum = 0.0;
+        float visibleWeight = 0.0;
+        vec3 origin = position + geometryNormal * 0.02;
+        for (int i = 0; i < 16; ++i) {
+            vec4 ray = m_GiCaptureSkyRays[i];
+            float weight = max(dot(ray.xyz, normal), 0.0) * ray.w;
+            if (weight > 0.0) {
+                float visibility = giCaptureSkyVisibility(i, origin);
+                // Filter sky radiance to the angular size of a representative ray.
+                // Normalize against open sky so fully visible surfaces retain their authored SH.
+                #if __VERSION__ >= 130
+                    vec3 radiance = textureCubeLod(g_SkyMap, ray.xyz, clamp(g_SkyMipCount - 1.0, 0.0, 2.0)).rgb;
+                #else
+                    vec3 radiance = textureCube(g_SkyMap, ray.xyz).rgb;
+                #endif
+                radiance = max(radiance, vec3(0.0));
+                openRadiance += radiance * weight;
+                visibleRadiance += radiance * (weight * visibility);
+                weightSum += weight;
+                visibleWeight += weight * visibility;
+            }
+        }
+        hemisphere = clamp(visibleWeight / max(weightSum, 1e-5), 0.0, 1.0);
+        vec3 tint = visibleRadiance / max(openRadiance, vec3(1e-5));
+        return clamp(mix(vec3(hemisphere), tint, step(vec3(1e-5), openRadiance)), 0.0, 1.0);
+    }
+#endif
+
 float environmentReflectionCoverage = 0.0;
 float environmentLocalCoverage(vec3 position) {
     if (g_EnvironmentLocalData[3].w < 0.0) {
@@ -42,9 +106,18 @@ vec3 environmentSpecular(vec3 direction, float roughness) {
 vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
         vec3 diffuseReflectance, vec3 specularReflectance, float shininess,
         float diffuseWeight) {
+    #ifdef GI_CAPTURE_SKY
+        float skyHemisphere;
+        vec3 skyMask = giCaptureSkyMask(position, normal, normal, skyHemisphere);
+    #endif
     vec3 diffuse = shLambertResponse(shNativeIrradiance(g_EnvironmentSh, giSkyDirection(normal)),
             diffuseReflectance, 1.0) * (g_EnvironmentData.w > 0.5
                     ? diffuseWeight : giSkyDiffuseWeight * g_SkyIntensity);
+    #ifdef GI_CAPTURE_SKY
+        if (g_EnvironmentData.w < 0.5) {
+            diffuse *= skyMask;
+        }
+    #endif
     // Map Blinn-Phong exponent to a roughness approximation for the GGX-prefiltered
     // environment. This is not exact convolution of a Blinn-Phong BRDF.
     float roughness = pow(2.0 / (max(shininess, 0.0) + 2.0), 0.25);
@@ -59,7 +132,11 @@ vec3 environmentPhong(vec3 position, vec3 normal, vec3 viewDirection,
         #else
             vec3 skySpecular = textureCube(g_SkyMap, direction, lod).rgb * specularReflectance;
         #endif
-        specular = mix(skySpecular * g_SkyIntensity, specular, coverage);
+        specular = mix(skySpecular * g_SkyIntensity
+            #ifdef GI_CAPTURE_SKY
+                * skyHemisphere
+            #endif
+            , specular, coverage);
     } else {
         specular *= coverage;
     }

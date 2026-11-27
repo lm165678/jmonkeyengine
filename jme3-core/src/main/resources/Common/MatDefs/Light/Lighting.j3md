@@ -15,6 +15,10 @@ MaterialDef Phong Lighting {
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiStaticLightmap -LINEAR
+        Texture2D GiCaptureSkyDepth -LINEAR
+        Matrix4Array GiCaptureSkyMatrices
+        Vector4Array GiCaptureSkyRays
+        Vector2 GiCaptureSkyTexelScale
         Float GiLightmapAtlasInset : 0.0
         Texture2D GiMoments -LINEAR
         Texture2D GiSkyVisibility -LINEAR
@@ -202,6 +206,7 @@ MaterialDef Phong Lighting {
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
             ENVIRONMENT_LIGHTING : EnvironmentLighting
+            GI_CAPTURE_SKY : GiCaptureSkyDepth
             BOUND_DRAW_BUFFER: BoundDrawBuffer         
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting           
@@ -260,6 +265,7 @@ MaterialDef Phong Lighting {
             GI_PROBES : GiIrradiance
             STATIC_PROBE_LIGHTMAP : GiStaticLightmap
             ENVIRONMENT_LIGHTING : EnvironmentLighting
+            GI_CAPTURE_SKY : GiCaptureSkyDepth
             BOUND_DRAW_BUFFER: BoundDrawBuffer
             VERTEX_COLOR : UseVertexColor
             VERTEX_LIGHTING : VertexLighting            

@@ -98,9 +98,17 @@ void main(){
     // Calculate env probes
     PBRLightingUtils_computeProbesContribution(surface);
     #ifdef ENVIRONMENT_LIGHTING
+        #ifdef GI_CAPTURE_SKY
+            float skyHemisphere;
+            vec3 skyMask = giCaptureSkyMask(wpos, surface.geometryNormal, surface.normal, skyHemisphere);
+        #endif
         #ifndef DEFERRED_GI_LIGHT
         surface.envLightContribution += shLambertResponse(shNativeIrradiance(g_SkySh, giSkyDirection(surface.normal)),
-                surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight * g_SkyIntensity;
+                surface.diffuseColor, surface.ao.r) * giSkyDiffuseWeight * g_SkyIntensity
+                #ifdef GI_CAPTURE_SKY
+                    * skyMask
+                #endif
+                ;
         #endif
         // Local reflections replace distant sky specular; they do not add energy.
         if (g_EnvironmentData.z > 0.5) {
@@ -109,7 +117,11 @@ void main(){
             surface.envLightContribution += ApproximateSpecularIBLPolynomial(g_SkyMap,
                     surface.specularColor, surface.roughness, surface.NdotV, reflected,
                     g_SkyMipCount) * g_SkyIntensity * (1.0 - environmentReflectionCoverage) * computeSpecularAO(clamp(surface.ao.r, 0.0, 1.0),
-                    surface.roughness, surface.NdotV);
+                    surface.roughness, surface.NdotV)
+                    #ifdef GI_CAPTURE_SKY
+                        * skyHemisphere
+                    #endif
+                    ;
         }
     #endif
 

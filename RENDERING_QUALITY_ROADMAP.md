@@ -512,6 +512,8 @@ GPU synthetic four-path switching/motion/disocclusion/alpha/GUI and static-edge 
 
 ## 天光 SH 求值优化待办（2026-11-23）
 
+2026-11-27 补记。已在探针烘焙的表面捕获阶段加入天空遮挡，遮挡图集与宏仅供烘焙使用。Sponza 侧廊的局部探针对照已验证，完整场景重烘焙和覆盖范围外的运行时天空遮挡仍待处理。详见交接文档。
+
 用户要求参考 GetSkySHDiffuse()，后续提醒如何优化天光；这里只登记计划，不开始实现。
 
 - [ ] 阅读参考实现 Engine/Shaders/Private/ReflectionEnvironmentShared.ush 中 GetSkySHDiffuse / GetSkySHDiffuseSimple，并追踪天空 SH 系数的 CPU 预处理和上传。实施前核对本地参考版本，不直接套用其系数布局。

@@ -71,6 +71,10 @@ public final class GiBakeJob implements AutoCloseable {
     private final Vector3f worldOffset;
     private final Vector3f worldScale;
     private final GiSceneBaker.Capture capture;
+    private final long skyWorkingBytes;
+    private final boolean ownsCaptureSky;
+    private GiCaptureSky captureSky;
+    private boolean captureSkyReady;
     private final GiSceneBaker.ProbeValidator placement;
     private final BooleanSupplier cancelled;
     private final IntConsumer progress;
@@ -91,6 +95,7 @@ public final class GiBakeJob implements AutoCloseable {
     private final Set<Material> bounceMaterials = Collections.newSetFromMap(new IdentityHashMap<>());
 
     GiBakeJob(RenderManager manager, Spatial scene, GiProbeVolume volume, GiSceneBaker.Settings settings,
+            long skyWorkingBytes, GiCaptureSky sharedCaptureSky,
             Consumer<ViewPort> configure, BooleanSupplier cancelled, IntConsumer progress) {
         this.manager = manager;
         this.scene = scene;
@@ -102,6 +107,9 @@ public final class GiBakeJob implements AutoCloseable {
         skyState = GiSkyState.capture(root);
         this.volume = volume;
         this.settings = settings;
+        this.skyWorkingBytes = skyWorkingBytes;
+        ownsCaptureSky = sharedCaptureSky == null;
+        captureSky = sharedCaptureSky;
         this.cancelled = cancelled;
         this.progress = progress;
         if (settings.bounceCount > 1) {
@@ -135,6 +143,9 @@ public final class GiBakeJob implements AutoCloseable {
                 : null;
         capture = new GiSceneBaker.Capture(settings, scene);
         try {
+            if (ownsCaptureSky && settings.captureSkyOcclusion) {
+                captureSky = GiCaptureSky.create(manager, scene, skyWorkingBytes);
+            }
             GiCaptureShadows.configure(manager, scene, capture.viewport, settings);
             configure.accept(capture.viewport);
         } catch (RuntimeException | Error error) {
@@ -167,6 +178,10 @@ public final class GiBakeJob implements AutoCloseable {
                         || !grid.getSpacing().equals(volume.getBakeGrid().getSpacing())
                         || !grid.getCounts().equals(volume.getGrid().getCounts())) {
                     throw new IllegalStateException("Volume changed during bake");
+                }
+                if (captureSky != null && !captureSkyReady) {
+                    captureSkyReady = captureSky.step();
+                    continue;
                 }
                 if (probe >= grid.getProbeCount()) {
                     GiProbeData ready = new GiProbeData(grid, settings.visibilityResolution, sh, moments,
@@ -263,8 +278,14 @@ public final class GiBakeJob implements AutoCloseable {
                 if (previousBounce != null) {
                     manager.addForcedMatParam(fade);
                 }
+                if (captureSky != null) {
+                    captureSky.bind();
+                }
                 capture.renderFace(manager, position, stage);
             } finally {
+                if (captureSky != null) {
+                    captureSky.unbind();
+                }
                 manager.removeForcedMatParam(fade);
                 manager.removeForcedMatParam(suppressLightmap);
                 manager.removeForcedMatParam(captureBounce);
@@ -322,12 +343,32 @@ public final class GiBakeJob implements AutoCloseable {
         return result;
     }
 
-    /** Invalidates selected probes before completion, retaining the remaining completed probes. */
+    /**
+     * Invalidates probes before completion. An occluder edit can affect any
+     * probe, so a live capture atlas is rebuilt and all probes are invalidated.
+     * With sky occlusion inactive, single-pass jobs retain other probes.
+     */
     public void invalidate(BitSet probes) {
         if (closed || probes.length() > grid.getProbeCount()) {
             throw new IllegalStateException("Invalid probe selection or closed job");
         }
-        if (settings.bounceCount > 1) {
+        boolean rebuildProbes = false;
+        if (ownsCaptureSky && settings.captureSkyOcclusion && !probes.isEmpty()) {
+            rebuildProbes = captureSky != null;
+            if (captureSky != null) {
+                captureSky.close();
+                captureSky = null;
+            }
+            try {
+                captureSky = GiCaptureSky.create(manager, scene, skyWorkingBytes);
+            } catch (RuntimeException | Error error) {
+                close();
+                throw error;
+            }
+            captureSkyReady = false;
+            rebuildProbes |= captureSky != null;
+        }
+        if (settings.bounceCount > 1 || rebuildProbes) {
             // Changed incoming radiance can affect every probe in later passes.
             completed.clear();
             bounce = 0;
@@ -346,7 +387,8 @@ public final class GiBakeJob implements AutoCloseable {
         if (settings.sceneRevision.isEmpty()) {
             throw new IllegalStateException("Set sceneRevision for checkpoint use");
         }
-        return "sky-total-v3:" + skyState + ":" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
+        String captureVersion = captureSky == null ? "sky-total-v3:" : "sky-raster-v4:" + captureSky.getTileSize() + ":";
+        return captureVersion + skyState + ":" + volume.isSurfaceLayout() + ":" + settings.sceneRevision + ":" + worldOffset + ":" + worldScale + ":" + grid.getCounts() + ":" + grid.getSpacing()
                 + ":" + settings.captureSize + ":" + settings.radianceSamples + ":" + settings.visibilityResolution
                 + ":" + settings.visibilitySamples + ":" + settings.near + ":" + settings.far
                 + ":" + settings.visibilityCone + ":" + settings.probeClearance + ":" + settings.relativeProbeClearance + ":" + settings.classifyProbes
@@ -475,6 +517,9 @@ public final class GiBakeJob implements AutoCloseable {
                 processor.cleanup();
             }
         } finally {
+            if (ownsCaptureSky && captureSky != null) {
+                captureSky.close();
+            }
             manager.releaseShadowManager(capture.viewport);
             manager.getRenderer().deleteFrameBuffer(capture.framebuffer);
             for (int face = 0; face < 6; face++) {

@@ -26,6 +26,9 @@ import java.util.ArrayList;
  * including volume exit, GI disable and bake-bounce sky suppression.
  * Add -Dgi.test.halfResolution=true to exercise opt-in deferred GI reconstruction.
  * This isolates composition; black walls do not validate multibounce transport.
+ * Run {@code gradlew :jme3-examples:skyBakeOcclusionSmoke} for the separate
+ * capture test with diffuse PBR walls, enabled/disabled capture occlusion,
+ * and both total and separated sky modes.
  * <pre>
  * 第一步：SkyFactory 创建独立天光，等待捕捉完成。
  * 第二步：默认 Settings.separateSky=false 保存完整漫反射，不保存天空可见度。
@@ -35,6 +38,8 @@ import java.util.ArrayList;
  * 第四步：修改天光强度；直接照明更新，旧反弹光保持并提示过期，手动重烘焙。
  * 第五步：ReflectionProbe 只提供局部镜面反射；这里故意保留旧 diffuseEnabled=true。
  * 第六步：卸载时关闭 binding，释放自己创建的体积资源；不释放共享天空贴图。
+ * 烘焙遮挡对照：保持同一天空和场景，在渲染线程分别用
+ * Settings.captureSkyOcclusion=true/false 重烘，比较封闭与开放处的探针。
  * </pre>
  */
 public final class TestSkyVolumeComposition extends SimpleApplication {
@@ -97,12 +102,78 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
     }
 
     private void wall(Node room, float x, float y, float z, float sx, float sy, float sz) {
-        Geometry geometry = new Geometry("black wall", new Box(sx, sy, sz));
         Material material = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         material.setColor("Color", ColorRGBA.Black);
+        wall(room, material, x, y, z, sx, sy, sz);
+    }
+
+    private void wall(Node room, Material material, float x, float y, float z, float sx, float sy, float sz) {
+        Geometry geometry = new Geometry("wall", new Box(sx, sy, sz));
         geometry.setMaterial(material);
         geometry.setLocalTranslation(x, y, z);
         room.attachChild(geometry);
+    }
+
+    private void verifyBakedSkyOcclusion() {
+        receiver.setCullHint(Spatial.CullHint.Always);
+        Material material = new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md");
+        material.setColor("BaseColor", new ColorRGBA(.65f, .65f, .65f, 1f));
+        material.setFloat("Metallic", 0f);
+        material.setFloat("Roughness", 1f);
+        for (boolean closed : new boolean[]{false, true}) {
+            Node room = new Node("Diffuse capture room");
+            wall(room, material, 0, -2, 0, 2, .08f, 2);
+            if (closed) {
+                wall(room, material, 0, 2, 0, 2, .08f, 2);
+                wall(room, material, -2, 0, 0, .08f, 2, 2);
+                wall(room, material, 2, 0, 0, .08f, 2, 2);
+                wall(room, material, 0, 0, -2, 2, 2, .08f);
+                wall(room, material, 0, 0, 2, 2, 2, .08f);
+            }
+            rootNode.attachChild(room);
+            for (boolean separate : new boolean[]{false, true}) {
+                float previous = captureUpwardIrradiance(separate, false);
+                float corrected = captureUpwardIrradiance(separate, true);
+                if (closed ? previous <= 0.1f || corrected > previous * .02f
+                        : Math.abs(corrected - previous) > .02f || previous <= 0.02f && !separate) {
+                    throw new AssertionError("Sky bake closed=" + closed + ", separate=" + separate
+                            + ": " + previous + " -> " + corrected);
+                }
+                System.out.println("SKY_BAKE_OCCLUSION_PASS closed=" + closed + ", separate=" + separate
+                        + ": " + previous + " -> " + corrected);
+            }
+            room.removeFromParent();
+        }
+    }
+
+    private float captureUpwardIrradiance(boolean separate, boolean occlude) {
+        var volume = new GiProbeVolume();
+        volume.configure(new Vector3f(.5f, .5f, .5f), 2, 2, 2);
+        volume.setLocalTranslation(-.25f, -.25f, -.25f);
+        rootNode.attachChild(volume);
+        rootNode.updateGeometricState();
+        var settings = new GiSceneBaker.Settings();
+        settings.captureSize = 32;
+        settings.radianceSamples = 512;
+        settings.visibilityResolution = 4;
+        settings.visibilitySamples = 16;
+        settings.classifyProbes = false;
+        settings.captureShadows = false;
+        settings.separateSky = separate;
+        settings.captureSkyOcclusion = occlude;
+        var data = GiSceneBaker.bake(renderManager, rootNode, volume, settings, view -> { }, () -> false, p -> { });
+        try {
+            float sum = 0f;
+            int count = data.getGrid().getProbeCount();
+            var irradiance = new Vector3f();
+            for (int probe = 0; probe < count; probe++) {
+                sum += data.evaluateProbeIrradiance(probe, Vector3f.UNIT_Y, irradiance).x;
+            }
+            return sum / count;
+        } finally {
+            volume.removeFromParent();
+            data.dispose();
+        }
     }
 
     private void prepare() {
@@ -164,6 +235,11 @@ public final class TestSkyVolumeComposition extends SimpleApplication {
             return;
         }
         if (!prepared) {
+            if (Boolean.getBoolean("gi.test.captureSkyOcclusion")) {
+                verifyBakedSkyOcclusion();
+                stop();
+                return;
+            }
             prepare();
             prepared = true;
         }

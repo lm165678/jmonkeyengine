@@ -15,6 +15,10 @@ MaterialDef PBR Lighting {
         // Use GiProbeData.bind() and close the binding to restore the previous values.
         Texture2D GiIrradiance -LINEAR
         Texture2D GiStaticLightmap -LINEAR
+        Texture2D GiCaptureSkyDepth -LINEAR
+        Matrix4Array GiCaptureSkyMatrices
+        Vector4Array GiCaptureSkyRays
+        Vector2 GiCaptureSkyTexelScale
         Texture2D GiDirectionalLightmap -LINEAR
         Texture2D GiBakedDirect -LINEAR
         Float GiLightmapAtlasInset : 0.0
@@ -232,6 +236,7 @@ MaterialDef PBR Lighting {
             BAKED_DIRECT_LIGHTMAP : GiBakedDirect
             BAKED_DIRECTIONAL_SHADOWS : BakedDirectionalShadows
             ENVIRONMENT_LIGHTING : EnvironmentLighting
+            GI_CAPTURE_SKY : GiCaptureSkyDepth
             BOUND_DRAW_BUFFER: BoundDrawBuffer       
             BASECOLORMAP : BaseColorMap            
             NORMALMAP : NormalMap
