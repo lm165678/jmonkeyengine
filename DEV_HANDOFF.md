@@ -1,3 +1,8 @@
+## 2026-11-27 paired source checkpoint
+
+- Engine implementation `00aec2ab7` on `dev_sky_fog_sytem` pairs with SDK implementation `11fd1049d76e18c30604bb4a35c3de03ecf8b53e` on `master`. Later engine commits document the paired checkpoint and the Goad composition diagnosis.
+- Engine work covers sky occlusion during GI capture, shared opaque velocity for TAA/FSR2, and SkyLight/LightProbe cubemap mip layout. SDK work includes the GBufferPass selector wording, PBRLighting for new J3M assets, and viewport selection that skips sky and hidden meshes. Scoped tests are recorded in their feature entries. SDK builds remain user-owned.
+
 ## 2026-11-27 Goad and runtime sky specular with total Probe GI
 
 - Reopened the user's 77,678,116-byte TestScene2 save with Goad at the reported camera (-9.3528, 5.6471, -3.7101). Native Forward test used the corrected sky mip layout, nine resident Probe slots, sky intensity 0.1, scene mobility and a fixed linear frame. With GI active, full SkyLight and specular-only were identical across all 370,944 pixels. The fully metallic GoldMat sphere's effective roughness median was 0.0919. Its 21,527 sampled pixels averaged 0.082518 luminance from SkyLight specular in both GI states. The saved J3O hash was unchanged.
